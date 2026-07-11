@@ -1,0 +1,155 @@
+*** Begin Patch
+*** Update File: src-tauri/src/lib.rs
+@@
+-use std::env;
+-use std::os::windows::process::CommandExt;
+-use std::process::Stdio;
+-use serde::{Deserialize, Serialize};
+-use sysinfo::System;
+-use tauri::{AppHandle, Listener, Manager};
+-use tauri_plugin_opener::OpenerExt;
++use std::env;
++use std::net::{IpAddr, SocketAddr, TcpListener, UdpSocket};
++use std::os::windows::process::CommandExt;
++use std::process::Stdio;
++use std::str::FromStr;
++use serde::{Deserialize, Serialize};
++use sysinfo::System;
++use tauri::{AppHandle, Listener, Manager};
++use tauri_plugin_opener::OpenerExt;
+@@
+ #[derive(Debug, Clone, Serialize)]
+ pub struct ServerStatus {
+     pub running: bool,
+     pub pid: Option<u32>,
+     pub port: u16,
++    pub host: String,
+     pub url: String,
+ }
+ 
+ impl Default for ServerStatus {
+     fn default() -> Self {
+         Self {
+             running: false,
+             pid: None,
+             port: 8080,
++            host: String::new(),
+             url: String::new(),
+         }
+     }
+ }
+ 
+ impl ServerStatus {
+-    fn url(&self) -> String {
+-        format!("http://127.0.0.1:{}", self.port)
++    fn normalize_host(&self) -> String {
++        self.host.trim().to_string()
++    }
++
++    fn display_host(&self) -> String {
++        let host = self.normalize_host().to_lowercase();
++        match host.as_str() {
++            "" | "127.0.0.1" | "localhost" => "127.0.0.1".into(),
++            "0.0.0.0" => local_ip_address()
++                .or_else(|_| IpAddr::from_str("127.0.0.1").ok())
++                .map(|ip| ip.to_string())
++                .unwrap_or_else(|| "127.0.0.1".into()),
++            _ => host,
++        }
++    }
++
++    fn url(&self) -> String {
++        format!("http://{}:{}", self.display_host(), self.port)
+     }
+ }
+@@
+     if !path.exists() {
+         return Err(format!("找不到 llama-server: {}", config.llama_server_path));
+     }
+     if !std::path::Path::new(&config.model).exists() {
+         return Err(format!("找不到模型文件: {}", config.model));
+     }
+ 
+-    if is_port_in_use(config.port) {
++    let bind_socket = SocketAddr::new(IpAddr::from_str(&config.host).unwrap_or(IpAddr::V4(std::net::Ipv4Addr::new(127, 0, 0, 1))), config.port);
++    if is_port_in_use(bind_socket) {
+         return Err(format!("端口 {} 已被占用，无法启动服务。", config.port));
+     }
+@@
+-    let _ = append_log_inner(
++    let _ = append_log_inner(
+         &app,
+         ServerLogLine {
+             ts: now(),
+             level: "info".into(),
+-            text: format!("已启动 llama-server，pid={pid}，监听地址={}:{}", config.host, config.port),
++            text: format!(
++                "已启动 llama-server，pid={pid}，监听地址={}:{}",
++                config.host, config.port
++            ),
+         },
+     )
+     .await;
+ 
+     *status = ServerStatus {
+         running: true,
+         pid: Some(pid),
++        host: config.host.clone(),
+         port: config.port,
+-        url: format!("http://{}:{}", config.host, config.port),
++        url: format!("http://{}:{}", config.host, config.port),
+     };
+@@
+ async fn open_preview(app: AppHandle) -> Result<(), String> {
+     let state = app.state::<tauri::async_runtime::Mutex<ServerStatus>>();
+     let status = state.lock().await.clone();
+ 
+     if !status.running {
+         return Err("服务未运行，请先启动 llama-server。".into());
+     }
+ 
+     let target = status.url();
+     app.opener()
+         .open_url(target, None::<&str>)
+         .map_err(|err| format!("打开预览失败: {err}"))?;
+     Ok(())
+ }
+@@
+ fn is_port_in_use(port: u16) -> bool {
+-    std::net::TcpListener::bind(("127.0.0.1", port)).is_err()
++    TcpListener::bind(("127.0.0.1", port)).is_err()
+ }
+ 
++fn is_port_in_use_socket(socket: SocketAddr) -> bool {
++    TcpListener::bind(socket).is_err()
++}
++
+ fn is_process_running(pid: Option<u32>) -> bool {
+@@
+ fn flash_value(value: &str) -> &str {
+     match value.to_lowercase().as_str() {
+         "on" => "on",
+         "off" => "off",
+         _ => "auto",
+     }
+ }
++
++fn local_ip_address() -> Result<IpAddr, String> {
++    let socket = UdpSocket::bind("0.0.0.0:0")
++        .map_err(|err| format!("绑定 UDP 临时端口失败: {err}"))?;
++    socket
++        .connect("1.1.1.1:53")
++        .map_err(|err| format!("连接 UDP 探测地址失败: {err}"))?;
++    let addr = socket
++        .local_addr()
++        .map_err(|err| format!("读取本地地址失败: {err}"))?;
++    Ok(addr.ip())
++}
++
++fn resolve_config_dir() -> Result<std::path::PathBuf, String> {
++    let app_data = env::var("APPDATA")
++        .or_else(|_| env::var("LOCALAPPDATA"))
++        .map_err(|_| "无法定位应用数据目录。".to_string())?;
++    Ok(std::path::Path::new(&app_data).join("LlamaLauncher"))
++}
+*** End Patch
