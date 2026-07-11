@@ -1,4 +1,5 @@
 use std::env;
+use std::io::BufRead;
 use std::net::{IpAddr, SocketAddr, TcpListener, UdpSocket};
 use std::os::windows::process::CommandExt;
 use std::process::Stdio;
@@ -342,7 +343,65 @@ async fn stop_server_inner(app: &AppHandle) -> Result<(), String> {
 }
 
 async fn wait_process(app: AppHandle, mut child: std::process::Child) {
-    match child.wait() {
+    // 读取子进程 stdout/stderr：避免管道缓冲写满导致服务端阻塞/死锁，
+    // 同时把 llama-server 的真实输出送进日志面板。
+    let stdout = child.stdout.take();
+    let stderr = child.stderr.take();
+    let (tx, rx) = std::sync::mpsc::channel::<(String, String)>();
+
+    let mut readers = Vec::new();
+    if let Some(out) = stdout {
+        let tx = tx.clone();
+        readers.push(std::thread::spawn(move || {
+            let reader = std::io::BufReader::new(out);
+            for line in reader.lines().map_while(Result::ok) {
+                let line = line.trim_end().to_string();
+                if line.is_empty() {
+                    continue;
+                }
+                if tx.send(("info".to_string(), line)).is_err() {
+                    break;
+                }
+            }
+        }));
+    }
+    if let Some(err) = stderr {
+        let tx = tx.clone();
+        readers.push(std::thread::spawn(move || {
+            let reader = std::io::BufReader::new(err);
+            for line in reader.lines().map_while(Result::ok) {
+                let line = line.trim_end().to_string();
+                if line.is_empty() {
+                    continue;
+                }
+                if tx.send(("warn".to_string(), line)).is_err() {
+                    break;
+                }
+            }
+        }));
+    }
+    drop(tx);
+
+    let exit = child.wait();
+
+    // 进程已退出，等读取线程把剩余输出写完后再排空 channel。
+    for handle in readers {
+        let _ = handle.join();
+    }
+
+    while let Ok((level, text)) = rx.recv() {
+        append_log_inner(
+            &app,
+            ServerLogLine {
+                ts: now(),
+                level,
+                text,
+            },
+        )
+        .await;
+    }
+
+    match exit {
         Ok(status) => {
             let _ = append_log_inner(
                 &app,
