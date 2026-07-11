@@ -3,6 +3,45 @@
 > **适用范围**：任何在本项目（`llama-launcher`，Tauri 2 + React/TypeScript 桌面应用）中工作的 AI 代码代理、代码生成模型或自动化助手，**必须**严格遵守本文件。本文件优先级高于模型的默认习惯。
 >
 > **如何使用**：每次动手改代码前先读完本文件；当任务触及"停止并请示"条款时，先停、先问，不要自行推进。
+>
+> **动手前另请重点阅读文末「七、不得回退的工程护栏」**——其中列出的工程化不变量禁止以任何理由回退或绕过。
+
+---
+
+## 〇、当前工程结构（动手前必读）
+
+本项目已完成 P0→P2 整改与 P3 工程化加固（lint/format 门禁、默认值后端单一真源、release 构建冒烟）。任何改动都**不得破坏以下已确立的结构与不变量**；不清楚某段代码为何存在时，先读完本节与第七节，不要"顺手简化"。
+
+### 目录与职责
+```
+llama-launcher/                    # 前端 React/TS + 构建配置
+├── src/
+│   ├── main.tsx                   # 入口，仅挂载 <App/>
+│   ├── App.tsx                    # 纯组合根；含"加载配置中…"门控（config 为 null 时拦截渲染）
+│   ├── types.ts                   # 前后端类型契约（ServerConfig / ServerStatus / ServerLogLine）
+│   ├── hooks/useServer.ts         # 状态 + 命令聚合；配置值全部来自后端，无硬编码默认值
+│   ├── lib/advanced.ts            # 高级参数常量与纯函数工具
+│   └── components/                # 6 个展示型组件（props 强类型，无业务逻辑）
+│       ├── ControlPanel / LogPanel / BasicParamsPanel
+│       └── AdvancedParamsPanel / PreviewBar / ConfigPanel
+├── src-tauri/
+│   ├── src/lib.rs                 # 9 个 IPC 命令 + 5 个单元测试；ServerConfig::default() 为默认值唯一真源
+│   ├── src/main.rs                # 入口，调用 lib.rs 的 run()
+│   ├── Cargo.toml                 # 依赖精简，features 显式
+│   ├── tauri.conf.json            # CSP 显式（非 null）；assetProtocol 已禁用
+│   └── capabilities/default.json  # 最小权限：core:default + opener:default
+└── .dev_docs/engineering-readiness.md   # 工程化就绪评审报告（含 P3 各状态）
+```
+
+### 已确立的关键不变量
+- **默认值唯一真源在后端**：`ServerConfig::default()`（Rust）+ `get_default_config` 命令；前端 `useServer` 挂载时并行拉取 `read_config`+`get_default_config` 并占位回退，`config` 初始 `null`。前端无任何硬编码默认值。
+- **门禁必须常绿**：`npm run check`（tsc + eslint + prettier + cargo fmt + clippy `-D warnings`）与 `cargo test --lib`（5 项）必须保持通过。
+- **安全配置已收紧**：CSP 显式、asset 协议禁用、capabilities 最小权限——不得回退。
+- **Git 工作流**：dev 分支为集成分支；重大改动先落 dev，勿直提交 main。
+
+### IPC 命令清单（新增命令须同步三处）
+`read_config` · `get_default_config` · `save_config` · `get_status` · `start_server` · `stop_server` · `open_preview` · `read_logs` · `clear_logs`
+> 新增 / 修改命令时：① 在 `invoke_handler!` 注册；② 同步 `src/types.ts`；③ 确认 capabilities 覆盖（**自定义 app 命令默认允许**，仅插件命令与核心 JS API 才需显式授权，不要因此误加冗余 permission）。
 
 ---
 
@@ -74,6 +113,7 @@
 - 禁止以"本地能跑"为由关闭安全机制（如把 `tauri.conf.json` 的 `csp` 置 `null`、把 asset 协议 `scope` 放宽为 `**`）作为绕过手段。
 - 禁止把构建产物 / 工具运行时缓存（如 `dist/`、`target/`、`/gen/schemas/`、`.codegraph/`）提交进仓库。
 - 禁止让 Rust 命令与前端类型契约（`src/types.ts`）长期不一致而不同步。
+- 禁止以"门禁太严 / CI 太慢 / 本地能跑"等理由关闭或绕过 `npm run check` 中的任一环节（`cargo clippy -D warnings`、`eslint`、`prettier`、`cargo fmt --check`）；告警要修根因，不要靠 `#[allow]` 或删配置项掩盖（详见第七节）。
 
 ---
 
@@ -83,3 +123,33 @@
 2. 小步提交、单一职责；一次 commit 解决一个问题。
 3. 涉及命令签名 / 权限 / 配置变更时，同步更新 `types.ts`、capabilities 与文档。
 4. 不确定时，回到第二节的停止条款。
+
+---
+
+## 七、不得回退的工程护栏（DO NOT REVERT）
+
+以下均为已落地的工程化成果，**禁止以"简化""本地能跑""门禁太严""CI 太慢"等任何理由回退或绕过**。回退会直接抵消历史整改，属本准则重点防范行为。
+
+1. **Lint / Format 门禁（`npm run check` 必须常绿）**
+   - 禁止移除 `eslint.config.js` / `.prettierrc.json` / `.prettierignore`，或从 `check:frontend` 中剔除 eslint / prettier。
+   - 禁止把 `check:rust` 的 `cargo clippy ... -D warnings` 改为不带 `-D warnings`，或给代码加 `#[allow(clippy::...)]` 让红变绿——**修根因，不修告警**。
+   - 提交前确保 `cargo fmt` 已执行，`cargo fmt --check` 不报错。
+
+2. **默认值后端单一真源**
+   - 禁止在前端重新引入 `DEFAULT_CONFIG`、`ADVANCED_DEFAULT` 或任何硬编码的 `ServerConfig` 默认值字面量。
+   - 禁止删除 `App.tsx` 的加载门控（`if (!config) return <加载中…>`）或将 `config` 初始值改回硬编码对象。
+   - 新增配置字段时，默认值**只在后端** `ServerConfig::default()` 定义一处，前端通过 `get_default_config` 获取。
+
+3. **安全配置已收紧（不可回退）**
+   - `tauri.conf.json` 的 `csp` 必须保持显式策略，**禁止置 `null`**。
+   - `assetProtocol` 保持禁用，**禁止重新启用**（除非确有前端使用 asset 协议的需求，并同步收紧 `scope` 而非放宽到 `**`）。
+   - `capabilities/default.json` 维持最小权限；新增权限须说明必要性，不得为"图省事"批量放开。
+
+4. **测试必须保留且常绿**
+   - `src-tauri/src/lib.rs` 的 5 个单元测试不得删除，不得用 `#[ignore]` 跳过来让门禁通过；改动相关逻辑后须使 `cargo test --lib` 仍绿。
+
+5. **禁止文本手术补丁**：不得重新引入 `patch_frontend.py` / `patch_rust.py` / `patch.diff` 之类的源码文本替换脚本（历史已清除，见第四节 Don'ts）。
+
+6. **提交纪律**
+   - 禁止 `git commit --no-verify`、`npm install --ignore-scripts` 等绕过门禁的手段。
+   - 重大改动先落 dev 分支，勿直提交 main；一次 commit 单一职责。
