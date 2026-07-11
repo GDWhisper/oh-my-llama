@@ -105,6 +105,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             read_config,
             save_config,
+            get_default_config,
             get_status,
             start_server,
             stop_server,
@@ -154,6 +155,11 @@ async fn read_config(_app: AppHandle) -> Result<ServerConfig, String> {
         return parse_config_value(&text);
     }
 
+    Ok(ServerConfig::default())
+}
+
+#[tauri::command]
+async fn get_default_config(_app: AppHandle) -> Result<ServerConfig, String> {
     Ok(ServerConfig::default())
 }
 

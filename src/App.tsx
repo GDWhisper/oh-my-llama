@@ -39,6 +39,15 @@ export default function App() {
     removeAdvancedKey,
   } = server;
 
+  // 加载门前拦截：配置从后端拉取完成前不渲染表单，避免任何默认值落到前端硬编码。
+  if (!config) {
+    return (
+      <main className="app">
+        <div style={{ padding: '48px', textAlign: 'center', color: '#888' }}>加载配置中…</div>
+      </main>
+    );
+  }
+
   const statusText = status?.running ? '运行中' : '已停止';
   const statusClass = status?.running ? 'running' : 'stopped';
 

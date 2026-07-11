@@ -2,7 +2,6 @@ import { useEffect, useMemo, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import type { ServerConfig, ServerLogLine, ServerStatus } from '../types';
 import {
-  ADVANCED_DEFAULT,
   ADVANCED_ORDER,
   OPTIONAL_ADVANCED_OPTIONS,
   isUnlimitedPredict,
@@ -19,25 +18,20 @@ function useInterval(callback: () => void, delay: number | null) {
   }, [callback, delay]);
 }
 
-const DEFAULT_CONFIG: ServerConfig = {
-  llama_server_path: '',
-  model: '',
-  host: '127.0.0.1',
-  port: 8080,
-  ctx_size: 4096,
-  n_predict: -1,
-  n_gpu_layers: 0,
-  threads: 0,
-  batch_size: 512,
-  temp: 0.7,
-  flash_attn: 'auto',
-  mmap: true,
-  mlock: false,
-  enabled_advanced_params: ['ctx_size'],
-};
+// 默认值唯一真源在后端（ServerConfig::default()）。前端不在任何地方硬编码默认值，
+// 统一通过 get_default_config / read_config 命令从后端获取，避免前后端默认值漂移。
+const EMPTY_ADVANCED_ENABLED = (): Record<AdvancedKey, boolean> =>
+  ADVANCED_ORDER.reduce(
+    (acc, key) => {
+      acc[key] = false;
+      return acc;
+    },
+    {} as Record<AdvancedKey, boolean>,
+  );
 
 export function useServer() {
-  const [config, setConfig] = useState<ServerConfig>(DEFAULT_CONFIG);
+  // 初始为 null：挂载后由后端默认值填充，加载完成前由 App 渲染加载占位。
+  const [config, setConfig] = useState<ServerConfig | null>(null);
   const [status, setStatus] = useState<ServerStatus | null>(null);
   const [logs, setLogs] = useState<ServerLogLine[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -45,30 +39,34 @@ export function useServer() {
   const [starting, setStarting] = useState(false);
   const [stopping, setStopping] = useState(false);
   const [advancedEnabled, setAdvancedEnabled] =
-    useState<Record<AdvancedKey, boolean>>(ADVANCED_DEFAULT);
+    useState<Record<AdvancedKey, boolean>>(EMPTY_ADVANCED_ENABLED);
   const [addingAdvanced, setAddingAdvanced] = useState(false);
   const [removingAdvanced, setRemovingAdvanced] = useState(false);
 
   const loadConfig = async () => {
     setError(null);
     try {
-      const data = await invoke<ServerConfig>('read_config');
-      const enabledList = data.enabled_advanced_params || ['ctx_size'];
+      const [data, defaults] = await Promise.all([
+        invoke<ServerConfig>('read_config'),
+        invoke<ServerConfig>('get_default_config'),
+      ]);
+      const enabledList =
+        data.enabled_advanced_params && data.enabled_advanced_params.length > 0
+          ? data.enabled_advanced_params
+          : defaults.enabled_advanced_params;
       const enabledSet = new Set(enabledList);
       setAdvancedEnabled(() => {
-        const next = { ...ADVANCED_DEFAULT };
+        const next = {} as Record<AdvancedKey, boolean>;
         ADVANCED_ORDER.forEach((key) => {
-          if (enabledSet.has(key)) {
-            next[key] = true;
-          }
+          next[key] = enabledSet.has(key);
         });
         return next;
       });
       setConfig({
-        ...DEFAULT_CONFIG,
+        ...defaults,
         ...data,
-        host: data.host || DEFAULT_CONFIG.host,
-        flash_attn: data.flash_attn || DEFAULT_CONFIG.flash_attn,
+        host: data.host || defaults.host,
+        flash_attn: data.flash_attn || defaults.flash_attn,
         enabled_advanced_params: enabledList,
       });
     } catch (err) {
@@ -108,24 +106,25 @@ export function useServer() {
 
   const previewUrl = useMemo(() => (status?.running ? status.url : ''), [status]);
   const autoFlashAttn = useMemo(
-    () => (config.n_gpu_layers > 0 ? 'on' : 'auto'),
-    [config.n_gpu_layers],
+    () => ((config?.n_gpu_layers ?? 0) > 0 ? 'on' : 'auto'),
+    [config?.n_gpu_layers],
   );
   const advancedFlashAttn = useMemo(
-    () => (config.flash_attn === 'auto' ? autoFlashAttn : config.flash_attn),
-    [autoFlashAttn, config.flash_attn],
+    () => (config?.flash_attn === 'auto' ? autoFlashAttn : (config?.flash_attn ?? 'auto')),
+    [autoFlashAttn, config?.flash_attn],
   );
   const advancedThreads = useMemo(
-    () => (config.threads === 0 ? 'auto' : String(config.threads)),
-    [config.threads],
+    () => ((config?.threads ?? 0) === 0 ? 'auto' : String(config?.threads ?? 0)),
+    [config?.threads],
   );
   const advancedBatchSize = useMemo(
-    () => (config.batch_size === 0 ? 'auto' : String(config.batch_size)),
-    [config.batch_size],
+    () => ((config?.batch_size ?? 0) === 0 ? 'auto' : String(config?.batch_size ?? 0)),
+    [config?.batch_size],
   );
   const advancedPredict = useMemo(
-    () => (isUnlimitedPredict(config.n_predict) ? 'unlimited' : String(config.n_predict)),
-    [config.n_predict],
+    () =>
+      isUnlimitedPredict(config?.n_predict ?? -1) ? 'unlimited' : String(config?.n_predict ?? -1),
+    [config?.n_predict],
   );
   const availableAdvancedOptions = useMemo(
     () => OPTIONAL_ADVANCED_OPTIONS.filter((option) => !advancedEnabled[option.key]),
@@ -138,6 +137,9 @@ export function useServer() {
   );
 
   const handleSave = async () => {
+    if (!config) {
+      return;
+    }
     setError(null);
     setSaving(true);
     try {
@@ -151,6 +153,9 @@ export function useServer() {
   };
 
   const handleStart = async () => {
+    if (!config) {
+      return;
+    }
     setError(null);
     setStarting(true);
     try {
@@ -212,7 +217,7 @@ export function useServer() {
   const addAdvancedKey = (key: AdvancedKey) => {
     setAdvancedEnabled((current) => ({ ...current, [key]: true }));
     setConfig((current) => {
-      if (current.enabled_advanced_params.includes(key)) {
+      if (!current || current.enabled_advanced_params.includes(key)) {
         return current;
       }
       return {
@@ -231,10 +236,15 @@ export function useServer() {
       }
       return next;
     });
-    setConfig((current) => ({
-      ...current,
-      enabled_advanced_params: current.enabled_advanced_params.filter((item) => item !== key),
-    }));
+    setConfig((current) => {
+      if (!current) {
+        return current;
+      }
+      return {
+        ...current,
+        enabled_advanced_params: current.enabled_advanced_params.filter((item) => item !== key),
+      };
+    });
   };
 
   return {

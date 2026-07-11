@@ -27,18 +27,6 @@ export const ADVANCED_ORDER: AdvancedKey[] = [
   'mlock',
 ];
 
-export const ADVANCED_DEFAULT: Record<AdvancedKey, boolean> = {
-  ctx_size: true,
-  n_predict: false,
-  n_gpu_layers: false,
-  threads: false,
-  batch_size: false,
-  temp: false,
-  flash_attn: false,
-  mmap: false,
-  mlock: false,
-};
-
 export const ADVANCED_LABELS: Record<AdvancedKey, string> = {
   ctx_size: '上下文长度',
   n_predict: '最大生成数',

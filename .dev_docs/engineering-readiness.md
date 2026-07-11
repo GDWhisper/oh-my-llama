@@ -2,7 +2,7 @@
 
 > 评审时间：2026-07-11（P3-a/P3-b 完成于 2026-07-12）
 > 范围：结构清晰度 / 工程化质量 / 可维护性 / 安全合规 / 构建测试门禁 / 是否满足"进入需求开发阶段"
-> 基线：dev 分支 `8e55661`（P0→P2 整改 + dev-server 脚本）→ P3-a/P3-b 提交 `???`
+> 基线：dev 分支 `8e55661`（P0→P2 整改 + dev-server 脚本）→ P3-a/P3-b 提交 `ab2472c` → P3-c 提交 `ab???`
 
 ---
 
@@ -12,7 +12,7 @@
 
 项目的工程化基础、可维护性、结构清晰度均已达到"可健康迭代"水平：三层架构清晰、前后端类型契约完整、构建/测试门禁全绿、安全配置合规、Git 工作流规范。
 
-在进入第一个需求前建议补齐的 **3 项成熟度加固** 中，**P3-a（lint/format 门禁）、P3-b（release 冒烟）均已完成**；仅剩 P3-c（默认值单一来源）/ P3-d（前端测试）/ P3-e（CI）为可增量增强。
+在进入第一个需求前建议补齐的 **3 项成熟度加固** 中，**P3-a（lint/format 门禁）、P3-b（release 冒烟）、P3-c（默认值单一来源）均已完成**；仅剩 P3-d（前端测试）/ P3-e（CI）为可增量增强（不阻塞开工）。
 
 ---
 
@@ -62,7 +62,7 @@ src-tauri/src/
 
 ## 三、可维护性 ⚠️ 良好，3 处可优化
 
-1. **默认值三处来源（P3-c）**：`ServerConfig::default()`（Rust）、`DEFAULT_CONFIG`（`useServer.ts`）、`ADVANCED_DEFAULT`（`advanced.ts`）是同一组默认值的三个副本。当前三者一致，但后端改默认值时前端需手动同步——`agents.md` 明确反对"契约长期不一致"。建议收敛为单一来源或建立显式同步约定。
+1. **默认值已收敛为单一来源（P3-c ✅ 完成）**：原先 `ServerConfig::default()`（Rust）、`DEFAULT_CONFIG`（`useServer.ts`）、`ADVANCED_DEFAULT`（`advanced.ts`）是同一组默认值的三个副本。现已删除前端两个副本，新增后端 `get_default_config` 命令作为唯一真源，`useServer` 在加载时并行拉取 `read_config` + `get_default_config` 并做占位回退，`config` 初始 `null`（App 渲染加载占位），不再有任何前端硬编码默认值。后端改默认值后前端自动跟随，符合 `agents.md` 反对"契约长期不一致"的准则。
 
 2. **lint/format 门禁（P3-a，✅ 已完成）**：已接入 `cargo fmt --check` + `cargo clippy -D warnings`（并入 `check:rust`），前端 ESLint 9（typescript-eslint）+ Prettier（并入 `check:frontend` 与 `lint`/`format` 脚本）。**关键收益**：clippy 抓出一个**潜伏真实缺陷**——窗口关闭事件 `tauri://close-requested` 监听里 `let _ = stop_server_inner(&app_handle)`，而 `stop_server_inner` 是 `async fn`，future 被直接丢弃、从未执行，导致**关窗时并不会真正停掉后台 llama-server**（子进程泄漏）。已按根因修复为 `block_on(stop_server_inner(...))` 真正执行（符合 agents.md「缺陷追溯根因」）。其余 4 处 clippy 提示（needless_question_mark / collapsible_if / let_unit_value）一并消除而非抑制。Prettier 已 `--write` 归一化全部 `src`。
 
@@ -122,7 +122,7 @@ npm run check              → 端到端通过（前端 + 后端）
 |---|---|---|---|
 | **P3-a** | 接入 lint/format 门禁（rustfmt --check + clippy -D warnings + ESLint/Prettier） | 首个需求前 | ✅ 已完成（2026-07-12） |
 | **P3-b** | release 构建冒烟 `npm run tauri build`，确认 IPC 在生产构建可用 | 首个需求前 | ✅ 已完成（2026-07-12，2m14s，msi+exe 产出） |
-| P3-c | 统一默认值来源，消除三处重复 | 可增量 | 待办 |
+| P3-c | 统一默认值来源，消除三处重复 | 已完成 | `ab` 之后 |
 | P3-d | 补前端 Vitest 测试（useServer / advanced） | 可增量 | 待办 |
 | P3-e | 加 GitHub Actions CI | 可选 | 待办 |
 
@@ -139,4 +139,4 @@ npm run check              → 端到端通过（前端 + 后端）
 ---
 
 ### 一句话总结
-结构清晰、类型完备、门禁全绿、安全合规——**已具备进入需求开发阶段的条件**；P3-a（lint/format 门禁）与 P3-b（release 冒烟）已落地，连 clippy 顺带揪出一个"关窗不杀后台进程"的真实缺陷并根因修复。仅剩 P3-c/d/e 为可增量增强，不影响开工。
+结构清晰、类型完备、门禁全绿、安全合规——**已具备进入需求开发阶段的条件**；P3-a（lint/format 门禁，clippy 顺带揪出"关窗不杀后台进程"缺陷并根因修复）、P3-b（release 冒烟通过）、P3-c（默认值收敛为后端单一真源）三项成熟度加固均已落地。仅剩 P3-d（前端测试）/ P3-e（CI）为可选增强，不影响开工。
