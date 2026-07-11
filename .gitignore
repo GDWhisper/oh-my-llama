@@ -26,3 +26,12 @@ dist-ssr
 # Agent / tool local state (not project source)
 /.codegraph/
 /.workbuddy/
+
+# Foreign AI-tool scaffolding (not project source)
+.codex/
+.qoder/
+.codebuddy/
+.omp/
+.pi/
+openspec/
+.dev_docs/changes/

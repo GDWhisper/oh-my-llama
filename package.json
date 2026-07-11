@@ -7,6 +7,9 @@
     "dev": "vite",
     "build": "tsc && vite build",
     "preview": "vite preview",
+    "check:frontend": "tsc --noEmit",
+    "check:rust": "cargo check --lib --manifest-path src-tauri/Cargo.toml",
+    "check": "npm run check:frontend && npm run check:rust",
     "tauri": "tauri"
   },
   "dependencies": {

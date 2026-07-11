@@ -8,7 +8,7 @@ use sysinfo::System;
 use tauri::{AppHandle, Listener, Manager};
 use tauri_plugin_opener::OpenerExt;
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
 pub struct ServerConfig {
     pub llama_server_path: String,
     pub model: String,
@@ -135,7 +135,7 @@ async fn read_config(_app: AppHandle) -> Result<ServerConfig, String> {
         if path.exists() {
             let text = std::fs::read_to_string(path)
                 .map_err(|err| format!("读取配置失败: {err}"))?;
-            return Ok(parse_config(&text)?);
+            return Ok(parse_config_value(&text)?);
         }
     }
 
@@ -143,7 +143,7 @@ async fn read_config(_app: AppHandle) -> Result<ServerConfig, String> {
     if app_path.exists() {
         let text = std::fs::read_to_string(&app_path)
             .map_err(|err| format!("读取配置失败: {err}"))?;
-        return Ok(parse_config(&text)?);
+        return Ok(parse_config_value(&text)?);
     }
 
     Ok(ServerConfig::default())
@@ -154,7 +154,7 @@ async fn save_config(_app: AppHandle, config: ServerConfig) -> Result<(), String
     let path = resolve_config_path()?;
     std::fs::create_dir_all(path.parent().unwrap())
         .map_err(|err| format!("创建配置目录失败: {err}"))?;
-    let text = build_config_text(&config);
+    let text = serialize_config_value(&config)?;
     std::fs::write(&path, text).map_err(|err| format!("写入配置失败: {err}"))?;
     Ok(())
 }
@@ -380,82 +380,20 @@ async fn append_log_inner(app: &AppHandle, line: ServerLogLine) {
     }
 }
 
-fn parse_config(text: &str) -> Result<ServerConfig, String> {
-    let mut map = std::collections::HashMap::new();
-    for raw_line in text.lines() {
-        let line = raw_line.trim();
-        if line.is_empty() || line.starts_with('#') {
-            continue;
-        }
-        if let Some((key, value)) = line.split_once('=') {
-            let key = key.trim().to_string();
-            let value = value.trim().trim_matches('"').to_string();
-            map.insert(key, value);
-        }
-    }
-
-    let mut enabled_advanced_params = get_str(&map, "enabled_advanced_params")
-        .unwrap_or_default()
-        .split(',')
-        .map(|s| s.trim().to_string())
-        .filter(|s| !s.is_empty())
-        .collect::<Vec<_>>();
-
-    if enabled_advanced_params.is_empty() {
-        let optional_keys = vec![
-            "n_predict", "n_gpu_layers", "threads", "batch_size", "temp", "flash_attn", "mmap", "mlock"
-        ];
-        for key in optional_keys {
-            if map.contains_key(key) {
-                enabled_advanced_params.push(key.to_string());
-            }
-        }
-        if !enabled_advanced_params.contains(&"ctx_size".to_string()) {
-            enabled_advanced_params.insert(0, "ctx_size".to_string());
-        }
-    } else if !enabled_advanced_params.contains(&"ctx_size".to_string()) {
-        enabled_advanced_params.insert(0, "ctx_size".to_string());
-    }
-
-    Ok(ServerConfig {
-        llama_server_path: get_str(&map, "llama_server_path").unwrap_or_default(),
-        model: get_str(&map, "model").unwrap_or_default(),
-        host: get_str(&map, "host").unwrap_or_else(|| "127.0.0.1".into()),
-        port: get_u16(&map, "port").unwrap_or(8080),
-        ctx_size: get_i64(&map, "ctx_size").unwrap_or(4096),
-        n_predict: get_i64(&map, "n_predict").unwrap_or(-1),
-        n_gpu_layers: get_i64(&map, "n_gpu_layers").unwrap_or(0),
-        threads: get_i64(&map, "threads").unwrap_or(0),
-        batch_size: get_i64(&map, "batch_size").unwrap_or(512),
-        temp: get_f64(&map, "temp").unwrap_or(0.7),
-        flash_attn: get_str(&map, "flash_attn").unwrap_or_else(|| "auto".into()),
-        mmap: get_bool(&map, "mmap").unwrap_or(true),
-        mlock: get_bool(&map, "mlock").unwrap_or(false),
-        enabled_advanced_params,
-    })
+fn parse_config_value(text: &str) -> Result<ServerConfig, String> {
+    let mut config: ServerConfig = toml::from_str(text)
+        .map_err(|err| format!("转换配置失败: {err}"))?;
+    config.llama_server_path = config.llama_server_path.trim().to_string();
+    Ok(config)
 }
 
-fn build_config_text(config: &ServerConfig) -> String {
-    let mut lines = Vec::new();
-    lines.push(format!(r#"llama_server_path = "{}""#, escape(&config.llama_server_path)));
-    lines.push(format!(r#"model = "{}""#, escape(&config.model)));
-    lines.push(format!(r#"host = "{}""#, escape(&config.host)));
-    lines.push(format!("port = {}", config.port));
-    lines.push(format!("ctx_size = {}", config.ctx_size));
-    lines.push(format!("n_predict = {}", config.n_predict));
-    lines.push(format!("n_gpu_layers = {}", config.n_gpu_layers));
-    lines.push(format!("threads = {}", config.threads));
-    lines.push(format!("batch_size = {}", config.batch_size));
-    lines.push(format!("temp = {}", config.temp));
-    lines.push(format!(r#"flash_attn = "{}""#, escape(&config.flash_attn)));
-    lines.push(format!("mmap = {}", config.mmap));
-    lines.push(format!("mlock = {}", config.mlock));
-    lines.push(format!(
-        r#"enabled_advanced_params = "{}""#,
-        escape(&config.enabled_advanced_params.join(","))
-    ));
-    lines.push(String::new());
-    lines.join("\n")
+fn serialize_config_value(config: &ServerConfig) -> Result<String, String> {
+    let mut text = toml::to_string(config)
+        .map_err(|err| format!("序列化配置失败: {err}"))?;
+    if !text.ends_with('\n') {
+        text.push('\n');
+    }
+    Ok(text)
 }
 
 fn resolve_config_path() -> Result<std::path::PathBuf, String> {
@@ -467,40 +405,8 @@ fn resolve_config_path() -> Result<std::path::PathBuf, String> {
         .join("llama-config.toml"))
 }
 
-fn get_str(map: &std::collections::HashMap<String, String>, key: &str) -> Option<String> {
-    map.get(key).cloned()
-}
-
-fn get_i64(map: &std::collections::HashMap<String, String>, key: &str) -> Option<i64> {
-    map.get(key).and_then(|value| value.parse().ok())
-}
-
-fn get_u16(map: &std::collections::HashMap<String, String>, key: &str) -> Option<u16> {
-    map.get(key).and_then(|value| value.parse().ok())
-}
-
-fn get_f64(map: &std::collections::HashMap<String, String>, key: &str) -> Option<f64> {
-    map.get(key).and_then(|value| value.parse().ok())
-}
-
-fn get_bool(map: &std::collections::HashMap<String, String>, key: &str) -> Option<bool> {
-    map.get(key).and_then(|value| match value.to_lowercase().as_str() {
-        "true" | "1" | "yes" | "on" => Some(true),
-        "false" | "0" | "no" | "off" => Some(false),
-        _ => None,
-    })
-}
-
-fn escape(value: &str) -> String {
-    value.replace('\\', "\\\\").replace('"', "\\\"")
-}
-
 fn now() -> String {
     chrono::Utc::now().format("%Y-%m-%d %H:%M:%S").to_string()
-}
-
-fn is_port_in_use(port: u16) -> bool {
-    TcpListener::bind(("127.0.0.1", port)).is_err()
 }
 
 fn is_port_in_use_socket(socket: SocketAddr) -> bool {
@@ -522,7 +428,7 @@ fn terminate_process(pid: u32) {
     if pid == 0 {
         return;
     }
-    let mut sys = System::new_all();
+    let sys = System::new_all();
     if let Some(process) = sys.process(sysinfo::Pid::from(pid as usize)) {
         let _ = process.kill();
         return;
@@ -561,9 +467,124 @@ fn local_ip_address() -> Result<IpAddr, String> {
     Ok(addr.ip())
 }
 
-fn resolve_config_dir() -> Result<std::path::PathBuf, String> {
-    let app_data = env::var("APPDATA")
-        .or_else(|_| env::var("LOCALAPPDATA"))
-        .map_err(|_| "无法定位应用数据目录。".to_string())?;
-    Ok(std::path::Path::new(&app_data).join("LlamaLauncher"))
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn round_trip_preserves_known_config() {
+        let config = ServerConfig {
+            llama_server_path: "C:/llama/llama-server.exe".into(),
+            model: "C:/models/model.gguf".into(),
+            host: "0.0.0.0".into(),
+            port: 9090,
+            ctx_size: 8192,
+            n_predict: 512,
+            n_gpu_layers: 32,
+            threads: 4,
+            batch_size: 1024,
+            temp: 0.4,
+            flash_attn: "on".into(),
+            mmap: false,
+            mlock: true,
+            enabled_advanced_params: vec![
+                "ctx_size".into(),
+                "n_predict".into(),
+                "n_gpu_layers".into(),
+                "threads".into(),
+                "batch_size".into(),
+                "temp".into(),
+                "flash_attn".into(),
+                "mmap".into(),
+                "mlock".into(),
+            ],
+        };
+
+        let text = serialize_config_value(&config).expect("serialize");
+        let parsed = parse_config_value(&text).expect("parse");
+
+        assert_eq!(parsed.llama_server_path, config.llama_server_path);
+        assert_eq!(parsed.model, config.model);
+        assert_eq!(parsed.host, config.host);
+        assert_eq!(parsed.port, config.port);
+        assert_eq!(parsed.enabled_advanced_params, config.enabled_advanced_params);
+    }
+
+    #[test]
+    fn save_config_round_trip_with_defaults() {
+        let config = ServerConfig::default();
+        let text = serialize_config_value(&config).expect("serialize");
+        let reparsed = parse_config_value(&text).expect("parse");
+
+        assert_eq!(reparsed, config);
+    }
+
+    #[test]
+    fn parse_ignores_unknown_keys() {
+        let text = r#"llama_server_path = "a"
+model = "b"
+host = "127.0.0.1"
+port = 8080
+ctx_size = 4096
+n_predict = 256
+n_gpu_layers = 16
+threads = 2
+batch_size = 512
+temp = 0.7
+flash_attn = "auto"
+mmap = true
+mlock = false
+enabled_advanced_params = ["ctx_size", "temp"]
+unknown_meta = "keep-me-out"
+"#;
+
+        let parsed = parse_config_value(text).expect("parse");
+        assert_eq!(parsed.n_predict, 256);
+        assert_eq!(parsed.enabled_advanced_params, vec!["ctx_size", "temp"]);
+    }
+
+    #[test]
+    fn malformed_numeric_falls_back_to_default() {
+        let text = r#"llama_server_path = "a"
+model = "b"
+host = "127.0.0.1"
+port = "not-a-number"
+ctx_size = 4096
+n_predict = -1
+n_gpu_layers = 0
+threads = 0
+batch_size = 512
+temp = 0.7
+flash_attn = "auto"
+mmap = true
+mlock = false
+enabled_advanced_params = ["ctx_size"]
+"#;
+
+        let err = parse_config_value(text).expect_err("should fail on malformed port");
+        assert!(err.contains("转换配置失败"));
+    }
+
+    #[test]
+    fn quoted_values_are_preserved() {
+        let text = r#"llama_server_path = "C:/path with spaces/llama-server.exe"
+model = "C:/models/my model.gguf"
+host = "127.0.0.1"
+port = 8080
+ctx_size = 4096
+n_predict = -1
+n_gpu_layers = 0
+threads = 0
+batch_size = 512
+temp = 0.7
+flash_attn = "auto"
+mmap = true
+mlock = false
+enabled_advanced_params = ["ctx_size"]
+"#;
+
+        let parsed = parse_config_value(text).expect("parse");
+        assert_eq!(parsed.llama_server_path, "C:/path with spaces/llama-server.exe");
+        assert_eq!(parsed.model, "C:/models/my model.gguf");
+    }
 }
