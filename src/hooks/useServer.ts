@@ -1,13 +1,13 @@
-import { useEffect, useMemo, useState } from "react";
-import { invoke } from "@tauri-apps/api/core";
-import type { ServerConfig, ServerLogLine, ServerStatus } from "../types";
+import { useEffect, useMemo, useState } from 'react';
+import { invoke } from '@tauri-apps/api/core';
+import type { ServerConfig, ServerLogLine, ServerStatus } from '../types';
 import {
   ADVANCED_DEFAULT,
   ADVANCED_ORDER,
   OPTIONAL_ADVANCED_OPTIONS,
   isUnlimitedPredict,
   type AdvancedKey,
-} from "../lib/advanced";
+} from '../lib/advanced';
 
 function useInterval(callback: () => void, delay: number | null) {
   useEffect(() => {
@@ -20,9 +20,9 @@ function useInterval(callback: () => void, delay: number | null) {
 }
 
 const DEFAULT_CONFIG: ServerConfig = {
-  llama_server_path: "",
-  model: "",
-  host: "127.0.0.1",
+  llama_server_path: '',
+  model: '',
+  host: '127.0.0.1',
   port: 8080,
   ctx_size: 4096,
   n_predict: -1,
@@ -30,10 +30,10 @@ const DEFAULT_CONFIG: ServerConfig = {
   threads: 0,
   batch_size: 512,
   temp: 0.7,
-  flash_attn: "auto",
+  flash_attn: 'auto',
   mmap: true,
   mlock: false,
-  enabled_advanced_params: ["ctx_size"],
+  enabled_advanced_params: ['ctx_size'],
 };
 
 export function useServer() {
@@ -44,15 +44,16 @@ export function useServer() {
   const [saving, setSaving] = useState(false);
   const [starting, setStarting] = useState(false);
   const [stopping, setStopping] = useState(false);
-  const [advancedEnabled, setAdvancedEnabled] = useState<Record<AdvancedKey, boolean>>(ADVANCED_DEFAULT);
+  const [advancedEnabled, setAdvancedEnabled] =
+    useState<Record<AdvancedKey, boolean>>(ADVANCED_DEFAULT);
   const [addingAdvanced, setAddingAdvanced] = useState(false);
   const [removingAdvanced, setRemovingAdvanced] = useState(false);
 
   const loadConfig = async () => {
     setError(null);
     try {
-      const data = await invoke<ServerConfig>("read_config");
-      const enabledList = data.enabled_advanced_params || ["ctx_size"];
+      const data = await invoke<ServerConfig>('read_config');
+      const enabledList = data.enabled_advanced_params || ['ctx_size'];
       const enabledSet = new Set(enabledList);
       setAdvancedEnabled(() => {
         const next = { ...ADVANCED_DEFAULT };
@@ -71,14 +72,14 @@ export function useServer() {
         enabled_advanced_params: enabledList,
       });
     } catch (err) {
-      setError("读取配置失败");
+      setError('读取配置失败');
       console.error(err);
     }
   };
 
   const loadStatus = async () => {
     try {
-      const data = await invoke<ServerStatus>("get_status");
+      const data = await invoke<ServerStatus>('get_status');
       setStatus(data);
     } catch (err) {
       console.error(err);
@@ -87,7 +88,7 @@ export function useServer() {
 
   const loadLogs = async () => {
     try {
-      const data = await invoke<ServerLogLine[]>("read_logs");
+      const data = await invoke<ServerLogLine[]>('read_logs');
       setLogs(data);
     } catch (err) {
       console.error(err);
@@ -105,41 +106,44 @@ export function useServer() {
     loadLogs();
   }, 1500);
 
-  const previewUrl = useMemo(() => (status?.running ? status.url : ""), [status]);
-  const autoFlashAttn = useMemo(() => (config.n_gpu_layers > 0 ? "on" : "auto"), [config.n_gpu_layers]);
+  const previewUrl = useMemo(() => (status?.running ? status.url : ''), [status]);
+  const autoFlashAttn = useMemo(
+    () => (config.n_gpu_layers > 0 ? 'on' : 'auto'),
+    [config.n_gpu_layers],
+  );
   const advancedFlashAttn = useMemo(
-    () => (config.flash_attn === "auto" ? autoFlashAttn : config.flash_attn),
-    [autoFlashAttn, config.flash_attn]
+    () => (config.flash_attn === 'auto' ? autoFlashAttn : config.flash_attn),
+    [autoFlashAttn, config.flash_attn],
   );
   const advancedThreads = useMemo(
-    () => (config.threads === 0 ? "auto" : String(config.threads)),
-    [config.threads]
+    () => (config.threads === 0 ? 'auto' : String(config.threads)),
+    [config.threads],
   );
   const advancedBatchSize = useMemo(
-    () => (config.batch_size === 0 ? "auto" : String(config.batch_size)),
-    [config.batch_size]
+    () => (config.batch_size === 0 ? 'auto' : String(config.batch_size)),
+    [config.batch_size],
   );
   const advancedPredict = useMemo(
-    () => (isUnlimitedPredict(config.n_predict) ? "unlimited" : String(config.n_predict)),
-    [config.n_predict]
+    () => (isUnlimitedPredict(config.n_predict) ? 'unlimited' : String(config.n_predict)),
+    [config.n_predict],
   );
   const availableAdvancedOptions = useMemo(
     () => OPTIONAL_ADVANCED_OPTIONS.filter((option) => !advancedEnabled[option.key]),
-    [advancedEnabled]
+    [advancedEnabled],
   );
 
   const enabledAdvancedKeys = useMemo(
     () => ADVANCED_ORDER.filter((key) => advancedEnabled[key]),
-    [advancedEnabled]
+    [advancedEnabled],
   );
 
   const handleSave = async () => {
     setError(null);
     setSaving(true);
     try {
-      await invoke("save_config", { config });
+      await invoke('save_config', { config });
     } catch (err) {
-      setError("保存配置失败");
+      setError('保存配置失败');
       console.error(err);
     } finally {
       setSaving(false);
@@ -150,10 +154,10 @@ export function useServer() {
     setError(null);
     setStarting(true);
     try {
-      await invoke("start_server", { config });
+      await invoke('start_server', { config });
       await loadStatus();
     } catch (err) {
-      const message = err instanceof Error ? err.message : "启动失败";
+      const message = err instanceof Error ? err.message : '启动失败';
       setError(message);
       console.error(err);
     } finally {
@@ -165,10 +169,10 @@ export function useServer() {
     setError(null);
     setStopping(true);
     try {
-      await invoke("stop_server");
+      await invoke('stop_server');
       await loadStatus();
     } catch (err) {
-      setError("停止失败");
+      setError('停止失败');
       console.error(err);
     } finally {
       setStopping(false);
@@ -180,16 +184,16 @@ export function useServer() {
       return;
     }
     try {
-      await invoke("open_preview");
+      await invoke('open_preview');
     } catch (err) {
-      setError("打开预览失败");
+      setError('打开预览失败');
       console.error(err);
     }
   };
 
   const handleClearLogs = async () => {
     try {
-      await invoke("clear_logs");
+      await invoke('clear_logs');
       setLogs([]);
     } catch (err) {
       console.error(err);

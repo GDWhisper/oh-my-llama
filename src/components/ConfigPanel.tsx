@@ -10,7 +10,7 @@ export function ConfigPanel({ saving, onSave }: Props) {
         <h2>配置</h2>
         <div className="actions">
           <button onClick={onSave} disabled={saving}>
-            {saving ? "保存中..." : "保存配置"}
+            {saving ? '保存中...' : '保存配置'}
           </button>
         </div>
       </div>

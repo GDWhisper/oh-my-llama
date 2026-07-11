@@ -1,10 +1,10 @@
+use serde::{Deserialize, Serialize};
 use std::env;
 use std::io::BufRead;
 use std::net::{IpAddr, SocketAddr, TcpListener, UdpSocket};
 use std::os::windows::process::CommandExt;
 use std::process::Stdio;
 use std::str::FromStr;
-use serde::{Deserialize, Serialize};
 use sysinfo::System;
 use tauri::{AppHandle, Listener, Manager};
 use tauri_plugin_opener::OpenerExt;
@@ -114,9 +114,13 @@ pub fn run() {
         ])
         .setup(|app| {
             let app_handle = app.handle().clone();
-            let _ = app_handle.clone().listen("tauri://close-requested", move |_| {
-                let _ = stop_server_inner(&app_handle);
-            });
+            let _ = app_handle
+                .clone()
+                .listen("tauri://close-requested", move |_| {
+                    // listen 回调是同步闭包，stop_server_inner 是 async；
+                    // 必须 block_on 真正执行，否则 future 会被直接丢弃、服务端不会被停止。
+                    let _ = tauri::async_runtime::block_on(stop_server_inner(&app_handle));
+                });
             Ok(())
         })
         .run(tauri::generate_context!())
@@ -131,20 +135,23 @@ async fn read_config(_app: AppHandle) -> Result<ServerConfig, String> {
         .filter(|path| path.exists())
         .unwrap_or_else(|| std::env::current_dir().unwrap_or_default());
 
-    let local_candidates = [exe_dir.join("config.toml"), exe_dir.join("config/llama-config.toml")];
+    let local_candidates = [
+        exe_dir.join("config.toml"),
+        exe_dir.join("config/llama-config.toml"),
+    ];
     for path in &local_candidates {
         if path.exists() {
-            let text = std::fs::read_to_string(path)
-                .map_err(|err| format!("读取配置失败: {err}"))?;
-            return Ok(parse_config_value(&text)?);
+            let text =
+                std::fs::read_to_string(path).map_err(|err| format!("读取配置失败: {err}"))?;
+            return parse_config_value(&text);
         }
     }
 
     let app_path = resolve_config_path()?;
     if app_path.exists() {
-        let text = std::fs::read_to_string(&app_path)
-            .map_err(|err| format!("读取配置失败: {err}"))?;
-        return Ok(parse_config_value(&text)?);
+        let text =
+            std::fs::read_to_string(&app_path).map_err(|err| format!("读取配置失败: {err}"))?;
+        return parse_config_value(&text);
     }
 
     Ok(ServerConfig::default())
@@ -216,42 +223,72 @@ async fn start_server(app: AppHandle, config: ServerConfig) -> Result<ServerStat
 
     let exe = path.to_owned();
     let mut cmd = std::process::Command::new(&exe);
-    cmd.arg("-m").arg(&config.model)
-        .arg("--host").arg(&config.host)
-        .arg("--port").arg(config.port.to_string())
-        .arg("-c").arg(config.ctx_size.to_string())
-        .arg("--timeout").arg("2400");
+    cmd.arg("-m")
+        .arg(&config.model)
+        .arg("--host")
+        .arg(&config.host)
+        .arg("--port")
+        .arg(config.port.to_string())
+        .arg("-c")
+        .arg(config.ctx_size.to_string())
+        .arg("--timeout")
+        .arg("2400");
 
-    if config.enabled_advanced_params.contains(&"n_predict".to_string()) {
+    if config
+        .enabled_advanced_params
+        .contains(&"n_predict".to_string())
+    {
         cmd.arg("-n").arg(config.n_predict.to_string());
     }
-    if config.enabled_advanced_params.contains(&"n_gpu_layers".to_string()) {
+    if config
+        .enabled_advanced_params
+        .contains(&"n_gpu_layers".to_string())
+    {
         cmd.arg("-ngl").arg(config.n_gpu_layers.to_string());
     }
-    if config.enabled_advanced_params.contains(&"threads".to_string()) {
+    if config
+        .enabled_advanced_params
+        .contains(&"threads".to_string())
+    {
         cmd.arg("-t").arg(config.threads.to_string());
     }
-    if config.enabled_advanced_params.contains(&"batch_size".to_string()) {
+    if config
+        .enabled_advanced_params
+        .contains(&"batch_size".to_string())
+    {
         cmd.arg("-b").arg(config.batch_size.to_string());
     }
     if config.enabled_advanced_params.contains(&"temp".to_string()) {
         cmd.arg("--temp").arg(config.temp.to_string());
     }
-    if config.enabled_advanced_params.contains(&"flash_attn".to_string()) {
+    if config
+        .enabled_advanced_params
+        .contains(&"flash_attn".to_string())
+    {
         cmd.arg("--flash-attn").arg(flash_value(&config.flash_attn));
     }
     if config.enabled_advanced_params.contains(&"mmap".to_string()) {
-        if config.mmap { cmd.arg("--mmap"); } else { cmd.arg("--no-mmap"); }
+        if config.mmap {
+            cmd.arg("--mmap");
+        } else {
+            cmd.arg("--no-mmap");
+        }
     }
-    if config.enabled_advanced_params.contains(&"mlock".to_string()) {
-        if config.mlock { cmd.arg("--mlock"); }
+    if config
+        .enabled_advanced_params
+        .contains(&"mlock".to_string())
+        && config.mlock
+    {
+        cmd.arg("--mlock");
     }
 
     cmd.stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .creation_flags(0x08000000);
 
-    let child = cmd.spawn().map_err(|err| format!("启动 llama-server 失败: {err}"))?;
+    let child = cmd
+        .spawn()
+        .map_err(|err| format!("启动 llama-server 失败: {err}"))?;
     let pid = child.id();
     append_log_inner(
         &app,
@@ -328,7 +365,7 @@ async fn stop_server_inner(app: &AppHandle) -> Result<(), String> {
     drop(status);
 
     if let Some(pid) = pid {
-        let _ = terminate_process(pid);
+        terminate_process(pid);
         append_log_inner(
             app,
             ServerLogLine {
@@ -407,7 +444,11 @@ async fn wait_process(app: AppHandle, mut child: std::process::Child) {
                 &app,
                 ServerLogLine {
                     ts: now(),
-                    level: if status.success() { "info".into() } else { "error".into() },
+                    level: if status.success() {
+                        "info".into()
+                    } else {
+                        "error".into()
+                    },
                     text: format!("llama-server 已退出，status={status}"),
                 },
             )
@@ -440,15 +481,14 @@ async fn append_log_inner(app: &AppHandle, line: ServerLogLine) {
 }
 
 fn parse_config_value(text: &str) -> Result<ServerConfig, String> {
-    let mut config: ServerConfig = toml::from_str(text)
-        .map_err(|err| format!("转换配置失败: {err}"))?;
+    let mut config: ServerConfig =
+        toml::from_str(text).map_err(|err| format!("转换配置失败: {err}"))?;
     config.llama_server_path = config.llama_server_path.trim().to_string();
     Ok(config)
 }
 
 fn serialize_config_value(config: &ServerConfig) -> Result<String, String> {
-    let mut text = toml::to_string(config)
-        .map_err(|err| format!("序列化配置失败: {err}"))?;
+    let mut text = toml::to_string(config).map_err(|err| format!("序列化配置失败: {err}"))?;
     if !text.ends_with('\n') {
         text.push('\n');
     }
@@ -473,7 +513,9 @@ fn is_port_in_use_socket(socket: SocketAddr) -> bool {
 }
 
 fn is_process_running(pid: Option<u32>) -> bool {
-    let Some(pid) = pid else { return false; };
+    let Some(pid) = pid else {
+        return false;
+    };
     if pid == 0 {
         return false;
     }
@@ -499,7 +541,11 @@ fn terminate_process(pid: u32) {
     {
         if !child.success() {
             let _ = std::process::Command::new("powershell")
-                .args(["-NoProfile", "-Command", &format!("Stop-Process -Id {pid} -Force")])
+                .args([
+                    "-NoProfile",
+                    "-Command",
+                    &format!("Stop-Process -Id {pid} -Force"),
+                ])
                 .creation_flags(0x08000000)
                 .status();
         }
@@ -515,8 +561,8 @@ fn flash_value(value: &str) -> &str {
 }
 
 fn local_ip_address() -> Result<IpAddr, String> {
-    let socket = UdpSocket::bind("0.0.0.0:0")
-        .map_err(|err| format!("绑定 UDP 临时端口失败: {err}"))?;
+    let socket =
+        UdpSocket::bind("0.0.0.0:0").map_err(|err| format!("绑定 UDP 临时端口失败: {err}"))?;
     socket
         .connect("1.1.1.1:53")
         .map_err(|err| format!("连接 UDP 探测地址失败: {err}"))?;
@@ -566,7 +612,10 @@ mod tests {
         assert_eq!(parsed.model, config.model);
         assert_eq!(parsed.host, config.host);
         assert_eq!(parsed.port, config.port);
-        assert_eq!(parsed.enabled_advanced_params, config.enabled_advanced_params);
+        assert_eq!(
+            parsed.enabled_advanced_params,
+            config.enabled_advanced_params
+        );
     }
 
     #[test]
@@ -643,7 +692,10 @@ enabled_advanced_params = ["ctx_size"]
 "#;
 
         let parsed = parse_config_value(text).expect("parse");
-        assert_eq!(parsed.llama_server_path, "C:/path with spaces/llama-server.exe");
+        assert_eq!(
+            parsed.llama_server_path,
+            "C:/path with spaces/llama-server.exe"
+        );
         assert_eq!(parsed.model, "C:/models/my model.gguf");
     }
 }

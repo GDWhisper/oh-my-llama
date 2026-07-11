@@ -1,4 +1,4 @@
-import type { ServerLogLine } from "../types";
+import type { ServerLogLine } from '../types';
 
 interface Props {
   logs: ServerLogLine[];

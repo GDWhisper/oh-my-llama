@@ -1,11 +1,11 @@
-import { useServer } from "./hooks/useServer";
-import { ControlPanel } from "./components/ControlPanel";
-import { LogPanel } from "./components/LogPanel";
-import { BasicParamsPanel } from "./components/BasicParamsPanel";
-import { AdvancedParamsPanel } from "./components/AdvancedParamsPanel";
-import { PreviewBar } from "./components/PreviewBar";
-import { ConfigPanel } from "./components/ConfigPanel";
-import "./App.css";
+import { useServer } from './hooks/useServer';
+import { ControlPanel } from './components/ControlPanel';
+import { LogPanel } from './components/LogPanel';
+import { BasicParamsPanel } from './components/BasicParamsPanel';
+import { AdvancedParamsPanel } from './components/AdvancedParamsPanel';
+import { PreviewBar } from './components/PreviewBar';
+import { ConfigPanel } from './components/ConfigPanel';
+import './App.css';
 
 export default function App() {
   const server = useServer();
@@ -39,8 +39,8 @@ export default function App() {
     removeAdvancedKey,
   } = server;
 
-  const statusText = status?.running ? "运行中" : "已停止";
-  const statusClass = status?.running ? "running" : "stopped";
+  const statusText = status?.running ? '运行中' : '已停止';
+  const statusClass = status?.running ? 'running' : 'stopped';
 
   return (
     <main className="app">

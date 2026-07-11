@@ -1,5 +1,5 @@
-import type { ServerConfig } from "../types";
-import { modelBasename } from "../lib/advanced";
+import type { ServerConfig } from '../types';
+import { modelBasename } from '../lib/advanced';
 
 interface Props {
   config: ServerConfig;
@@ -7,7 +7,7 @@ interface Props {
 }
 
 export function BasicParamsPanel({ config, onChange }: Props) {
-  const modelLabel = modelBasename(config.model) || "模型文件";
+  const modelLabel = modelBasename(config.model) || '模型文件';
   return (
     <div className="panel">
       <h2>必要参数</h2>
@@ -16,7 +16,9 @@ export function BasicParamsPanel({ config, onChange }: Props) {
           <label>llama-server 路径</label>
           <input
             value={config.llama_server_path}
-            onChange={(event) => onChange({ ...config, llama_server_path: event.currentTarget.value })}
+            onChange={(event) =>
+              onChange({ ...config, llama_server_path: event.currentTarget.value })
+            }
           />
         </div>
         <div className="field">
@@ -39,7 +41,9 @@ export function BasicParamsPanel({ config, onChange }: Props) {
           <input
             type="number"
             value={config.port}
-            onChange={(event) => onChange({ ...config, port: Number(event.currentTarget.value || 0) })}
+            onChange={(event) =>
+              onChange({ ...config, port: Number(event.currentTarget.value || 0) })
+            }
           />
         </div>
       </div>
