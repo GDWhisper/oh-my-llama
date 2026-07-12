@@ -1,5 +1,8 @@
+import { useState } from 'react';
 import type { ServerConfig } from '../types';
 import { ADVANCED_LABELS, type AdvancedKey, type AdvancedOption } from '../lib/advanced';
+import { Button } from './Button';
+import { ConfirmDialog } from './ConfirmDialog';
 
 interface Props {
   config: ServerConfig;
@@ -16,6 +19,9 @@ interface Props {
   onStopRemove: () => void;
   onAddKey: (key: AdvancedKey) => void;
   onRemoveKey: (key: AdvancedKey) => void;
+  onClearAdvanced: () => void;
+  saving: boolean;
+  onSave: () => void;
   onChange: (config: ServerConfig) => void;
 }
 
@@ -35,24 +41,33 @@ export function AdvancedParamsPanel(props: Props) {
     onStopRemove,
     onAddKey,
     onRemoveKey,
+    onClearAdvanced,
+    saving,
+    onSave,
     onChange,
   } = props;
+  // 清空高级参数需二次确认：点击「清空参数」弹出确认弹窗，确认后才执行。
+  const [showClearDialog, setShowClearDialog] = useState(false);
 
   return (
     <div className="panel">
       <div className="section-header">
         <h2>高级参数</h2>
         <div className="actions">
-          <button className="secondary" type="button" onClick={onToggleAdd}>
+          <Button
+            variant={addingAdvanced ? 'secondary-active' : 'secondary'}
+            type="button"
+            onClick={onToggleAdd}
+          >
             {addingAdvanced ? '关闭添加' : '添加参数'}
-          </button>
-          <button
-            className="secondary"
+          </Button>
+          <Button
+            variant={removingAdvanced ? 'secondary-danger' : 'secondary'}
             type="button"
             onClick={removingAdvanced ? onStopRemove : onStartRemove}
           >
             {removingAdvanced ? '退出移除' : '移除参数'}
-          </button>
+          </Button>
         </div>
       </div>
       {addingAdvanced && availableAdvancedOptions.length > 0 && (
@@ -76,9 +91,9 @@ export function AdvancedParamsPanel(props: Props) {
             <div className="field-header">
               <label>{ADVANCED_LABELS[key]}</label>
               {removable && (
-                <button className="danger" type="button" onClick={() => onRemoveKey(key)}>
+                <Button variant="danger" type="button" onClick={() => onRemoveKey(key)}>
                   删除
-                </button>
+                </Button>
               )}
             </div>
             {key === 'ctx_size' && (
@@ -207,6 +222,29 @@ export function AdvancedParamsPanel(props: Props) {
           </div>
         );
       })}
+      <div className="empty">
+        高级参数按需添加；未加入的参数不会写入配置，启动时由 llama-server 自动决定。
+      </div>
+      <div className="panel-actions">
+        <Button variant="danger" type="button" onClick={() => setShowClearDialog(true)}>
+          清空参数
+        </Button>
+        <Button onClick={onSave} disabled={saving}>
+          {saving ? '保存中...' : '保存配置'}
+        </Button>
+      </div>
+      <ConfirmDialog
+        open={showClearDialog}
+        title="清空所有高级参数"
+        danger
+        confirmText="确认清空"
+        message="将移除全部已启用的高级参数，并把各高级值复位为默认值。此操作需点「保存配置」才会生效。"
+        onConfirm={() => {
+          onClearAdvanced();
+          setShowClearDialog(false);
+        }}
+        onCancel={() => setShowClearDialog(false)}
+      />
     </div>
   );
 }
