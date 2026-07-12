@@ -1946,6 +1946,7 @@ dependencies = [
  "tauri-plugin-dialog",
  "tauri-plugin-opener",
  "toml 1.1.2+spec-1.1.0",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]

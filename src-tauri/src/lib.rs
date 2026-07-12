@@ -2,12 +2,20 @@ use serde::{Deserialize, Serialize};
 use std::env;
 use std::io::Read;
 use std::net::{IpAddr, SocketAddr, TcpListener, UdpSocket};
+use std::os::windows::io::AsRawHandle;
 use std::os::windows::process::CommandExt;
 use std::process::Stdio;
 use std::str::FromStr;
 use sysinfo::System;
 use tauri::{AppHandle, Emitter, Listener, Manager};
 use tauri_plugin_opener::OpenerExt;
+use windows_sys::Win32::Foundation::{CloseHandle, HANDLE};
+use windows_sys::Win32::System::Console::{GenerateConsoleCtrlEvent, CTRL_C_EVENT};
+use windows_sys::Win32::System::JobObjects::{
+    AssignProcessToJobObject, CreateJobObjectW, JobObjectExtendedLimitInformation,
+    SetInformationJobObject, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
+    JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
+};
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
 pub struct ServerConfig {
@@ -319,6 +327,20 @@ async fn start_server(app: AppHandle, config: ServerConfig) -> Result<ServerStat
         .spawn()
         .map_err(|err| format!("启动 llama-server 失败: {err}"))?;
     let pid = child.id();
+    // 建立 Job Object 守护：launcher 进程以任何方式死亡（含崩溃/被强杀/被 OOM）时，
+    // 内核会据此终结 llama-server 子进程并回收 GPU 显存（见 create_kill_on_close_job）。
+    // 把句柄随 child 一起交给 wait_process 持有，进程一退出即被内核回收 → KILL_ON_JOB_CLOSE 触发。
+    let job = create_kill_on_close_job(&child);
+    if job.is_none() {
+        append_log_inner(
+            &app,
+            ServerLogLine {
+                ts: now(),
+                level: "warn".into(),
+                text: "未能建立 Job Object 守护（环境限制）：launcher 意外崩溃时子进程可能无法自动回收。".into(),
+            },
+        );
+    }
     // 我们发送给 llama-server 的完整命令行：单独用 level="cmd" 记一条，
     // 供前端"原生"模式把它置顶固定显示（区别于下方透传的 raw 输出）。
     let command_line = format!("{} {}", config.llama_server_path, args.join(" "));
@@ -353,7 +375,7 @@ async fn start_server(app: AppHandle, config: ServerConfig) -> Result<ServerStat
 
     let app_handle = app.clone();
     tauri::async_runtime::spawn(async move {
-        let _ = wait_process(app_handle, child).await;
+        let _ = wait_process(app_handle, child, job).await;
     });
 
     Ok(status.clone())
@@ -383,10 +405,7 @@ async fn open_preview(app: AppHandle) -> Result<(), String> {
 #[tauri::command]
 async fn read_logs(app: AppHandle) -> Result<Vec<ServerLogLine>, String> {
     let state = app.state::<std::sync::Mutex<Vec<ServerLogLine>>>();
-    let logs = state
-        .lock()
-        .unwrap_or_else(|e| e.into_inner())
-        .clone();
+    let logs = state.lock().unwrap_or_else(|e| e.into_inner()).clone();
     Ok(logs)
 }
 
@@ -394,10 +413,7 @@ async fn read_logs(app: AppHandle) -> Result<Vec<ServerLogLine>, String> {
 async fn clear_logs(app: AppHandle) -> Result<(), String> {
     {
         let state = app.state::<std::sync::Mutex<Vec<ServerLogLine>>>();
-        state
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .clear();
+        state.lock().unwrap_or_else(|e| e.into_inner()).clear();
     }
     // 通知前端清空（含置顶命令行），保持前后端一致。
     let _ = app.emit("log://clear", ());
@@ -454,7 +470,16 @@ async fn stop_server_inner(app: &AppHandle) -> Result<(), String> {
     drop(status);
 
     if let Some(pid) = pid {
-        terminate_process(pid);
+        // 先礼貌请求 llama-server 走自带的干净卸载路径：它注册了控制台处理器，
+        // 收到 CTRL_C_EVENT 会在退出前卸载 GPU 模型（与你手动关终端时行为一致）。
+        // Job Object 仍是兜底——若它不响应，下面的强制终止 + launcher 崩溃时的
+        // KILL_ON_JOB_CLOSE 会保证进程必死、GPU 必回收。
+        signal_console_ctrl_c(pid);
+        // 给子进程一点时间自行退出；超时仍未退出再强制终止，避免 stop 卡住。
+        std::thread::sleep(std::time::Duration::from_millis(1500));
+        if is_process_running(Some(pid)) {
+            terminate_process(pid);
+        }
         append_log_inner(
             app,
             ServerLogLine {
@@ -523,7 +548,7 @@ fn pump_reader(
     }
 }
 
-async fn wait_process(app: AppHandle, mut child: std::process::Child) {
+async fn wait_process(app: AppHandle, mut child: std::process::Child, _job: Option<JobHandle>) {
     // 读取子进程 stdout/stderr：避免管道缓冲写满导致服务端阻塞/死锁，
     // 同时把 llama-server 的真实输出（含 \r 进度、空行、首尾空格）原样送进日志面板。
     let stdout = child.stdout.take();
@@ -587,7 +612,7 @@ async fn wait_process(app: AppHandle, mut child: std::process::Child) {
     });
     let exit = waiter
         .join()
-        .unwrap_or_else(|_| Err(std::io::Error::new(std::io::ErrorKind::Other, "waiter thread panicked")));
+        .unwrap_or_else(|_| Err(std::io::Error::other("waiter thread panicked")));
 
     // 等消费线程把缓冲区里最后几行也写完，保证"已退出"状态行出现在所有输出之后。
     let _ = consumer.join();
@@ -626,9 +651,7 @@ async fn wait_process(app: AppHandle, mut child: std::process::Child) {
 fn append_log_inner(app: &AppHandle, line: ServerLogLine) {
     {
         let state = app.state::<std::sync::Mutex<Vec<ServerLogLine>>>();
-        let mut logs = state
-            .lock()
-            .unwrap_or_else(|e| e.into_inner());
+        let mut logs = state.lock().unwrap_or_else(|e| e.into_inner());
         logs.push(line.clone());
         // 缓冲上限调大：原生模式下用户希望看到完整输出。5000 足以覆盖典型模型加载+推理会话。
         // 注意：命令行(level=cmd)前端单独保存并置顶，不依赖此缓冲，故不会因滚动被挤掉。
@@ -717,6 +740,61 @@ fn terminate_process(pid: u32) {
                 .creation_flags(0x08000000)
                 .status();
         }
+    }
+}
+
+/// 持有 Job Object 句柄；drop 时关闭句柄。
+/// 与 KILL_ON_JOB_CLOSE 配合：当最后一个句柄关闭（含 launcher 进程崩溃/被强杀导致句柄被内核回收）时，
+/// Windows 会终结仍在作业中的 llama-server 子进程，从而回收其占用的 GPU 显存。
+/// 用 usize 存裸句柄以保证跨线程/跨 await 的 Send 性（裸指针本身不 Send）。
+struct JobHandle(usize);
+
+impl Drop for JobHandle {
+    fn drop(&mut self) {
+        if self.0 != 0 {
+            unsafe {
+                let _ = CloseHandle(self.0 as HANDLE);
+            }
+        }
+    }
+}
+
+/// 为刚拉起的 llama-server 子进程建立 Job Object 并设 KILL_ON_JOB_CLOSE 兜底守护。
+/// 返回 Some 表示已挂上；返回 None 表示当前环境不允许（例如 launcher 自身已被包在另一个
+/// 禁止嵌套作业的作业里），此时降级为仅走优雅退出信号，不阻断启动。
+fn create_kill_on_close_job(child: &std::process::Child) -> Option<JobHandle> {
+    unsafe {
+        let job = CreateJobObjectW(std::ptr::null(), std::ptr::null());
+        if job.is_null() {
+            return None;
+        }
+        let mut info: JOBOBJECT_EXTENDED_LIMIT_INFORMATION = std::mem::zeroed();
+        info.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+        let set_ok = SetInformationJobObject(
+            job,
+            JobObjectExtendedLimitInformation,
+            &info as *const _ as *const std::ffi::c_void,
+            std::mem::size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>() as u32,
+        ) != 0;
+        if !set_ok {
+            let _ = CloseHandle(job);
+            return None;
+        }
+        let assign_ok = AssignProcessToJobObject(job, child.as_raw_handle() as HANDLE) != 0;
+        if !assign_ok {
+            let _ = CloseHandle(job);
+            return None;
+        }
+        Some(JobHandle(job as usize))
+    }
+}
+
+/// 向以 pid 为根的控制台进程组发送 CTRL_C_EVENT，请求 llama-server 走自带清理路径
+/// （它注册了控制台处理器，会在退出前卸载 GPU 模型）。launcher 是 GUI 进程、无控制台，
+/// 但 GenerateConsoleCtrlEvent 在指定非零进程组时仍可从 GUI 进程调用。
+fn signal_console_ctrl_c(pid: u32) {
+    unsafe {
+        let _ = GenerateConsoleCtrlEvent(CTRL_C_EVENT, pid);
     }
 }
 
