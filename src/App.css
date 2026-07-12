@@ -141,6 +141,30 @@ body {
   color: #6b7280;
 }
 
+.field-path {
+  display: flex;
+  align-items: stretch;
+  gap: 8px;
+  min-width: 0;
+}
+
+.field-path input {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.browse-btn {
+  flex: 0 0 auto;
+  white-space: nowrap;
+  background: #ffffff;
+  color: #111827;
+  border-color: #d1d5db;
+}
+
+.browse-btn:hover {
+  background: #f3f4f6;
+}
+
 .advanced-base {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));

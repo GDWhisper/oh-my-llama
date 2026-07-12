@@ -1,10 +1,21 @@
 import type { ServerConfig } from '../types';
 import { modelBasename } from '../lib/advanced';
+import { PathField } from './PathField';
 
 interface Props {
   config: ServerConfig;
   onChange: (config: ServerConfig) => void;
 }
+
+const SERVER_FILTERS = [
+  { name: '可执行文件', extensions: ['exe'] },
+  { name: '所有文件', extensions: ['*'] },
+];
+
+const MODEL_FILTERS = [
+  { name: '模型文件', extensions: ['gguf', 'bin', 'ggml', 'safetensors'] },
+  { name: '所有文件', extensions: ['*'] },
+];
 
 export function BasicParamsPanel({ config, onChange }: Props) {
   const modelLabel = modelBasename(config.model) || '模型文件';
@@ -12,23 +23,19 @@ export function BasicParamsPanel({ config, onChange }: Props) {
     <div className="panel">
       <h2>必要参数</h2>
       <div className="fields">
-        <div className="field">
-          <label>llama-server 路径</label>
-          <input
-            value={config.llama_server_path}
-            onChange={(event) =>
-              onChange({ ...config, llama_server_path: event.currentTarget.value })
-            }
-          />
-        </div>
-        <div className="field">
-          <label>模型路径</label>
-          <input
-            value={config.model}
-            onChange={(event) => onChange({ ...config, model: event.currentTarget.value })}
-          />
-          {modelLabel !== config.model && <div className="field-hint">当前模型：{modelLabel}</div>}
-        </div>
+        <PathField
+          label="llama-server 路径"
+          value={config.llama_server_path}
+          filters={SERVER_FILTERS}
+          onChange={(value) => onChange({ ...config, llama_server_path: value })}
+        />
+        <PathField
+          label="模型路径"
+          value={config.model}
+          filters={MODEL_FILTERS}
+          hint={modelLabel !== config.model ? `当前模型：${modelLabel}` : undefined}
+          onChange={(value) => onChange({ ...config, model: value })}
+        />
         <div className="field">
           <label>监听地址</label>
           <input
