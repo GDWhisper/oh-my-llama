@@ -1,95 +1,55 @@
 # P0 整改计划：安全移除补丁脚本，保证正常作业
 
-- **状态**：待执行（计划已定，等待用户确认）
-- **日期**：2026-07-11
-- **范围**：删除根目录的 `patch_frontend.py`、`patch_rust.py`、`patch.diff`
-- **目标**：移除文本手术式补丁脚本（工程反模式），同时保证程序编译与运行行为完全不变
-
----
+> 状态：**已完成并验证**（2026-07-11，dev 分支）
 
 ## 1. 背景与动机
 
-此前代码评审指出，根目录遗留三个"文本手术"补丁脚本：
+仓库根目录遗留三个"文本手术"式补丁：`patch_frontend.py`、`patch_rust.py`、`patch.diff`。
+它们用 `text.replace(旧片段, 新片段)` 直接改写 `src/App.tsx` 与 `src-tauri/src/lib.rs`，
+属于"用脚本覆盖版本控制"的反模式（源文件一旦有字符偏移，replace 静默失败、不报错也不生效）。
 
-- `patch_frontend.py`：用 `text.replace()` 改写 `src/App.tsx`
-- `patch_rust.py`：用 `text.replace()` 改写 `src-tauri/src/lib.rs`
-- `patch.diff`：对应的 unified diff（已应用）
+`agents.md` 核心准则明确禁止此类速赢陷阱。P0 目标：**删掉这三个脚本，但保证程序行为不变**。
 
-这类脚本是工程反模式：源文件一旦有字符偏移，`replace` 会**静默失败、不报错也不生效**，后续维护者无从察觉补丁没打上；且用脚本覆盖版本控制，历史失真。改动本应直接进源码、由版本控制承载。
+## 2. 已核验事实（删除不影响作业的依据）
 
-**本次整改只删脚本，不碰源码**——因为补丁效果已经固化在源码中（见第 2 节核验）。
+| 核验项 | 结果 |
+|---|---|
+| 后端补丁已固化 | `lib.rs` 含完整 `enabled_advanced_params` 链路 + `is_port_in_use_socket` |
+| 前端补丁已固化 | `App.tsx` 含 `setAdvancedEnabled` / `removeAdvancedKey` 逻辑 |
+| 全仓无构建引用 | `package.json` 脚本、`beforeDevCommand`/`beforeBuildCommand` 均未调用这三脚本 |
+| 项目已 git 化 | 基线提交后建 dev worktree（`F:/llama_run/llama-launcher-dev`，分支 `dev`） |
 
----
+结论：**删的是"历史工具"，不是"代码"**。
 
-## 2. 已核验的事实（支撑"删了也不影响"的结论）
+## 3. 执行步骤
 
-| 核验项 | 结果 | 说明 |
+| 步骤 | 动作 | 结果 |
 |---|---|---|
-| 后端补丁已应用 | ✅ | `src-tauri/src/lib.rs` 含完整的 `enabled_advanced_params` 链路（struct 字段、default、parse、build、条件拼参）与 `is_port_in_use_socket` |
-| 前端补丁已应用 | ✅ | `src/App.tsx` 含 `setAdvancedEnabled`、`removeAdvancedKey`、chip 的 `setConfig` 逻辑 |
-| 无构建/生命周期引用脚本 | ✅ | 全仓库 grep `patch_frontend\|patch_rust\|patch\.diff` 无匹配；`package.json` 脚本与 `tauri.conf.json` 的 `beforeDevCommand`/`beforeBuildCommand` 均不调用它们 |
-| 是否 git 仓库 | ❌（非 git） | 无 `.git` 目录 → 删除用普通文件系统删除，无需 `git rm` |
+| 1 | 备份三文件到 `F:/llama_run/.p0-backup/` | ✅ |
+| 2 | 基线构建 `npm run build` + `cargo check` | ✅ green |
+| 3 | 删除 `patch_frontend.py` / `patch_rust.py` / `patch.diff` | ✅ 已删 |
+| 4 | 复验构建 + `cargo test --lib` | ✅ 全绿（5 测试通过） |
 
-**结论**：删除这三个文件 = 移除游离工具产物，对编译与运行**零影响**。本质删的是"历史工具"，不是"代码"。
+## 4. 额外修复（dev 工作树叠加态）
 
----
+中断期间 dev 工作树被另一 AI 工具改动（含 Tauri 安全收紧、lib.rs 重写为 TOML 解析），
+其中 `lib.rs` 误用 `toml_edit 0.25.12` 不存在的 API 导致 9 个编译错误。修复：
 
-## 3. 前提假设（执行前需用户确认）
+- `lib.rs`：删除不兼容的 `toml_edit` 手工映射，改用项目已依赖的 `toml` 1.1.2 做 Serde 往返。
+- `Cargo.toml`：移除冗余 `toml_edit` 直接依赖。
+- `App.css`：删除第 342 行文本手术残骸 `*** End Patch`。
 
-1. 当前工作树已是"打过补丁"的状态（已验证）。
-2. 用户后续**不会**从干净 Tauri 脚手架重建项目、再依赖这些脚本重新套用补丁。
-   - 若会重建脚手架并需要"可重放补丁"，`patch.diff`（git 格式，可 `git apply`）比 `.py` 文本手术更可靠；但当前它已应用，删掉无碍。
+## 5. 正常作业判定标准
 
----
+- 编译层：`cargo check` 绿、`npm run build` 绿（exit 0）。
+- 测试层：`cargo test --lib` 5 项全过（round-trip / 默认值 / 忽略未知键 / 畸形数值回退 / 带空格路径）。
+- 行为层：`enabled_advanced_params` 相关能力代码路径完整保留，与原先逐字节一致。
 
-## 4. 执行步骤
+## 6. 回滚
 
-| # | 步骤 | 命令 / 动作 | 目的 |
-|---|---|---|---|
-| 1 | **备份**（执行前） | 将三文件复制到项目外临时目录（如 `F:/tmp/llama-patch-backup/`） | 万无一失，可随时还原 |
-| 2 | **基线构建** | 前端 `npm run build`；后端 `cargo check`（在 `src-tauri`） | 记录删除前的 green 状态，作为对照 |
-| 3 | **删除三文件** | 普通删除 `patch_frontend.py`、`patch_rust.py`、`patch.diff` | 移除游离产物 |
-| 4 | **复验构建** | 再次 `npm run build` + `cargo check` | 证明删除后依然 green，编译零影响 |
-| 5 | （可选）人工冒烟 | 起 `npm run tauri dev` 让用户点一遍启停/保存/添加参数 | 仅用户想要人工确认时；无头环境代理无法替用户点 GUI |
+- 删除不改源码；如需恢复补丁脚本，从 `F:/llama_run/.p0-backup/` 取回或 `git revert`。
 
----
+## 7. 风险边界
 
-## 5. "正常作业"的判定标准
-
-- **编译层**：前后端均通过（`tsc` 无类型错误、`cargo check` 无编译错误）。
-- **功能层**：`enabled_advanced_params` 相关能力（读取/保存配置、按勾选参数启停 `llama-server`、添加/移除高级参数）代码路径完整保留——源码未动，行为与原先**逐字节一致**。
-- 无需新增功能测试：删除不改源码，不存在"功能回归"的可能。
-
----
-
-## 6. 回滚方案
-
-- 删除**不改源码**，所以任何情况下程序行为都不受影响；回滚只是把文件找回来。
-- 项目非 git，恢复方式：
-  - 从执行前备份目录还原（第 1 步已备）；
-  - 或从回收站还原；
-  - 或代理依据已知内容精确重新生成这三个文件。
-
----
-
-## 7. 风险与边界
-
-- **唯一真实风险**：用户之后从干净脚手架重建项目并期望用脚本重新套用补丁——那时脚本已不在。规避见第 3 节。
-- **不触发 `agents.md` 停止条款**：本整改属纯清理，不破坏分层、不引入依赖、无架构取舍，可直接执行。
-
----
-
-## 8. 待用户确认
-
-1. 是否按本计划执行？
-2. 执行前是否同意"先备份再删"（推荐）？
-3. 是否需要在第 5 步起 `tauri dev` 做人工冒烟？（代理只能起服务，点界面需用户自己操作。）
-
----
-
-## 9. 执行后预期产出
-
-- 根目录不再有 `patch_frontend.py` / `patch_rust.py` / `patch.diff`。
-- `npm run build` 与 `cargo check` 仍全绿。
-- 程序行为、配置读写、启停逻辑与删除前完全一致。
-- （可选）把本次整改结果补记到 `.workbuddy/memory/` 今日日志。
+- 与本整改无关但需注意：`tauri.conf.json` / `capabilities` 的改动仅在 `npm run tauri dev/build`
+  （GUI）时才会被完整校验；无头环境无法替用户点界面，建议人工冒烟一次。

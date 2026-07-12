@@ -26,3 +26,23 @@ dist-ssr
 # Agent / tool local state (not project source)
 /.codegraph/
 /.workbuddy/
+
+# Foreign AI-tool scaffolding (not project source)
+.codex/
+.qoder/
+.codebuddy/
+.omp/
+.pi/
+openspec/
+.dev_docs/changes/
+
+# EXCEPTION: track the codegraph config we author (converted from .claude).
+# Un-ignore ONLY these; the rest of .codebuddy/ (foreign OpenSpec scaffolding:
+# commands/opsx/*, skills/openspec-*) stays ignored per the rule above.
+!.codebuddy/
+!.codebuddy/settings.json
+!.codebuddy/skills/
+!.codebuddy/skills/codegraph/
+# Re-ignore the foreign OpenSpec scaffolding inside .codebuddy/
+.codebuddy/commands/
+.codebuddy/skills/openspec-*/

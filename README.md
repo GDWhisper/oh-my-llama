@@ -4,9 +4,17 @@
 
 ## 开发
 
-```\n+npm install\n+npm run tauri dev\n+```
+```
+npm install
+npm run tauri dev
+```
 
 ## 预览端口
 
 当前开发预览统一使用 `6060`。
 
+## 验证
+
+- `npm run build`
+- `npm run check`
+- `cargo test --lib --manifest-path src-tauri/Cargo.toml`
