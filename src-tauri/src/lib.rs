@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::env;
 use std::io::Read;
 use std::net::{IpAddr, SocketAddr, TcpListener, UdpSocket};
@@ -120,8 +121,10 @@ pub fn run() {
         .manage(tauri::async_runtime::Mutex::new(ServerStatus::default()))
         .manage(std::sync::Mutex::new(Vec::<ServerLogLine>::new()))
         .invoke_handler(tauri::generate_handler![
-            read_config,
-            save_config,
+            get_configs_state,
+            save_named_config,
+            delete_named_config,
+            set_active,
             get_default_config,
             get_status,
             start_server,
@@ -147,34 +150,86 @@ pub fn run() {
         .expect("error while running llama launcher");
 }
 
-#[tauri::command]
-async fn read_config(_app: AppHandle) -> Result<ServerConfig, String> {
-    let exe_dir = std::env::current_exe()
-        .ok()
-        .and_then(|path| path.parent().map(|path| path.to_path_buf()))
-        .filter(|path| path.exists())
-        .unwrap_or_else(|| std::env::current_dir().unwrap_or_default());
+// ── 多配置管理：命名配置库 + 默认配置（工厂默认值，只读模板）────────────
+// 存储格式（APPDATA/LlamaLauncher/configs.toml）：
+//   active = "配置名"            // 当前选中的配置；"default" 表示默认配置
+//   [configs.配置名]            // 一条命名配置，结构与 ServerConfig 一致
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+struct ConfigStore {
+    #[serde(default)]
+    active: String,
+    #[serde(default)]
+    configs: HashMap<String, ServerConfig>,
+}
 
-    let local_candidates = [
-        exe_dir.join("config.toml"),
-        exe_dir.join("config/llama-config.toml"),
-    ];
-    for path in &local_candidates {
-        if path.exists() {
-            let text =
-                std::fs::read_to_string(path).map_err(|err| format!("读取配置失败: {err}"))?;
-            return parse_config_value(&text);
+#[derive(Debug, Clone, Serialize)]
+struct ConfigsState {
+    default: ServerConfig,
+    configs: HashMap<String, ServerConfig>,
+    active: String,
+}
+
+fn resolve_app_data() -> Result<std::path::PathBuf, String> {
+    let dir = env::var("APPDATA")
+        .or_else(|_| env::var("LOCALAPPDATA"))
+        .map_err(|_| "无法定位应用数据目录。".to_string())?;
+    Ok(std::path::PathBuf::from(dir))
+}
+
+fn configs_path(app_data: &std::path::Path) -> std::path::PathBuf {
+    app_data.join("LlamaLauncher").join("configs.toml")
+}
+
+fn load_store(path: &std::path::Path) -> ConfigStore {
+    if path.exists() {
+        if let Ok(text) = std::fs::read_to_string(path) {
+            if let Ok(store) = toml::from_str::<ConfigStore>(&text) {
+                return store;
+            }
         }
     }
+    ConfigStore::default()
+}
 
-    let app_path = resolve_config_path()?;
-    if app_path.exists() {
-        let text =
-            std::fs::read_to_string(&app_path).map_err(|err| format!("读取配置失败: {err}"))?;
-        return parse_config_value(&text);
+fn save_store(path: &std::path::Path, store: &ConfigStore) -> Result<(), String> {
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).map_err(|err| format!("创建配置目录失败: {err}"))?;
     }
+    let text = toml::to_string(store).map_err(|err| format!("序列化配置失败: {err}"))?;
+    std::fs::write(path, text).map_err(|err| format!("写入配置失败: {err}"))?;
+    Ok(())
+}
 
-    Ok(ServerConfig::default())
+// 旧版单配置文件（config.toml / config/llama-config.toml / APPDATA 下的旧路径）。
+// 仅用于首次升级时把用户既有配置迁移为一条命名配置，避免配置丢失。
+fn read_legacy_config() -> Option<ServerConfig> {
+    let exe_dir = std::env::current_exe()
+        .ok()
+        .and_then(|p| p.parent().map(|p| p.to_path_buf()))
+        .filter(|p| p.exists());
+    let candidates = [
+        exe_dir.as_ref().map(|d| d.join("config.toml")),
+        exe_dir.as_ref().map(|d| d.join("config/llama-config.toml")),
+    ];
+    for path in candidates.into_iter().flatten() {
+        if path.exists() {
+            if let Ok(text) = std::fs::read_to_string(&path) {
+                if let Ok(cfg) = parse_config_value(&text) {
+                    return Some(cfg);
+                }
+            }
+        }
+    }
+    if let Ok(app_path) = resolve_config_path() {
+        if app_path.exists() {
+            if let Ok(text) = std::fs::read_to_string(&app_path) {
+                if let Ok(cfg) = parse_config_value(&text) {
+                    return Some(cfg);
+                }
+            }
+        }
+    }
+    None
 }
 
 #[tauri::command]
@@ -183,13 +238,77 @@ async fn get_default_config(_app: AppHandle) -> Result<ServerConfig, String> {
 }
 
 #[tauri::command]
-async fn save_config(_app: AppHandle, config: ServerConfig) -> Result<(), String> {
-    let path = resolve_config_path()?;
-    std::fs::create_dir_all(path.parent().unwrap())
-        .map_err(|err| format!("创建配置目录失败: {err}"))?;
-    let text = serialize_config_value(&config)?;
-    std::fs::write(&path, text).map_err(|err| format!("写入配置失败: {err}"))?;
-    Ok(())
+async fn get_configs_state(_app: AppHandle) -> Result<ConfigsState, String> {
+    let app_data = resolve_app_data()?;
+    let path = configs_path(&app_data);
+    let legacy_missing = !path.exists();
+    let mut store = load_store(&path);
+    // 首次升级：命名配置库尚不存在，但旧版单配置文件里有用户既有配置 →
+    // 迁移为「导入的配置」并设为当前，避免用户配置丢失（默认配置保持为只读模板）。
+    if legacy_missing {
+        if let Some(legacy) = read_legacy_config() {
+            if legacy != ServerConfig::default() {
+                store.configs.insert("导入的配置".into(), legacy);
+                store.active = "导入的配置".into();
+                save_store(&path, &store)?;
+            }
+        }
+    }
+    let active = if store.active.is_empty()
+        || (store.active != "default" && !store.configs.contains_key(&store.active))
+    {
+        "default".into()
+    } else {
+        store.active.clone()
+    };
+    Ok(ConfigsState {
+        default: ServerConfig::default(),
+        configs: store.configs,
+        active,
+    })
+}
+
+#[tauri::command]
+async fn save_named_config(
+    _app: AppHandle,
+    name: String,
+    config: ServerConfig,
+) -> Result<(), String> {
+    if name.trim().is_empty() || name == "default" {
+        return Err("配置名无效（不能使用默认配置名）。".into());
+    }
+    let app_data = resolve_app_data()?;
+    let path = configs_path(&app_data);
+    let mut store = load_store(&path);
+    store.configs.insert(name, config);
+    save_store(&path, &store)
+}
+
+#[tauri::command]
+async fn delete_named_config(_app: AppHandle, name: String) -> Result<(), String> {
+    if name == "default" {
+        return Err("默认配置不可删除。".into());
+    }
+    let app_data = resolve_app_data()?;
+    let path = configs_path(&app_data);
+    let mut store = load_store(&path);
+    store.configs.remove(&name);
+    if store.active == name {
+        store.active = "default".into();
+    }
+    save_store(&path, &store)
+}
+
+#[tauri::command]
+async fn set_active(_app: AppHandle, name: String) -> Result<(), String> {
+    let app_data = resolve_app_data()?;
+    let path = configs_path(&app_data);
+    let mut store = load_store(&path);
+    if name != "default" && !store.configs.contains_key(&name) {
+        return Err(format!("未知配置：{name}"));
+    }
+    store.active = name;
+    save_store(&path, &store)
 }
 
 #[tauri::command]
@@ -1071,5 +1190,76 @@ enabled_advanced_params = ["ctx_size"]
         config.extra_args.push("".into());
         let joined2 = build_server_args(&config).join(" ");
         assert!(!joined2.ends_with(' '));
+    }
+
+    #[test]
+    fn store_round_trip_preserves_named_configs() {
+        let dir = std::env::temp_dir().join(format!("llama_cfg_test_{}", std::process::id()));
+        let path = configs_path(&dir);
+        let _ = std::fs::create_dir_all(dir.join("LlamaLauncher"));
+        let store = ConfigStore {
+            active: "a".into(),
+            configs: {
+                let mut m = HashMap::new();
+                m.insert("a".into(), ServerConfig::default());
+                m.insert(
+                    "b".into(),
+                    ServerConfig {
+                        port: 9999,
+                        n_gpu_layers: 20,
+                        enabled_advanced_params: vec![String::from("ctx_size"), String::from("n_gpu_layers")],
+                        ..ServerConfig::default()
+                    },
+                );
+                m
+            },
+            ..ConfigStore::default()
+        };
+        save_store(&path, &store).expect("save");
+
+        let loaded = load_store(&path);
+        assert_eq!(loaded.active, "a");
+        assert_eq!(loaded.configs.len(), 2);
+        let b_back = loaded.configs.get("b").expect("b present");
+        assert_eq!(b_back.port, 9999);
+        assert_eq!(b_back.n_gpu_layers, 20);
+        assert_eq!(
+            b_back.enabled_advanced_params,
+            vec![String::from("ctx_size"), String::from("n_gpu_layers")]
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn load_store_missing_path_is_empty() {
+        let dir = std::env::temp_dir().join(format!("llama_cfg_missing_{}", std::process::id()));
+        let path = configs_path(&dir);
+        let store = load_store(&path);
+        assert!(store.configs.is_empty());
+        assert_eq!(store.active, "");
+    }
+
+    #[test]
+    fn configs_state_resolves_valid_active() {
+        let dir = std::env::temp_dir().join(format!("llama_cfg_state_{}", std::process::id()));
+        let path = configs_path(&dir);
+        let _ = std::fs::create_dir_all(dir.join("LlamaLauncher"));
+        let store = ConfigStore {
+            active: "ghost".into(), // 指向不存在的配置
+            configs: {
+                let mut m = HashMap::new();
+                m.insert("real".into(), ServerConfig::default());
+                m
+            },
+            ..ConfigStore::default()
+        };
+        save_store(&path, &store).expect("save");
+
+        // get_configs_state 通过 load_store + 校验完成，这里校验 load_store 后
+        // 调用方（命令）会把非法 active 回退为 "default"，逻辑在命令内，这里只验证存储层。
+        let loaded = load_store(&path);
+        assert_eq!(loaded.active, "ghost");
+        assert!(loaded.configs.contains_key("real"));
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

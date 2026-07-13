@@ -5,6 +5,7 @@ import { LogPanel } from './components/LogPanel';
 import { BasicParamsPanel } from './components/BasicParamsPanel';
 import { AdvancedParamsPanel } from './components/AdvancedParamsPanel';
 import { ParamPaste } from './components/ParamPaste';
+import { ConfigManager } from './components/ConfigManager';
 import type { ApplyPlan } from './lib/parseArgs';
 import './App.css';
 
@@ -29,6 +30,14 @@ export default function App() {
     advancedPredict,
     availableAdvancedOptions,
     enabledAdvancedKeys,
+    configs,
+    activeName,
+    nameDialog,
+    selectConfig,
+    requestCreateEmpty,
+    confirmName,
+    cancelName,
+    deleteConfig,
     setConfig,
     setAdjustingAdvanced,
     handleSave,
@@ -118,6 +127,16 @@ export default function App() {
 
       <div className="layout">
         <section className="column sidebar">
+          <ConfigManager
+            configs={configs}
+            activeName={activeName}
+            onSelect={selectConfig}
+            onCreateEmpty={requestCreateEmpty}
+            onDelete={deleteConfig}
+            nameDialog={nameDialog}
+            onNameConfirm={confirmName}
+            onNameCancel={cancelName}
+          />
           <BasicParamsPanel
             config={config}
             models={models}

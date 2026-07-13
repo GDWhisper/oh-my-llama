@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
-import type { ServerConfig, ServerLogLine, ServerStatus } from '../types';
+import type { ConfigsState, ServerConfig, ServerLogLine, ServerStatus } from '../types';
 import {
   ADVANCED_ORDER,
   OPTIONAL_ADVANCED_OPTIONS,
@@ -51,36 +51,55 @@ export function useServer() {
   const [modelExists, setModelExists] = useState<boolean | null>(null);
   // 模型目录下检测到的 .gguf 模型文件名列表（仅文件名，用于下拉框展示）
   const [models, setModels] = useState<string[]>([]);
-  // 后端默认配置（ServerConfig::default()），仅用于「清空高级参数」时把各高级值复位到默认。
-  const defaultsRef = useRef<ServerConfig | null>(null);
+  // 后端默认配置（ServerConfig::default()）：既作为「默认配置」只读模板，
+  // 也用于「清空高级参数」时把各高级值复位到默认。
+  const defaultRef = useRef<ServerConfig | null>(null);
+  const [defaultConfig, setDefaultConfig] = useState<ServerConfig | null>(null);
+  // 多配置管理：命名配置库 + 当前选中名（'default' 表示默认配置）。
+  const [configs, setConfigs] = useState<Record<string, ServerConfig>>({});
+  const [activeName, setActiveName] = useState<string>('default');
+  // 「保存为新配置 / 新建空配置」的名称输入弹窗状态。
+  const [nameDialog, setNameDialog] = useState<{
+    open: boolean;
+    mode: 'save-as-new' | 'create-empty';
+  }>({ open: false, mode: 'save-as-new' });
+  // 用于避免闭包读到过期 state 的镜像 ref。
+  const configsRef = useRef<Record<string, ServerConfig>>({});
+  const activeRef = useRef<string>('default');
+
+  // 根据一份完整配置（含 enabled_advanced_params）重算高级参数开关状态。
+  const applyEnabled = (cfg: ServerConfig | null) => {
+    const base = defaultRef.current;
+    const enabledList =
+      cfg?.enabled_advanced_params && cfg.enabled_advanced_params.length > 0
+        ? cfg.enabled_advanced_params
+        : (base?.enabled_advanced_params ?? ['ctx_size']);
+    const enabledSet = new Set(enabledList);
+    setAdvancedEnabled(() => {
+      const next = {} as Record<AdvancedKey, boolean>;
+      ADVANCED_ORDER.forEach((key) => {
+        next[key] = enabledSet.has(key);
+      });
+      return next;
+    });
+  };
 
   const loadConfig = async () => {
     setError(null);
     try {
-      const [data, defaults] = await Promise.all([
-        invoke<ServerConfig>('read_config'),
-        invoke<ServerConfig>('get_default_config'),
-      ]);
-      const enabledList =
-        data.enabled_advanced_params && data.enabled_advanced_params.length > 0
-          ? data.enabled_advanced_params
-          : defaults.enabled_advanced_params;
-      const enabledSet = new Set(enabledList);
-      setAdvancedEnabled(() => {
-        const next = {} as Record<AdvancedKey, boolean>;
-        ADVANCED_ORDER.forEach((key) => {
-          next[key] = enabledSet.has(key);
-        });
-        return next;
-      });
-      defaultsRef.current = defaults;
-      setConfig({
-        ...defaults,
-        ...data,
-        host: data.host || defaults.host,
-        flash_attn: data.flash_attn || defaults.flash_attn,
-        enabled_advanced_params: enabledList,
-      });
+      const state = await invoke<ConfigsState>('get_configs_state');
+      const def = state.default;
+      defaultRef.current = def;
+      setDefaultConfig(def);
+      configsRef.current = state.configs;
+      setConfigs(state.configs);
+      const active =
+        state.active === 'default' || state.configs[state.active] ? state.active : 'default';
+      activeRef.current = active;
+      setActiveName(active);
+      const base = active === 'default' ? def : (state.configs[active] ?? def);
+      setConfig({ ...def, ...base });
+      applyEnabled(base);
     } catch (err) {
       setError('读取配置失败');
       console.error(err);
@@ -127,6 +146,8 @@ export function useServer() {
   useEffect(() => {
     loadConfig();
     loadStatus();
+    // 挂载时只拉取一次配置与状态（故意只在 [] 时执行）。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // 日志实时透传：挂载时先拉一次历史，随后订阅后端 log://line 增量事件逐行追加，
@@ -237,19 +258,112 @@ export function useServer() {
     [advancedEnabled],
   );
 
+  // 集中式保存：当前是默认配置时不能直接覆盖，改为弹出命名框生成新配置；
+  // 当前是命名配置时直接覆盖原配置。
   const handleSave = async () => {
     if (!config) {
+      return;
+    }
+    if (activeName === 'default') {
+      setNameDialog({ open: true, mode: 'save-as-new' });
       return;
     }
     setError(null);
     setSaving(true);
     try {
-      await invoke('save_config', { config });
+      await invoke('save_named_config', { name: activeName, config });
+      configsRef.current = { ...configsRef.current, [activeName]: config };
+      setConfigs(configsRef.current);
     } catch (err) {
       setError('保存配置失败');
       console.error(err);
     } finally {
       setSaving(false);
+    }
+  };
+
+  // 切换当前配置：把目标配置载入表单并持久化「当前选中」。
+  const selectConfig = async (name: string) => {
+    activeRef.current = name;
+    setActiveName(name);
+    try {
+      await invoke('set_active', { name });
+    } catch (err) {
+      console.error(err);
+    }
+    const base = name === 'default' ? defaultRef.current : configsRef.current[name];
+    if (!base) {
+      return;
+    }
+    setConfig({ ...defaultRef.current, ...base });
+    applyEnabled(base);
+  };
+
+  // 打开「新建空配置」命名弹窗（空配置 = 工厂默认参数的副本）。
+  const requestCreateEmpty = () => {
+    setNameDialog({ open: true, mode: 'create-empty' });
+  };
+
+  const cancelName = () => {
+    setNameDialog({ open: false, mode: 'save-as-new' });
+  };
+
+  // 名称留空时按日期时间自动生成。
+  const autoConfigName = () => {
+    const d = new Date();
+    const p = (n: number) => String(n).padStart(2, '0');
+    return `配置 ${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
+  };
+
+  // 命名弹窗确认：把 base 配置以给定名存为命名配置并切换过去。
+  const confirmName = async (rawName: string) => {
+    const def = defaultRef.current;
+    if (!def) {
+      return;
+    }
+    const name = rawName.trim() || autoConfigName();
+    const base = nameDialog.mode === 'save-as-new' ? (config ?? def) : def;
+    setError(null);
+    setSaving(true);
+    try {
+      await invoke('save_named_config', { name, config: base });
+      configsRef.current = { ...configsRef.current, [name]: base };
+      setConfigs(configsRef.current);
+      activeRef.current = name;
+      setActiveName(name);
+      await invoke('set_active', { name });
+      setConfig({ ...def, ...base });
+      applyEnabled(base);
+    } catch (err) {
+      setError('保存配置失败');
+      console.error(err);
+    } finally {
+      setSaving(false);
+      setNameDialog({ open: false, mode: 'save-as-new' });
+    }
+  };
+
+  // 删除命名配置（默认配置不可删）；若正选中它则回退到默认配置。
+  const deleteConfig = async (name: string) => {
+    try {
+      await invoke('delete_named_config', { name });
+      const next = { ...configsRef.current };
+      delete next[name];
+      configsRef.current = next;
+      setConfigs(next);
+      if (activeRef.current === name) {
+        activeRef.current = 'default';
+        setActiveName('default');
+        await invoke('set_active', { name: 'default' });
+        const def = defaultRef.current;
+        if (def) {
+          setConfig({ ...def });
+          applyEnabled(def);
+        }
+      }
+    } catch (err) {
+      setError('删除配置失败');
+      console.error(err);
     }
   };
 
@@ -349,7 +463,7 @@ export function useServer() {
       if (!current) {
         return current;
       }
-      const d = defaultsRef.current;
+      const d = defaultRef.current;
       if (!d) {
         // defaults 尚未加载时退化为仅清空启用列表（保留常驻 ctx_size），避免用 undefined 覆盖原值。
         return { ...current, enabled_advanced_params: ['ctx_size'], extra_args: [] };
@@ -371,6 +485,8 @@ export function useServer() {
     });
   };
 
+  const isDefault = activeName === 'default';
+
   return {
     config,
     status,
@@ -391,6 +507,16 @@ export function useServer() {
     advancedPredict,
     availableAdvancedOptions,
     enabledAdvancedKeys,
+    configs,
+    activeName,
+    isDefault,
+    defaultConfig,
+    nameDialog,
+    selectConfig,
+    requestCreateEmpty,
+    confirmName,
+    cancelName,
+    deleteConfig,
     setConfig,
     setAdvancedEnabled,
     setAdjustingAdvanced,

@@ -26,6 +26,14 @@ export interface ServerStatus {
   url: string;
 }
 
+// 多配置管理：默认配置（只读模板）+ 命名配置库 + 当前选中名。
+// active 为 "default" 时表示处于默认配置。
+export interface ConfigsState {
+  default: ServerConfig;
+  configs: Record<string, ServerConfig>;
+  active: string;
+}
+
 export interface ServerLogLine {
   ts: string;
   level: string;

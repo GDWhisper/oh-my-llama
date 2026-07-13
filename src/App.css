@@ -316,6 +316,167 @@ body {
   margin-top: 12px;
 }
 
+/* 配置管理卡片：下拉(左) + 新增配置(右)，二者同处于 .fields 网格的同一行 */
+.config-actions {
+  display: flex;
+  gap: 12px;
+  /* .fields 是 2 列网格，默认 align-items:stretch 会把本行按钮竖向拉伸到与左侧
+     下拉字段同高（标签+触发框≈56px），导致按钮明显偏高。用 align-self:end 让其保持
+     自身高度并底对齐下拉触发框，视觉上与「一键传参」等其它按钮一致。 */
+  align-self: end;
+}
+
+/* 与公共 .btn 保持一致：内容自适应宽度，禁止被 flex 拉伸，确保和其他按钮尺寸统一 */
+.config-actions .btn {
+  flex: 0 0 auto;
+}
+
+/* 自定义下拉框（替代原生 select，便于在选项右侧放 × 删除图标） */
+.select-box {
+  position: relative;
+}
+
+.select-trigger {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  padding: 9px 12px;
+  font-size: 14px;
+  color: #111827;
+  background: #ffffff;
+  border: 1px solid #d1d5db;
+  border-radius: 8px;
+  cursor: pointer;
+  transition:
+    border-color 0.15s,
+    box-shadow 0.15s;
+}
+
+.select-trigger:hover {
+  border-color: #9ca3af;
+}
+
+.select-box.open .select-trigger {
+  border-color: #6366f1;
+  box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.15);
+}
+
+.select-value {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.select-caret {
+  flex: none;
+  font-size: 11px;
+  color: #9ca3af;
+}
+
+.select-list {
+  position: absolute;
+  z-index: 20;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  margin: 0;
+  padding: 4px;
+  list-style: none;
+  background: #ffffff;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.12);
+  max-height: 240px;
+  overflow-y: auto;
+}
+
+.select-option {
+  display: flex;
+  align-items: center;
+}
+
+.option-main {
+  flex: 1;
+  text-align: left;
+  padding: 8px 10px;
+  font-size: 14px;
+  color: #1f2937;
+  background: transparent;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.option-main:hover {
+  background: #f3f4f6;
+}
+
+.option-main.selected {
+  color: #4f46e5;
+  font-weight: 600;
+}
+
+.option-delete {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  margin-right: 4px;
+  font-size: 16px;
+  line-height: 1;
+  color: #9ca3af;
+  background: transparent;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  transition:
+    color 0.15s,
+    background 0.15s;
+}
+
+.option-delete:hover {
+  color: #dc2626;
+  background: #fee2e2;
+}
+
+/* 命名弹窗（保存为新配置 / 新建空配置） */
+.modal h3 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+  color: #111827;
+}
+
+.modal-hint {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.5;
+  color: #6b7280;
+}
+
+.name-input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 8px 10px;
+  border: 1px solid #d1d5db;
+  border-radius: 8px;
+  font-size: 13px;
+  color: #111827;
+  outline: none;
+}
+
+.name-input:focus {
+  border-color: #2563eb;
+  box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.15);
+}
+
 /* 通用二次确认弹窗 */
 .modal-overlay {
   position: fixed;
@@ -327,26 +488,28 @@ body {
   z-index: 1000;
 }
 
+/* 通用弹窗：所有弹窗共用同一套内部间距，避免逐个手写 margin 导致的「挨太近」问题 */
 .modal {
   background: #ffffff;
   border-radius: 12px;
   padding: 20px 22px;
   width: min(360px, 90vw);
   box-shadow: 0 10px 40px rgba(0, 0, 0, 0.25);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
 }
 
 .modal-title {
   font-size: 15px;
   font-weight: 600;
   color: #111827;
-  margin-bottom: 8px;
 }
 
 .modal-body {
   font-size: 13px;
   line-height: 1.5;
   color: #374151;
-  margin-bottom: 16px;
 }
 
 .modal-actions {
