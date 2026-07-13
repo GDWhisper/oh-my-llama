@@ -80,7 +80,7 @@ export default function App() {
     setAdvancedEnabled,
   } = server;
 
-  // 「一键传参」窗口开关：在必要参数与高级参数两张卡片之间展开。
+  // 「一键传参」窗口开关：在配置管理卡片与必要参数卡片之间展开。
   const [showParamPaste, setShowParamPaste] = useState(false);
 
   // 轻量提示（复制成功等）：固定底部居中，约 2.2s 后自动消失。
@@ -190,6 +190,9 @@ export default function App() {
             onNameConfirm={confirmName}
             onNameCancel={cancelName}
           />
+          {showParamPaste && (
+            <ParamPaste onConfirm={applyPlan} onClose={() => setShowParamPaste(false)} />
+          )}
           <BasicParamsPanel
             config={config}
             models={models}
@@ -197,9 +200,6 @@ export default function App() {
             onSave={handleSave}
             onChange={setConfig}
           />
-          {showParamPaste && (
-            <ParamPaste onConfirm={applyPlan} onClose={() => setShowParamPaste(false)} />
-          )}
           <AdvancedParamsPanel
             config={config}
             adjustingAdvanced={adjustingAdvanced}
