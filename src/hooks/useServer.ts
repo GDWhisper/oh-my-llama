@@ -58,11 +58,13 @@ export function useServer() {
   // 多配置管理：命名配置库 + 当前选中名（'default' 表示默认配置）。
   const [configs, setConfigs] = useState<Record<string, ServerConfig>>({});
   const [activeName, setActiveName] = useState<string>('default');
-  // 「保存为新配置 / 新建空配置」的名称输入弹窗状态。
+  // 「保存为新配置 / 新建空配置 / 重命名配置」的名称输入弹窗状态。
   const [nameDialog, setNameDialog] = useState<{
     open: boolean;
-    mode: 'save-as-new' | 'create-empty';
+    mode: 'save-as-new' | 'create-empty' | 'rename';
   }>({ open: false, mode: 'save-as-new' });
+  // 重命名弹窗对应的「原名」（确认时作为 old_name 传给后端）。
+  const [renameTarget, setRenameTarget] = useState<string>('');
   // 用于避免闭包读到过期 state 的镜像 ref。
   const configsRef = useRef<Record<string, ServerConfig>>({});
   const activeRef = useRef<string>('default');
@@ -308,6 +310,12 @@ export function useServer() {
     setNameDialog({ open: false, mode: 'save-as-new' });
   };
 
+  // 打开「重命名配置」弹窗（预填当前名，确认时作为 old_name 传给后端）。
+  const requestRename = (name: string) => {
+    setRenameTarget(name);
+    setNameDialog({ open: true, mode: 'rename' });
+  };
+
   // 名称留空时按日期时间自动生成。
   const autoConfigName = () => {
     const d = new Date();
@@ -319,6 +327,45 @@ export function useServer() {
   const confirmName = async (rawName: string) => {
     const def = defaultRef.current;
     if (!def) {
+      return;
+    }
+    // 重命名分支：old_name 是当前配置名，new_name 为用户输入（不可为空/同名）。
+    if (nameDialog.mode === 'rename') {
+      const oldName = renameTarget;
+      const newName = rawName.trim();
+      if (!newName || newName === oldName) {
+        // 空名或同名：视作未改动，直接关闭。
+        setNameDialog({ open: false, mode: 'save-as-new' });
+        setRenameTarget('');
+        return;
+      }
+      setError(null);
+      setSaving(true);
+      try {
+        // Tauri v2 把命令参数以 camelCase 暴露给 JS：Rust 端 old_name/new_name
+        // 在 invoke 中须用 oldName/newName（本应用其余命令都是单词参数，未触发此约定）。
+        await invoke('rename_named_config', { oldName: oldName, newName: newName });
+        const next = { ...configsRef.current };
+        const value = next[oldName];
+        delete next[oldName];
+        next[newName] = value;
+        configsRef.current = next;
+        setConfigs(next);
+        if (activeRef.current === oldName) {
+          activeRef.current = newName;
+          setActiveName(newName);
+          await invoke('set_active', { name: newName });
+        }
+      } catch (err) {
+        // 透出真实错误（如「命令不存在」说明后端未重编，或「配置名已存在」等），便于定位。
+        const message = err instanceof Error ? err.message : String(err);
+        setError(`重命名失败：${message}`);
+        console.error(err);
+      } finally {
+        setSaving(false);
+        setNameDialog({ open: false, mode: 'save-as-new' });
+        setRenameTarget('');
+      }
       return;
     }
     const name = rawName.trim() || autoConfigName();
@@ -511,9 +558,11 @@ export function useServer() {
     activeName,
     isDefault,
     defaultConfig,
+    renameTarget,
     nameDialog,
     selectConfig,
     requestCreateEmpty,
+    requestRename,
     confirmName,
     cancelName,
     deleteConfig,

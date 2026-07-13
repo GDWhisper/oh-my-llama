@@ -32,9 +32,11 @@ export default function App() {
     enabledAdvancedKeys,
     configs,
     activeName,
+    renameTarget,
     nameDialog,
     selectConfig,
     requestCreateEmpty,
+    requestRename,
     confirmName,
     cancelName,
     deleteConfig,
@@ -130,8 +132,10 @@ export default function App() {
           <ConfigManager
             configs={configs}
             activeName={activeName}
+            renameTarget={renameTarget}
             onSelect={selectConfig}
             onCreateEmpty={requestCreateEmpty}
+            onRename={requestRename}
             onDelete={deleteConfig}
             nameDialog={nameDialog}
             onNameConfirm={confirmName}

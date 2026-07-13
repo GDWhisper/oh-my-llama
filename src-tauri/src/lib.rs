@@ -125,6 +125,7 @@ pub fn run() {
             save_named_config,
             delete_named_config,
             set_active,
+            rename_named_config,
             get_default_config,
             get_status,
             start_server,
@@ -309,6 +310,51 @@ async fn set_active(_app: AppHandle, name: String) -> Result<(), String> {
     }
     store.active = name;
     save_store(&path, &store)
+}
+
+#[tauri::command]
+async fn rename_named_config(
+    _app: AppHandle,
+    old_name: String,
+    new_name: String,
+) -> Result<(), String> {
+    let app_data = resolve_app_data()?;
+    let path = configs_path(&app_data);
+    let mut store = load_store(&path);
+    rename_named_config_in_store(&mut store, &old_name, &new_name)?;
+    save_store(&path, &store)
+}
+
+// 重命名纯逻辑（与命令分离，便于单测）：把 old_name 改名 new_name，
+// 同时若它正是当前 active 则一并更新；默认配置不可改、空名/同名冲突/已存在均报错。
+fn rename_named_config_in_store(
+    store: &mut ConfigStore,
+    old_name: &str,
+    new_name: &str,
+) -> Result<(), String> {
+    if old_name == "default" {
+        return Err("默认配置不可重命名。".into());
+    }
+    let new_name = new_name.trim().to_string();
+    if new_name.is_empty() || new_name == "default" {
+        return Err("配置名无效（不能为空或使用默认配置名）。".into());
+    }
+    if !store.configs.contains_key(old_name) {
+        return Err(format!("未知配置：{old_name}"));
+    }
+    if old_name == new_name {
+        // 同名：无需改动
+        return Ok(());
+    }
+    if store.configs.contains_key(&new_name) {
+        return Err(format!("配置名已存在：{new_name}"));
+    }
+    let value = store.configs.remove(old_name).unwrap();
+    store.configs.insert(new_name.clone(), value);
+    if store.active == old_name {
+        store.active = new_name;
+    }
+    Ok(())
 }
 
 #[tauri::command]
@@ -1261,5 +1307,34 @@ enabled_advanced_params = ["ctx_size"]
         assert_eq!(loaded.active, "ghost");
         assert!(loaded.configs.contains_key("real"));
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn rename_named_config_in_store_works() {
+        let mut store = ConfigStore {
+            active: "a".into(),
+            configs: {
+                let mut m = HashMap::new();
+                m.insert("a".into(), ServerConfig::default());
+                m.insert("b".into(), ServerConfig::default());
+                m
+            },
+            ..ConfigStore::default()
+        };
+        // 改名并同步 active
+        assert!(rename_named_config_in_store(&mut store, "a", "renamed").is_ok());
+        assert!(store.configs.contains_key("renamed"));
+        assert!(!store.configs.contains_key("a"));
+        assert_eq!(store.active, "renamed");
+        // 同名：无操作成功
+        assert!(rename_named_config_in_store(&mut store, "renamed", "renamed").is_ok());
+        // 默认配置不可改
+        assert!(rename_named_config_in_store(&mut store, "default", "x").is_err());
+        // 目标已存在：冲突报错
+        assert!(rename_named_config_in_store(&mut store, "renamed", "b").is_err());
+        // 空名：报错
+        assert!(rename_named_config_in_store(&mut store, "renamed", "  ").is_err());
+        // 未知源：报错
+        assert!(rename_named_config_in_store(&mut store, "ghost", "z").is_err());
     }
 }

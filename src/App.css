@@ -446,6 +446,32 @@ body {
   background: #fee2e2;
 }
 
+/* 重命名图标：位于 × 删除图标左侧，hover 变靛蓝以示「可编辑」 */
+.option-rename {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  margin-right: 2px;
+  font-size: 15px;
+  line-height: 1;
+  color: #9ca3af;
+  background: transparent;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  transition:
+    color 0.15s,
+    background 0.15s;
+}
+
+.option-rename:hover {
+  color: #4f46e5;
+  background: #eef2ff;
+}
+
 /* 命名弹窗（保存为新配置 / 新建空配置） */
 .modal h3 {
   margin: 0;
