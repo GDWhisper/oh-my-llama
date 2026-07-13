@@ -13,6 +13,8 @@ interface Props {
   renameTarget: string;
   onSelect: (name: string) => void;
   onCreateEmpty: () => void;
+  onParamPaste: () => void;
+  onShare: () => void;
   onRename: (name: string) => void;
   onDelete: (name: string) => void;
   nameDialog: { open: boolean; mode: DialogMode };
@@ -30,6 +32,8 @@ export function ConfigManager({
   renameTarget,
   onSelect,
   onCreateEmpty,
+  onParamPaste,
+  onShare,
   onRename,
   onDelete,
   nameDialog,
@@ -134,6 +138,12 @@ export function ConfigManager({
         <div className="config-actions">
           <Button variant="secondary" type="button" onClick={onCreateEmpty}>
             新增配置
+          </Button>
+          <Button variant="secondary" type="button" onClick={onParamPaste}>
+            一键传参
+          </Button>
+          <Button variant="secondary" type="button" onClick={onShare}>
+            分享参数
           </Button>
         </div>
       </div>

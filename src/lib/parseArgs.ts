@@ -325,3 +325,37 @@ export function groupExtraArgs(extra: string[]): { text: string; start: number; 
   }
   return groups;
 }
+
+// 把一份配置序列化为与后端 build_server_args 完全一致的 llama-server 启动命令行
+// （基础参数 + 各项已启用高级参数，未知/自定义参数原样追加），
+// 供「分享参数」复制到剪切板，他人粘贴即可复现同一启动。
+const FLASH_NORMALIZE: Record<string, string> = { on: 'on', off: 'off', auto: 'auto' };
+
+const quoteIfNeeded = (value: string): string => (/\s/.test(value) ? `"${value}"` : value);
+
+export function configToCommand(config: ServerConfig): string {
+  const enabled = new Set(config.enabled_advanced_params);
+  const parts: string[] = [];
+  parts.push('-m', quoteIfNeeded(config.model));
+  parts.push('--host', config.host);
+  parts.push('--port', String(config.port));
+  parts.push('-c', String(config.ctx_size));
+  parts.push('--timeout', '2400');
+  if (enabled.has('n_predict')) parts.push('-n', String(config.n_predict));
+  if (enabled.has('n_gpu_layers')) parts.push('-ngl', String(config.n_gpu_layers));
+  if (enabled.has('threads')) parts.push('-t', String(config.threads));
+  if (enabled.has('batch_size')) parts.push('-b', String(config.batch_size));
+  if (enabled.has('temp')) parts.push('--temp', String(config.temp));
+  if (enabled.has('flash_attn')) {
+    const fv = FLASH_NORMALIZE[(config.flash_attn || 'auto').toLowerCase()] ?? 'auto';
+    parts.push('--flash-attn', fv);
+  }
+  if (enabled.has('mmap')) parts.push(config.mmap ? '--mmap' : '--no-mmap');
+  if (enabled.has('mlock') && config.mlock) parts.push('--mlock');
+  // 自定义参数：原样追加（与启动一致），空字符串占位跳过。
+  for (const arg of config.extra_args) {
+    if (arg) parts.push(arg);
+  }
+  const exe = config.llama_server_path.trim() || 'llama-server.exe';
+  return [exe, ...parts].join(' ');
+}

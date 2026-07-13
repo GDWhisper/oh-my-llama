@@ -316,9 +316,10 @@ body {
   margin-top: 12px;
 }
 
-/* 配置管理卡片：下拉(左) + 新增配置(右)，二者同处于 .fields 网格的同一行 */
+/* 配置管理卡片：下拉(左) + 新增配置/一键传参/分享参数(右)，二者同处于 .fields 网格的同一行 */
 .config-actions {
   display: flex;
+  flex-wrap: wrap;
   gap: 12px;
   /* .fields 是 2 列网格，默认 align-items:stretch 会把本行按钮竖向拉伸到与左侧
      下拉字段同高（标签+触发框≈56px），导致按钮明显偏高。用 align-self:end 让其保持
@@ -719,6 +720,35 @@ button:disabled {
   color: #991b1b;
   border: 1px solid #fecaca;
   font-size: 13px;
+}
+
+/* 轻量提示（复制成功等）：固定底部居中，2.2s 后由 JS 置空自动消失 */
+.toast {
+  position: fixed;
+  left: 50%;
+  bottom: 28px;
+  transform: translateX(-50%);
+  z-index: 50;
+  padding: 10px 18px;
+  border-radius: 10px;
+  background: #16a34a;
+  color: #ffffff;
+  font-size: 13px;
+  font-weight: 500;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.18);
+  pointer-events: none;
+  animation: toast-in 160ms ease-out;
+}
+
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    transform: translate(-50%, 8px);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, 0);
+  }
 }
 
 .empty {

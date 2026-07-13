@@ -14,7 +14,6 @@ interface Props {
   advancedThreads: string;
   advancedBatchSize: string;
   advancedPredict: string;
-  onOpenParamPaste: () => void;
   onRemoveExtraArg: (index: number) => void;
   onToggleAdjust: () => void;
   onAddKey: (key: AdvancedKey) => void;
@@ -35,7 +34,6 @@ export function AdvancedParamsPanel(props: Props) {
     advancedThreads,
     advancedBatchSize,
     advancedPredict,
-    onOpenParamPaste,
     onRemoveExtraArg,
     onToggleAdjust,
     onAddKey,
@@ -53,9 +51,6 @@ export function AdvancedParamsPanel(props: Props) {
       <div className="section-header">
         <h2>高级参数</h2>
         <div className="actions">
-          <Button variant="secondary" type="button" onClick={onOpenParamPaste}>
-            一键传参
-          </Button>
           <Button
             variant={adjustingAdvanced ? 'secondary-active' : 'secondary'}
             type="button"

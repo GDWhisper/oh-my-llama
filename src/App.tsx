@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useRef } from 'react';
 import { useServer } from './hooks/useServer';
 import { ControlPanel } from './components/ControlPanel';
 import { LogPanel } from './components/LogPanel';
@@ -6,8 +6,35 @@ import { BasicParamsPanel } from './components/BasicParamsPanel';
 import { AdvancedParamsPanel } from './components/AdvancedParamsPanel';
 import { ParamPaste } from './components/ParamPaste';
 import { ConfigManager } from './components/ConfigManager';
-import type { ApplyPlan } from './lib/parseArgs';
+import { configToCommand, type ApplyPlan } from './lib/parseArgs';
 import './App.css';
+
+// 复制到剪切板：优先 navigator.clipboard（安全上下文），失败时回退 execCommand。
+async function copyToClipboard(text: string): Promise<boolean> {
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(text);
+      return true;
+    }
+  } catch {
+    // 落到下方回退
+  }
+  try {
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    ta.style.position = 'fixed';
+    ta.style.top = '-9999px';
+    ta.style.opacity = '0';
+    document.body.appendChild(ta);
+    ta.focus();
+    ta.select();
+    const ok = document.execCommand('copy');
+    document.body.removeChild(ta);
+    return ok;
+  } catch {
+    return false;
+  }
+}
 
 export default function App() {
   const server = useServer();
@@ -55,6 +82,26 @@ export default function App() {
 
   // 「一键传参」窗口开关：在必要参数与高级参数两张卡片之间展开。
   const [showParamPaste, setShowParamPaste] = useState(false);
+
+  // 轻量提示（复制成功等）：固定底部居中，约 2.2s 后自动消失。
+  const [toast, setToast] = useState<string | null>(null);
+  const toastTimer = useRef<number | null>(null);
+  const showToast = (message: string) => {
+    setToast(message);
+    if (toastTimer.current !== null) {
+      window.clearTimeout(toastTimer.current);
+    }
+    toastTimer.current = window.setTimeout(() => setToast(null), 2200);
+  };
+  // 「分享参数」：把当前配置序列化成启动命令行复制到剪切板。
+  const shareConfig = async () => {
+    if (!config) {
+      return;
+    }
+    const text = configToCommand(config);
+    const ok = await copyToClipboard(text);
+    showToast(ok ? '已复制启动参数到剪切板' : '复制失败，请手动复制');
+  };
 
   // 把解析出的套用计划真正写入配置：已知 flag 落到对应字段并启用高级键，
   // 未知 flag 以自定义参数（extra_args）原样进入启动命令。
@@ -135,6 +182,8 @@ export default function App() {
             renameTarget={renameTarget}
             onSelect={selectConfig}
             onCreateEmpty={requestCreateEmpty}
+            onParamPaste={() => setShowParamPaste(true)}
+            onShare={shareConfig}
             onRename={requestRename}
             onDelete={deleteConfig}
             nameDialog={nameDialog}
@@ -160,7 +209,6 @@ export default function App() {
             advancedThreads={advancedThreads}
             advancedBatchSize={advancedBatchSize}
             advancedPredict={advancedPredict}
-            onOpenParamPaste={() => setShowParamPaste(true)}
             onRemoveExtraArg={removeExtraArg}
             onToggleAdjust={() => setAdjustingAdvanced((value) => !value)}
             onAddKey={addAdvancedKey}
@@ -178,6 +226,7 @@ export default function App() {
       </div>
 
       {error && <div className="error-banner">{error}</div>}
+      {toast && <div className="toast">{toast}</div>}
     </main>
   );
 }
