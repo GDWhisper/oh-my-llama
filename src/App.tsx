@@ -3,8 +3,6 @@ import { ControlPanel } from './components/ControlPanel';
 import { LogPanel } from './components/LogPanel';
 import { BasicParamsPanel } from './components/BasicParamsPanel';
 import { AdvancedParamsPanel } from './components/AdvancedParamsPanel';
-import { PreviewBar } from './components/PreviewBar';
-import { ConfigPanel } from './components/ConfigPanel';
 import './App.css';
 
 export default function App() {
@@ -13,7 +11,10 @@ export default function App() {
     config,
     status,
     logs,
+    commandLine,
     error,
+    models,
+    modelMissing,
     saving,
     starting,
     stopping,
@@ -37,6 +38,7 @@ export default function App() {
     stopRemovingAdvanced,
     addAdvancedKey,
     removeAdvancedKey,
+    clearAdvanced,
   } = server;
 
   // 加载门前拦截：配置从后端拉取完成前不渲染表单，避免任何默认值落到前端硬编码。
@@ -54,25 +56,32 @@ export default function App() {
   return (
     <main className="app">
       <header className="header">
-        <h1>Llama Launcher</h1>
-        <div className={`status ${statusClass}`}>{statusText}</div>
+        <div className="header-top">
+          <h1>Llama Launcher</h1>
+          <div className={`status ${statusClass}`}>{statusText}</div>
+        </div>
+        <ControlPanel
+          status={status}
+          config={config}
+          modelMissing={modelMissing}
+          starting={starting}
+          stopping={stopping}
+          previewUrl={previewUrl}
+          onStart={handleStart}
+          onStop={handleStop}
+          onOpenPreview={handleOpenPreview}
+        />
       </header>
 
       <div className="layout">
         <section className="column sidebar">
-          <ControlPanel
-            status={status}
-            starting={starting}
-            stopping={stopping}
-            onStart={handleStart}
-            onStop={handleStop}
-            onOpenPreview={handleOpenPreview}
+          <BasicParamsPanel
+            config={config}
+            models={models}
+            saving={saving}
+            onSave={handleSave}
+            onChange={setConfig}
           />
-          <LogPanel logs={logs} onClear={handleClearLogs} />
-        </section>
-
-        <section className="column main">
-          <BasicParamsPanel config={config} onChange={setConfig} />
           <AdvancedParamsPanel
             config={config}
             addingAdvanced={addingAdvanced}
@@ -88,10 +97,15 @@ export default function App() {
             onStopRemove={stopRemovingAdvanced}
             onAddKey={addAdvancedKey}
             onRemoveKey={removeAdvancedKey}
+            onClearAdvanced={clearAdvanced}
+            saving={saving}
+            onSave={handleSave}
             onChange={setConfig}
           />
-          <PreviewBar status={status} previewUrl={previewUrl} onOpenPreview={handleOpenPreview} />
-          <ConfigPanel saving={saving} onSave={handleSave} />
+        </section>
+
+        <section className="column main log-side">
+          <LogPanel logs={logs} commandLine={commandLine} onClear={handleClearLogs} />
         </section>
       </div>
 

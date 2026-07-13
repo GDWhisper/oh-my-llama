@@ -1,6 +1,7 @@
 export interface ServerConfig {
   llama_server_path: string;
   model: string;
+  model_dir: string;
   host: string;
   port: number;
   ctx_size: number;

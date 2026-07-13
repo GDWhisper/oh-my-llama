@@ -20,7 +20,7 @@
         "title": "Llama Launcher",
         "width": 1100,
         "height": 780,
-        "minWidth": 900,
+        "minWidth": 450,
         "minHeight": 640
       }
     ],

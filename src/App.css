@@ -26,7 +26,11 @@ body {
 }
 
 .app {
-  min-height: 100vh;
+  /* 固定为视口高（而非 min-height），让 1fr 行有确定高度，
+     从而 .layout 高度被约束 —— 日志列因此不再随内容扩张，
+     终端面板在卡片内部滚动；同时左右两栏等高、上下对齐。 */
+  height: 100vh;
+  overflow: hidden;
   display: grid;
   grid-template-rows: auto 1fr;
   gap: 16px;
@@ -35,14 +39,42 @@ body {
 
 .header {
   display: flex;
-  align-items: center;
-  justify-content: space-between;
+  flex-direction: column;
   gap: 12px;
   padding: 16px 20px;
   border-radius: 12px;
   background: #ffffff;
   border: 1px solid #e5e7eb;
   box-shadow: 0 1px 2px rgba(15, 23, 42, 0.05);
+}
+
+.header-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+/* 服务控制合并进标题卡片：左侧信息（当前模型 + 预览地址），右侧操作按钮 */
+.header-controls {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.header-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+/* 标题卡片内的提示改为靠 flex 间距对齐，去掉原本的 margin-top */
+.header-info .control-hint,
+.header-info .preview-url {
+  margin-top: 0;
 }
 
 .header h1 {
@@ -52,8 +84,7 @@ body {
 }
 
 .layout {
-  display: grid;
-  grid-template-columns: 320px 1fr;
+  display: flex;
   gap: 16px;
   min-height: 0;
 }
@@ -64,6 +95,13 @@ body {
   gap: 16px;
   min-height: 0;
   overflow: auto;
+  /* 作为 .layout(flex 行) 的子项：左栏（服务控制/必要参数/高级参数）宽度下限 320、上限 640。
+     上限取 640 而非 520：窗口加宽时左栏优先撑满，到窗口≈1010px(内容≈936)才到顶，
+     之后再富余空间才给日志；这样左栏在并列模式有约 720→1010px 的可见生长区间，不会早期冻住。
+     flex-shrink 远小于右栏 → 窗口收窄时日志先缩到 280 下限，再才是左栏缩到 320。 */
+  flex: 10000 1 320px;
+  min-width: 320px;
+  max-width: 640px;
 }
 
 .panel {
@@ -91,6 +129,34 @@ body {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
+}
+
+/* 日志卡片工具条：左侧 简要/原生 分段开关，右侧 清空日志 按钮 */
+.log-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.seg {
+  display: inline-flex;
+  border: 1px solid #d1d5db;
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.seg-btn {
+  border: none;
+  background: transparent;
+  padding: 4px 10px;
+  font-size: 12px;
+  color: #374151;
+  cursor: pointer;
+}
+
+.seg-btn.active {
+  background: #2563eb;
+  color: #ffffff;
 }
 
 .fields {
@@ -141,6 +207,56 @@ body {
   color: #6b7280;
 }
 
+.control-hint {
+  margin-top: 6px;
+}
+
+.field-hint-error {
+  color: #dc2626;
+  font-weight: 500;
+}
+
+.model-select {
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid #d1d5db;
+  border-radius: 8px;
+  font-size: 14px;
+  font-family: inherit;
+  background: #ffffff;
+  color: #111827;
+}
+
+.model-select:disabled {
+  background: #f3f4f6;
+  color: #9ca3af;
+  cursor: not-allowed;
+}
+
+.field-path {
+  display: flex;
+  align-items: stretch;
+  gap: 8px;
+  min-width: 0;
+}
+
+.field-path input {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.browse-btn {
+  flex: 0 0 auto;
+  white-space: nowrap;
+  background: #ffffff;
+  color: #111827;
+  border-color: #d1d5db;
+}
+
+.browse-btn:hover {
+  background: #f3f4f6;
+}
+
 .advanced-base {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -172,17 +288,18 @@ body {
   margin-top: 4px;
 }
 
-.danger {
-  border-radius: 8px;
-  border: 1px solid transparent;
-  padding: 4px 8px;
-  font-size: 12px;
-  background: #dc2626;
-  color: #ffffff;
-  cursor: pointer;
+/* 公共按钮基类：宽度自适应内容，统一盒模型，避免各实例宽度不一致 */
+.btn {
+  box-sizing: border-box;
+  width: auto;
 }
 
-.danger:hover {
+.btn-danger {
+  background: #dc2626;
+  color: #ffffff;
+}
+
+.btn-danger:hover {
   background: #b91c1c;
 }
 
@@ -190,6 +307,52 @@ body {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
+}
+
+.panel-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+  margin-top: 12px;
+}
+
+/* 通用二次确认弹窗 */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+
+.modal {
+  background: #ffffff;
+  border-radius: 12px;
+  padding: 20px 22px;
+  width: min(360px, 90vw);
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.25);
+}
+
+.modal-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: #111827;
+  margin-bottom: 8px;
+}
+
+.modal-body {
+  font-size: 13px;
+  line-height: 1.5;
+  color: #374151;
+  margin-bottom: 16px;
+}
+
+.modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
 }
 
 button {
@@ -208,10 +371,23 @@ button:disabled {
   cursor: not-allowed;
 }
 
-button.secondary {
+.btn-secondary {
   background: #ffffff;
   color: #111827;
   border-color: #d1d5db;
+}
+
+/* 高级参数面板：添加/移除模式激活时的高亮态，让“点击后状态变化”一目了然 */
+.btn-secondary-active {
+  background: #2563eb;
+  color: #ffffff;
+  border-color: #2563eb;
+}
+
+.btn-secondary-danger {
+  background: #dc2626;
+  color: #ffffff;
+  border-color: #dc2626;
 }
 
 .status {
@@ -236,59 +412,115 @@ button.secondary {
   color: #991b1b;
 }
 
-.preview-bar {
-  flex-direction: row;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-}
-
-.preview-title {
-  font-size: 13px;
-  font-weight: 600;
-  color: #111827;
-}
-
 .preview-url {
+  margin-top: 4px;
   font-size: 12px;
   color: #374151;
   word-break: break-all;
 }
 
-.log-list {
+/* 内嵌终端面板：直接展示所有打印内容 */
+.terminal {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 2px;
   overflow: auto;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: #0b1020;
   font-family:
     ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New',
     monospace;
   font-size: 12px;
   line-height: 18px;
-  color: #111827;
 }
 
-.log-line {
-  display: grid;
-  grid-template-columns: auto 70px 1fr;
-  gap: 10px;
-  padding: 6px 8px;
-  border-radius: 8px;
-  background: #f9fafb;
-  border: 1px solid #f3f4f6;
+.terminal-empty {
+  color: #64748b;
+  font-style: italic;
 }
 
-.log-line .level {
+/* 用户上滚查阅历史时出现的“回到底部”悬浮按钮 */
+.term-jump {
+  position: absolute;
+  right: 12px;
+  bottom: 12px;
+  z-index: 2;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  border: 1px solid #26314f;
+  background: rgba(17, 26, 51, 0.92);
+  color: #cbd5e1;
+  font-size: 12px;
+  cursor: pointer;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
+}
+
+.term-jump:hover {
+  background: #1b2547;
+  color: #ffffff;
+}
+
+.term-line {
+  display: flex;
+  gap: 8px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.term-ts {
+  flex: 0 0 auto;
+  color: #64748b;
+}
+
+.term-level {
+  flex: 0 0 auto;
   font-weight: 600;
-  color: #2563eb;
 }
 
-.log-line .level.warn {
-  color: #d97706;
+.term-line.info .term-level {
+  color: #38bdf8;
 }
 
-.log-line .level.error {
-  color: #dc2626;
+.term-line.warn .term-level {
+  color: #fbbf24;
+}
+
+.term-line.error .term-level {
+  color: #f87171;
+}
+
+.term-text {
+  color: #e5e7eb;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* 原生模式：置顶固定的命令行（我们发送给 llama-server 的参数）。
+   sticky 贴住终端滚动容器顶部，始终可见，不随下方透传输出滚走。 */
+.term-pinned {
+  position: sticky;
+  top: -10px; /* 抵消 .terminal 的上内边距，紧贴容器顶边 */
+  z-index: 1;
+  margin: -10px -12px 6px;
+  padding: 8px 12px;
+  background: #111a33;
+  border-bottom: 1px solid #26314f;
+}
+
+.term-line.cmd {
+  gap: 0;
+}
+
+.term-line.cmd .term-text {
+  color: #34d399;
+  font-weight: 600;
 }
 
 .error-banner {
@@ -316,16 +548,73 @@ button.secondary {
 .column.sidebar {
   max-height: 100%;
   overflow: auto;
+  /* 滚动条常驻占位：出现/消失时内容不再左右位移、不挤压空间 */
+  scrollbar-gutter: stable;
+  scrollbar-width: thin;
+  scrollbar-color: #cdd3df transparent;
 }
 
 .column.main {
   min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
   overflow: auto;
+  /* 与左栏一致：滚动条预留，避免内容抖动 */
+  scrollbar-gutter: stable;
+  scrollbar-width: thin;
+  scrollbar-color: #cdd3df transparent;
+}
+/* 细滚动条：低调不突兀，hover 时略加深（WebView2/Chromium 走 webkit 伪元素） */
+.column.sidebar::-webkit-scrollbar,
+.column.main::-webkit-scrollbar {
+  width: 8px;
 }
 
-@media (max-width: 960px) {
+.column.sidebar::-webkit-scrollbar-track,
+.column.main::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.column.sidebar::-webkit-scrollbar-thumb,
+.column.main::-webkit-scrollbar-thumb {
+  background: #cdd3df;
+  border-radius: 4px;
+}
+
+.column.sidebar::-webkit-scrollbar-thumb:hover,
+.column.main::-webkit-scrollbar-thumb:hover {
+  background: #9aa3b2;
+}
+
+/* 作为 .layout(flex 行) 的子项：日志列不设上限（flex-grow 小 → 等左栏撑满 520 后才扩展）；
+   flex-shrink 远大于左栏 → 窗口收窄时日志优先缩到 280 下限。 */
+.log-side {
+  flex: 1 10000 280px;
+  min-width: 280px;
+}
+
+/* 右侧日志列：日志面板纵向撑满，终端面板在卡片内部滚动。 */
+.log-side > .panel:has(.terminal) {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.log-side > .panel:has(.terminal) .terminal {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+/* 窄屏堆叠断点。必须低于"左栏涨满 640 上限所需窗口宽（内容≈936px / 窗口≈1010px）"，
+   否则并列模式下左栏一进入就已封顶、再拖宽度也纹丝不动。
+   720px 让并列模式覆盖 720→1010 这段左栏仍在生长（320→640）的区间。 */
+@media (max-width: 720px) {
   .layout {
-    grid-template-columns: 1fr;
+    flex-direction: column;
+  }
+
+  .sidebar {
+    max-width: none;
   }
 
   .fields {
@@ -334,10 +623,5 @@ button.secondary {
 
   .advanced-base {
     grid-template-columns: 1fr;
-  }
-
-  .preview-bar {
-    flex-direction: column;
-    align-items: flex-start;
   }
 }
