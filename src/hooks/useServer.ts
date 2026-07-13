@@ -40,6 +40,16 @@ export function useServer() {
   const [commandLine, setCommandLine] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  // 轻量提示（保存成功 / 复制成功等）：固定底部居中，约 2.2s 后自动消失。
+  const [toast, setToast] = useState<string | null>(null);
+  const toastTimer = useRef<number | null>(null);
+  const showToast = (message: string) => {
+    setToast(message);
+    if (toastTimer.current !== null) {
+      window.clearTimeout(toastTimer.current);
+    }
+    toastTimer.current = window.setTimeout(() => setToast(null), 2200);
+  };
   const [starting, setStarting] = useState(false);
   const [stopping, setStopping] = useState(false);
   const [advancedEnabled, setAdvancedEnabled] =
@@ -276,6 +286,7 @@ export function useServer() {
       await invoke('save_named_config', { name: activeName, config });
       configsRef.current = { ...configsRef.current, [activeName]: config };
       setConfigs(configsRef.current);
+      showToast('保存成功');
     } catch (err) {
       setError('保存配置失败');
       console.error(err);
@@ -381,6 +392,7 @@ export function useServer() {
       await invoke('set_active', { name });
       setConfig({ ...def, ...base });
       applyEnabled(base);
+      showToast('保存成功');
     } catch (err) {
       setError('保存配置失败');
       console.error(err);
@@ -540,6 +552,8 @@ export function useServer() {
     logs,
     commandLine,
     error,
+    toast,
+    showToast,
     models,
     modelMissing,
     saving,

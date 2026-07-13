@@ -1,9 +1,49 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import type { ServerConfig } from '../types';
 import { ADVANCED_LABELS, type AdvancedKey, type AdvancedOption } from '../lib/advanced';
 import { groupExtraArgs } from '../lib/parseArgs';
 import { Button } from './Button';
 import { ConfirmDialog } from './ConfirmDialog';
+
+// 单条「自定义参数」的可编辑行。用本地草稿承接输入、失焦时才提交，
+// 避免「受控输入 + 每次按键重新分词归一化」导致的光标跳动 / 尾随空格被吞。
+// 当外部文本变化（如切换配置、提交后归一化）时通过 effect 同步草稿。
+function ExtraArgRow({
+  text,
+  onCommit,
+  onRemove,
+}: {
+  text: string;
+  onCommit: (value: string) => void;
+  onRemove: () => void;
+}) {
+  const [draft, setDraft] = useState(text);
+  useEffect(() => {
+    setDraft(text);
+  }, [text]);
+  return (
+    <div className="field extra-args">
+      <div className="field-header">
+        <label>自定义参数</label>
+        <Button variant="danger" type="button" onClick={onRemove}>
+          删除
+        </Button>
+      </div>
+      <input
+        className="extra-value-input"
+        value={draft}
+        spellCheck={false}
+        placeholder="例如 --foo bar"
+        onChange={(event) => setDraft(event.currentTarget.value)}
+        onBlur={() => {
+          if (draft !== text) {
+            onCommit(draft);
+          }
+        }}
+      />
+    </div>
+  );
+}
 
 interface Props {
   config: ServerConfig;
@@ -15,6 +55,7 @@ interface Props {
   advancedBatchSize: string;
   advancedPredict: string;
   onRemoveExtraArg: (index: number) => void;
+  onUpdateExtraArg: (index: number, text: string) => void;
   onToggleAdjust: () => void;
   onAddKey: (key: AdvancedKey) => void;
   onRemoveKey: (key: AdvancedKey) => void;
@@ -35,6 +76,7 @@ export function AdvancedParamsPanel(props: Props) {
     advancedBatchSize,
     advancedPredict,
     onRemoveExtraArg,
+    onUpdateExtraArg,
     onToggleAdjust,
     onAddKey,
     onRemoveKey,
@@ -213,15 +255,12 @@ export function AdvancedParamsPanel(props: Props) {
         );
       })}
       {groupExtraArgs(config.extra_args).map((group) => (
-        <div className="field extra-args" key={`${group.start}`}>
-          <div className="field-header">
-            <label>自定义参数</label>
-            <Button variant="danger" type="button" onClick={() => onRemoveExtraArg(group.start)}>
-              删除
-            </Button>
-          </div>
-          <code className="extra-value">{group.text}</code>
-        </div>
+        <ExtraArgRow
+          key={group.start}
+          text={group.text}
+          onCommit={(value) => onUpdateExtraArg(group.start, value)}
+          onRemove={() => onRemoveExtraArg(group.start)}
+        />
       ))}
       <div className="empty">
         高级参数按需添加；未加入的参数不会写入配置，启动时由 llama-server 自动决定。

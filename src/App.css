@@ -853,6 +853,27 @@ button:disabled {
   word-break: break-all;
 }
 
+/* 可编辑的自定义参数输入框：沿用 .extra-value 的等宽紫色观感，但可聚焦编辑。 */
+.extra-value-input {
+  width: 100%;
+  box-sizing: border-box;
+  font-family:
+    ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New',
+    monospace;
+  font-size: 12px;
+  color: #9333ea;
+  background: #faf5ff;
+  border: 1px solid #e9d5ff;
+  border-radius: 8px;
+  padding: 6px 10px;
+}
+
+.extra-value-input:focus {
+  outline: none;
+  border-color: #c084fc;
+  box-shadow: 0 0 0 2px rgba(192, 132, 252, 0.25);
+}
+
 .column {
   display: flex;
   flex-direction: column;

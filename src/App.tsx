@@ -1,4 +1,4 @@
-import { useState, useRef } from 'react';
+import { useState } from 'react';
 import { useServer } from './hooks/useServer';
 import { ControlPanel } from './components/ControlPanel';
 import { LogPanel } from './components/LogPanel';
@@ -6,7 +6,7 @@ import { BasicParamsPanel } from './components/BasicParamsPanel';
 import { AdvancedParamsPanel } from './components/AdvancedParamsPanel';
 import { ParamPaste } from './components/ParamPaste';
 import { ConfigManager } from './components/ConfigManager';
-import { configToCommand, type ApplyPlan } from './lib/parseArgs';
+import { configToCommand, splitExtraArg, type ApplyPlan } from './lib/parseArgs';
 import './App.css';
 
 // 复制到剪切板：优先 navigator.clipboard（安全上下文），失败时回退 execCommand。
@@ -44,6 +44,8 @@ export default function App() {
     logs,
     commandLine,
     error,
+    toast,
+    showToast,
     models,
     modelMissing,
     saving,
@@ -83,16 +85,6 @@ export default function App() {
   // 「一键传参」窗口开关：在配置管理卡片与必要参数卡片之间展开。
   const [showParamPaste, setShowParamPaste] = useState(false);
 
-  // 轻量提示（复制成功等）：固定底部居中，约 2.2s 后自动消失。
-  const [toast, setToast] = useState<string | null>(null);
-  const toastTimer = useRef<number | null>(null);
-  const showToast = (message: string) => {
-    setToast(message);
-    if (toastTimer.current !== null) {
-      window.clearTimeout(toastTimer.current);
-    }
-    toastTimer.current = window.setTimeout(() => setToast(null), 2200);
-  };
   // 「分享参数」：把当前配置序列化成启动命令行复制到剪切板。
   const shareConfig = async () => {
     if (!config) {
@@ -142,6 +134,19 @@ export default function App() {
     });
   };
 
+  // 编辑某个自定义参数：把整行文本重新拆成 [flag, value]，就地写回扁平数组的
+  // [start, start+1] 两个槽位（保持成对结构不变，不影响其它条目的下标）。
+  const updateExtraArg = (start: number, text: string) => {
+    const [flag, value] = splitExtraArg(text);
+    setConfig((current) => {
+      if (!current) return current;
+      const next = [...current.extra_args];
+      next[start] = flag;
+      next[start + 1] = value;
+      return { ...current, extra_args: next };
+    });
+  };
+
   // 加载门前拦截：配置从后端拉取完成前不渲染表单，避免任何默认值落到前端硬编码。
   if (!config) {
     return (
@@ -184,6 +189,8 @@ export default function App() {
             onCreateEmpty={requestCreateEmpty}
             onParamPaste={() => setShowParamPaste(true)}
             onShare={shareConfig}
+            onSave={handleSave}
+            saving={saving}
             onRename={requestRename}
             onDelete={deleteConfig}
             nameDialog={nameDialog}
@@ -210,6 +217,7 @@ export default function App() {
             advancedBatchSize={advancedBatchSize}
             advancedPredict={advancedPredict}
             onRemoveExtraArg={removeExtraArg}
+            onUpdateExtraArg={updateExtraArg}
             onToggleAdjust={() => setAdjustingAdvanced((value) => !value)}
             onAddKey={addAdvancedKey}
             onRemoveKey={removeAdvancedKey}

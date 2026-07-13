@@ -8,7 +8,7 @@ import type { AdvancedKey } from './advanced';
 export interface ParsedArg {
   // '' 表示位置参数（无 flag）
   flag: string;
-  kind: 'value' | 'bool' | 'model' | 'unknown' | 'positional';
+  kind: 'value' | 'bool' | 'model' | 'unknown' | 'positional' | 'exe';
   field?: keyof ServerConfig;
   key?: AdvancedKey;
   boolValue?: boolean;
@@ -76,14 +76,25 @@ function tokenize(input: string): string[] {
   return tokens;
 }
 
+// 判断某个非 flag token 是否为「llama-server 启动器」本体：
+// - 以 .exe 结尾（Windows 最常见，含绝对路径如 F:\llama-turbo\llama-server.exe）；
+// - 或裸名为 llama-server（类 Unix 无扩展名），但需排除形如 llama-server-model.gguf 的模型文件。
+function isExeToken(tok: string): boolean {
+  if (/\.exe$/i.test(tok)) return true;
+  if (/llama-server/i.test(tok) && !/\.(gguf|bin|safetensors|pth|pt|ggml)$/i.test(tok)) return true;
+  return false;
+}
+
 export function parseLlamaArgs(input: string): ParsedArg[] {
   const tokens = tokenize(input);
   const out: ParsedArg[] = [];
   let firstToken = true;
   for (let i = 0; i < tokens.length; i++) {
     let tok = tokens[i];
-    // 跳过开头的可执行文件名（如 llama-server.exe / 绝对路径），不把它当参数。
-    if (firstToken && !tok.startsWith('-') && (/\.exe$/i.test(tok) || /llama-server/i.test(tok))) {
+    // 开头的启动器路径（如 llama-server.exe / 绝对路径）：识别为启动器本体，
+    // 捕获进 llama_server_path，而非当成未知参数丢弃。
+    if (firstToken && !tok.startsWith('-') && isExeToken(tok)) {
+      out.push({ flag: '', kind: 'exe', field: 'llama_server_path', value: tok });
       firstToken = false;
       continue;
     }
@@ -167,6 +178,14 @@ export function buildPlan(args: ParsedArg[]): ApplyPlan {
   const rows: PreviewRow[] = [];
 
   for (const arg of args) {
+    if (arg.kind === 'exe') {
+      if (arg.value) {
+        patch.llama_server_path = arg.value;
+        rows.push({ text: `启动器路径 → ${arg.value}`, custom: false });
+      }
+      continue;
+    }
+
     if (arg.kind === 'model') {
       if (arg.value) {
         patch.model = arg.value;
@@ -308,22 +327,36 @@ export function buildPlan(args: ParsedArg[]): ApplyPlan {
 }
 
 // 把扁平的 extra_args（[flag, value, flag, value, ...]）还原成展示用的成组列表，
-// 供高级参数卡片里渲染可移除的「自定义参数」片。
-export function groupExtraArgs(extra: string[]): { text: string; start: number; count: number }[] {
-  const groups: { text: string; start: number; count: number }[] = [];
-  let i = 0;
-  while (i < extra.length) {
+// 供高级参数卡片里渲染可编辑 / 可移除的「自定义参数」片。
+// 存储恒为「成对」：每条自定义参数占两个槽位（flag + value，value 为 '' 表示纯 flag），
+// 因此严格按步长 2 遍历——这与 buildPlan 的写入和 removeExtraArg 的按 2 删除保持一致，
+// 避免纯 flag（value=''）时错位产生空行。
+export function groupExtraArgs(
+  extra: string[],
+): { text: string; flag: string; value: string; start: number }[] {
+  const groups: { text: string; flag: string; value: string; start: number }[] = [];
+  for (let i = 0; i + 1 < extra.length; i += 2) {
     const flag = extra[i];
-    const next = i + 1 < extra.length ? extra[i + 1] : '';
-    const hasValue = next !== '';
+    const value = extra[i + 1];
     groups.push({
-      text: hasValue ? `${flag} ${next}` : flag,
+      text: value !== '' ? `${flag} ${value}` : flag,
+      flag,
+      value,
       start: i,
-      count: hasValue ? 2 : 1,
     });
-    i += hasValue ? 2 : 1;
   }
   return groups;
+}
+
+// 把用户在「自定义参数」输入框里编辑的一整行文本，拆回扁平存储所需的 [flag, value] 对。
+// 与解析粘贴命令一致的引号感知分词：首个 token 作 flag，其余 token 合并作 value（无则 ''）。
+export function splitExtraArg(text: string): [string, string] {
+  const tokens = tokenize(text);
+  if (tokens.length === 0) {
+    return ['', ''];
+  }
+  const [flag, ...rest] = tokens;
+  return [flag, rest.join(' ')];
 }
 
 // 把一份配置序列化为与后端 build_server_args 完全一致的 llama-server 启动命令行
