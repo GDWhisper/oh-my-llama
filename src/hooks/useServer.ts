@@ -44,8 +44,9 @@ export function useServer() {
   const [stopping, setStopping] = useState(false);
   const [advancedEnabled, setAdvancedEnabled] =
     useState<Record<AdvancedKey, boolean>>(EMPTY_ADVANCED_ENABLED);
-  const [addingAdvanced, setAddingAdvanced] = useState(false);
-  const [removingAdvanced, setRemovingAdvanced] = useState(false);
+  // 「调整参数」模式：合并了原「添加参数」「移除参数」两种模式。
+  // 开启后同时展示「可添加参数」候选片与各已启用参数上的「删除」按钮。
+  const [adjustingAdvanced, setAdjustingAdvanced] = useState(false);
   // 模型路径指向的文件是否存在：null=未判定（含空路径），true=存在，false=已移走/删除
   const [modelExists, setModelExists] = useState<boolean | null>(null);
   // 模型目录下检测到的 .gguf 模型文件名列表（仅文件名，用于下拉框展示）
@@ -306,15 +307,6 @@ export function useServer() {
     }
   };
 
-  const startRemovingAdvanced = () => {
-    setRemovingAdvanced(true);
-    setAddingAdvanced(false);
-  };
-
-  const stopRemovingAdvanced = () => {
-    setRemovingAdvanced(false);
-  };
-
   const addAdvancedKey = (key: AdvancedKey) => {
     setAdvancedEnabled((current) => ({ ...current, [key]: true }));
     setConfig((current) => {
@@ -329,14 +321,7 @@ export function useServer() {
   };
 
   const removeAdvancedKey = (key: AdvancedKey) => {
-    setAdvancedEnabled((current) => {
-      const next = { ...current, [key]: false };
-      const hasEnabled = ADVANCED_ORDER.some((item) => next[item]);
-      if (!hasEnabled) {
-        setRemovingAdvanced(false);
-      }
-      return next;
-    });
+    setAdvancedEnabled((current) => ({ ...current, [key]: false }));
     setConfig((current) => {
       if (!current) {
         return current;
@@ -352,8 +337,7 @@ export function useServer() {
   // 并把各高级值复位到后端默认值；UI 开关状态同步清空。需用户先二次确认再调用。
   // 与「移除参数」一致，仅修改内存配置，仍需点「保存配置」才会持久化。
   const clearAdvanced = () => {
-    setAddingAdvanced(false);
-    setRemovingAdvanced(false);
+    setAdjustingAdvanced(false);
     // ctx_size（上下文长度）是常驻必选参数：不可删除、也不在「可添加」列表里。
     // 清空时必须保留它启用，否则它既不显示、又无法再添加，会造成死锁。
     setAdvancedEnabled(() => {
@@ -368,7 +352,7 @@ export function useServer() {
       const d = defaultsRef.current;
       if (!d) {
         // defaults 尚未加载时退化为仅清空启用列表（保留常驻 ctx_size），避免用 undefined 覆盖原值。
-        return { ...current, enabled_advanced_params: ['ctx_size'] };
+        return { ...current, enabled_advanced_params: ['ctx_size'], extra_args: [] };
       }
       return {
         ...current,
@@ -382,6 +366,7 @@ export function useServer() {
         mmap: d.mmap,
         mlock: d.mlock,
         enabled_advanced_params: ['ctx_size'],
+        extra_args: [],
       };
     });
   };
@@ -398,8 +383,7 @@ export function useServer() {
     starting,
     stopping,
     advancedEnabled,
-    addingAdvanced,
-    removingAdvanced,
+    adjustingAdvanced,
     previewUrl,
     advancedFlashAttn,
     advancedThreads,
@@ -409,14 +393,12 @@ export function useServer() {
     enabledAdvancedKeys,
     setConfig,
     setAdvancedEnabled,
-    setAddingAdvanced,
+    setAdjustingAdvanced,
     handleSave,
     handleStart,
     handleStop,
     handleOpenPreview,
     handleClearLogs,
-    startRemovingAdvanced,
-    stopRemovingAdvanced,
     addAdvancedKey,
     removeAdvancedKey,
     clearAdvanced,

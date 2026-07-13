@@ -1,22 +1,22 @@
 import { useState } from 'react';
 import type { ServerConfig } from '../types';
 import { ADVANCED_LABELS, type AdvancedKey, type AdvancedOption } from '../lib/advanced';
+import { groupExtraArgs } from '../lib/parseArgs';
 import { Button } from './Button';
 import { ConfirmDialog } from './ConfirmDialog';
 
 interface Props {
   config: ServerConfig;
-  addingAdvanced: boolean;
-  removingAdvanced: boolean;
+  adjustingAdvanced: boolean;
   availableAdvancedOptions: AdvancedOption[];
   enabledAdvancedKeys: AdvancedKey[];
   advancedFlashAttn: string;
   advancedThreads: string;
   advancedBatchSize: string;
   advancedPredict: string;
-  onToggleAdd: () => void;
-  onStartRemove: () => void;
-  onStopRemove: () => void;
+  onOpenParamPaste: () => void;
+  onRemoveExtraArg: (index: number) => void;
+  onToggleAdjust: () => void;
   onAddKey: (key: AdvancedKey) => void;
   onRemoveKey: (key: AdvancedKey) => void;
   onClearAdvanced: () => void;
@@ -28,17 +28,16 @@ interface Props {
 export function AdvancedParamsPanel(props: Props) {
   const {
     config,
-    addingAdvanced,
-    removingAdvanced,
+    adjustingAdvanced,
     availableAdvancedOptions,
     enabledAdvancedKeys,
     advancedFlashAttn,
     advancedThreads,
     advancedBatchSize,
     advancedPredict,
-    onToggleAdd,
-    onStartRemove,
-    onStopRemove,
+    onOpenParamPaste,
+    onRemoveExtraArg,
+    onToggleAdjust,
     onAddKey,
     onRemoveKey,
     onClearAdvanced,
@@ -54,23 +53,19 @@ export function AdvancedParamsPanel(props: Props) {
       <div className="section-header">
         <h2>高级参数</h2>
         <div className="actions">
-          <Button
-            variant={addingAdvanced ? 'secondary-active' : 'secondary'}
-            type="button"
-            onClick={onToggleAdd}
-          >
-            {addingAdvanced ? '关闭添加' : '添加参数'}
+          <Button variant="secondary" type="button" onClick={onOpenParamPaste}>
+            一键传参
           </Button>
           <Button
-            variant={removingAdvanced ? 'secondary-danger' : 'secondary'}
+            variant={adjustingAdvanced ? 'secondary-active' : 'secondary'}
             type="button"
-            onClick={removingAdvanced ? onStopRemove : onStartRemove}
+            onClick={onToggleAdjust}
           >
-            {removingAdvanced ? '退出移除' : '移除参数'}
+            {adjustingAdvanced ? '完成调整' : '调整参数'}
           </Button>
         </div>
       </div>
-      {addingAdvanced && availableAdvancedOptions.length > 0 && (
+      {adjustingAdvanced && availableAdvancedOptions.length > 0 && (
         <div className="advanced-chooser">
           {availableAdvancedOptions.map((option) => (
             <button
@@ -85,7 +80,7 @@ export function AdvancedParamsPanel(props: Props) {
         </div>
       )}
       {enabledAdvancedKeys.map((key) => {
-        const removable = removingAdvanced && key !== 'ctx_size';
+        const removable = adjustingAdvanced && key !== 'ctx_size';
         return (
           <div className="field" key={key}>
             <div className="field-header">
@@ -222,6 +217,17 @@ export function AdvancedParamsPanel(props: Props) {
           </div>
         );
       })}
+      {groupExtraArgs(config.extra_args).map((group) => (
+        <div className="field extra-args" key={`${group.start}`}>
+          <div className="field-header">
+            <label>自定义参数</label>
+            <Button variant="danger" type="button" onClick={() => onRemoveExtraArg(group.start)}>
+              删除
+            </Button>
+          </div>
+          <code className="extra-value">{group.text}</code>
+        </div>
+      ))}
       <div className="empty">
         高级参数按需添加；未加入的参数不会写入配置，启动时由 llama-server 自动决定。
       </div>
