@@ -1,6 +1,6 @@
 # agents.md — 智能体协作准则（AI Agent Guidelines）
 
-> **适用范围**：任何在本项目（`llama-launcher`，Tauri 2 + React/TypeScript 桌面应用）中工作的 AI 代码代理、代码生成模型或自动化助手，**必须**严格遵守本文件。本文件优先级高于模型的默认习惯。
+> **适用范围**：任何在本项目（`oh-my-llama`，Tauri 2 + React/TypeScript 桌面应用）中工作的 AI 代码代理、代码生成模型或自动化助手，**必须**严格遵守本文件。本文件优先级高于模型的默认习惯。
 >
 > **如何使用**：每次动手改代码前先读完本文件；当任务触及"停止并请示"条款时，先停、先问，不要自行推进。
 >
@@ -14,7 +14,7 @@
 
 ### 目录与职责
 ```
-llama-launcher/                    # 前端 React/TS + 构建配置
+oh-my-llama/                    # 前端 React/TS + 构建配置
 ├── src/
 │   ├── main.tsx                   # 入口，仅挂载 <App/>
 │   ├── App.tsx                    # 纯组合根；含"加载配置中…"门控（config 为 null 时拦截渲染）

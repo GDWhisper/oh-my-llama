@@ -1,12 +1,12 @@
 [package]
-name = "llama-launcher"
+name = "oh-my-llama"
 version = "0.1.0"
-description = "Llama server launcher"
-authors = ["you"]
+description = "Oh My Llama"
+authors = ["GDWhisper"]
 edition = "2021"
 
 [lib]
-name = "llama_launcher_lib"
+name = "oh_my_llama_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]

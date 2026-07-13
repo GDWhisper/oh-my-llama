@@ -111,7 +111,7 @@ export default function App() {
     <main className="app">
       <header className="header">
         <div className="header-top">
-          <h1>Llama Launcher</h1>
+          <h1>Oh My Llama</h1>
           <div className={`status ${statusClass}`}>{statusText}</div>
         </div>
         <ControlPanel

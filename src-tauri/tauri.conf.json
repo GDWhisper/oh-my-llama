@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "Llama Launcher",
+  "productName": "Oh My Llama",
   "version": "0.1.0",
-  "identifier": "com.vacio.llama-launcher",
+  "identifier": "com.gdwhisper.oh-my-llama",
   "bundle": {
     "active": true,
     "targets": "all",
@@ -17,7 +17,7 @@
   "app": {
     "windows": [
       {
-        "title": "Llama Launcher",
+        "title": "Oh My Llama",
         "width": 1100,
         "height": 780,
         "minWidth": 450,

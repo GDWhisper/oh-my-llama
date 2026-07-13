@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-    Manage the llama-launcher Tauri dev server: start / stop / restart.
+    Manage the oh-my-llama Tauri dev server: start / stop / restart.
 
 .DESCRIPTION
     `npm run tauri dev` starts a Vite dev server on -Port (default 6060) plus the

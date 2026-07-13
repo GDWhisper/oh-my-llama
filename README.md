@@ -1,4 +1,4 @@
-# Llama Launcher
+# Oh My Llama
 
 一个用于启动和管理 `llama-server` 的 Tauri 桌面启动器。
 

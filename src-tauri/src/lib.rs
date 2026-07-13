@@ -148,11 +148,11 @@ pub fn run() {
             Ok(())
         })
         .run(tauri::generate_context!())
-        .expect("error while running llama launcher");
+        .expect("error while running oh my llama");
 }
 
 // ── 多配置管理：命名配置库 + 默认配置（工厂默认值，只读模板）────────────
-// 存储格式（APPDATA/LlamaLauncher/configs.toml）：
+// 存储格式（APPDATA/OhMyLlama/configs.toml）：
 //   active = "配置名"            // 当前选中的配置；"default" 表示默认配置
 //   [configs.配置名]            // 一条命名配置，结构与 ServerConfig 一致
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -178,7 +178,7 @@ fn resolve_app_data() -> Result<std::path::PathBuf, String> {
 }
 
 fn configs_path(app_data: &std::path::Path) -> std::path::PathBuf {
-    app_data.join("LlamaLauncher").join("configs.toml")
+    app_data.join("OhMyLlama").join("configs.toml")
 }
 
 fn load_store(path: &std::path::Path) -> ConfigStore {
@@ -864,7 +864,7 @@ fn resolve_config_path() -> Result<std::path::PathBuf, String> {
         .or_else(|_| env::var("LOCALAPPDATA"))
         .map_err(|_| "无法定位应用数据目录。".to_string())?;
     Ok(std::path::Path::new(&app_data)
-        .join("LlamaLauncher")
+        .join("OhMyLlama")
         .join("llama-config.toml"))
 }
 
@@ -1242,7 +1242,7 @@ enabled_advanced_params = ["ctx_size"]
     fn store_round_trip_preserves_named_configs() {
         let dir = std::env::temp_dir().join(format!("llama_cfg_test_{}", std::process::id()));
         let path = configs_path(&dir);
-        let _ = std::fs::create_dir_all(dir.join("LlamaLauncher"));
+        let _ = std::fs::create_dir_all(dir.join("OhMyLlama"));
         let store = ConfigStore {
             active: "a".into(),
             configs: {
@@ -1289,7 +1289,7 @@ enabled_advanced_params = ["ctx_size"]
     fn configs_state_resolves_valid_active() {
         let dir = std::env::temp_dir().join(format!("llama_cfg_state_{}", std::process::id()));
         let path = configs_path(&dir);
-        let _ = std::fs::create_dir_all(dir.join("LlamaLauncher"));
+        let _ = std::fs::create_dir_all(dir.join("OhMyLlama"));
         let store = ConfigStore {
             active: "ghost".into(), // 指向不存在的配置
             configs: {
