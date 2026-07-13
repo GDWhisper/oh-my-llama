@@ -35,6 +35,10 @@ pub struct ServerConfig {
     pub mmap: bool,
     pub mlock: bool,
     pub enabled_advanced_params: Vec<String>,
+    // 一键传参写入的自定义参数：原样追加到启动命令行末尾，
+    // 确保用户粘贴的（未知）llama-server 参数与真正启动时完全一致。
+    #[serde(default)]
+    pub extra_args: Vec<String>,
 }
 
 impl Default for ServerConfig {
@@ -55,6 +59,7 @@ impl Default for ServerConfig {
             mmap: true,
             mlock: false,
             enabled_advanced_params: vec!["ctx_size".into()],
+            extra_args: Vec::new(),
         }
     }
 }
@@ -279,6 +284,9 @@ fn build_server_args(config: &ServerConfig) -> Vec<String> {
     {
         args.push("--mlock".into());
     }
+    // 一键传参写入的自定义参数：原样追加到命令行末尾，确保用户传入的参数
+    // 与真正启动时一致（含未知 flag 也会进入 llama-server）。
+    args.extend(config.extra_args.iter().filter(|a| !a.is_empty()).cloned());
     args
 }
 
@@ -850,6 +858,7 @@ mod tests {
                 "mmap".into(),
                 "mlock".into(),
             ],
+            extra_args: vec![],
         };
 
         let text = serialize_config_value(&config).expect("serialize");
@@ -1019,6 +1028,7 @@ enabled_advanced_params = ["ctx_size"]
             mmap: true,
             mlock: false,
             enabled_advanced_params: vec!["ctx_size".into()],
+            extra_args: Vec::new(),
         };
         let joined = build_server_args(&config).join(" ");
         assert!(joined.contains("-m C:/models/m.gguf"));
@@ -1030,5 +1040,36 @@ enabled_advanced_params = ["ctx_size"]
         assert!(!joined.contains("-n "));
         assert!(!joined.contains("--temp"));
         assert!(!joined.contains("--flash-attn"));
+    }
+
+    #[test]
+    fn build_server_args_appends_extra_args() {
+        let mut config = ServerConfig {
+            llama_server_path: "C:/llama/llama-server.exe".into(),
+            model: "C:/models/m.gguf".into(),
+            model_dir: "C:/models".into(),
+            host: "127.0.0.1".into(),
+            port: 8080,
+            ctx_size: 4096,
+            n_predict: -1,
+            n_gpu_layers: 0,
+            threads: 0,
+            batch_size: 512,
+            temp: 0.7,
+            flash_attn: "auto".into(),
+            mmap: true,
+            mlock: false,
+            enabled_advanced_params: vec!["ctx_size".into()],
+            extra_args: vec!["--main-gpu".into(), "0".into(), "--alias".into(), "demo".into()],
+        };
+        let joined = build_server_args(&config).join(" ");
+        // 未知/自定义参数被原样追加到启动命令，确保与用户传入一致
+        assert!(joined.contains("--main-gpu 0"));
+        assert!(joined.contains("--alias demo"));
+
+        // 空串不应进入命令行
+        config.extra_args.push("".into());
+        let joined2 = build_server_args(&config).join(" ");
+        assert!(!joined2.ends_with(' '));
     }
 }
