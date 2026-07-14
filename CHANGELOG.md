@@ -4,6 +4,21 @@
 
 > 本文件为**详细改动历史**（含涉及的文件与实现机制）；GitHub Release 页面为对应版本的**总结性**说明。
 
+## [0.0.3] - 2026-07-14
+
+### 新增功能
+- **国际化（i18n）框架 — 中 / English 双语**：新增无第三方依赖的轻量 i18n 层（`src/i18n/`：字典 `messages.ts`、`I18nProvider` + `useI18n` 钩子），语言选择持久化并即时切换。全部界面组件（`ConfigManager` / `BasicParamsPanel` / `PathField` / `AdvancedParamsPanel` / `LogPanel` / `NameDialog` / `ConfirmDialog` / `App` / `useServer` 等）改为 `t(key)` 取文案；中英字典键在编译期保持一致（TypeScript 键类型约束），漏键即报错。
+- **设置浮窗（齿轮入口）**：标题栏右上角新增齿轮按钮（Material Design 标准 settings 路径）打开居中 Modal `SettingsDialog`（复用 `.modal-overlay`/`.modal`，支持 Esc 与遮罩关闭）。语言切换由标题栏移入设置浮窗，`LangSwitch` 支持 `variant='segment'`（标题栏分段）与 `'list'`（浮窗内列表式单选，「中文 / English」带选中勾）两种形态。服务状态标签移至「Oh My Llama」标题左侧。
+- **应用内更新通道（方案 A：`tauri-plugin-updater`）**：设置浮窗「关于」分组新增「检查更新」按钮，**手动触发**（不做启动自动检查、暂不提供开关）。Rust 侧 `Cargo.toml` 引入 `tauri-plugin-updater`、`lib.rs` 注册插件、`capabilities/default.json` 加 `updater:default`、`tauri.conf.json` 加 `plugins.updater`（`endpoints` 指向 Release 的 `latest.json`、`pubkey` 公钥、Windows `installMode: passive`）。前端新增 `src/hooks/useUpdater.ts`（状态机 idle→checking→available→downloading→ready→no-update→error）与 `src/components/UpdateDialog.tsx`（版本对比 + 发布说明 + 进度条 + 取消 + 「重启安装」）。下载**可见、可取消**（`Update.close()` best-effort 中断），安装**必须显式确认**，绝不后台静默安装。CI（`release.yml`）加 `TAURI_SIGNING_PRIVATE_KEY` 注入 + `includeUpdaterArtifacts: true` + `updaterJsonPreferNsis: true`，产出 `.sig` 与 `latest.json`。
+
+### 功能优化
+- **语言按钮样式自适应**：设置浮窗内语言选项 `.lang-list` 由竖向改为 `row + flex-wrap`（空间足够并排、不够自动换行）；`.lang-list-item` 去除占满整行的 `width:100%`，改为按字体自适应的内边距（`0.55em 1.1em`）+ `white-space:nowrap`，选中勾图标改 `1em` 跟随字体；`.modal-body` 加 `gap:18px`，语言栏与关于栏之间留出间距。
+- **英文文档**：新增 `README_En.md`（`README.md` 全文英译），两文件顶部加语言互索引（`中文 | English`，当前语言加粗、另一语言超链接互指）。
+- **发布文档**：`.dev_docs/release-guide.md` 补「六、更新机制（方案 A）」章节（密钥/签名/CI 产物/发版生效/坑）；`agents.md` 同步索引。
+
+### Bug 修复
+- **清理既有 Rust 告警**（`check:rust` 要求 `-D warnings`，与本版功能无关但阻断门禁）：`lib.rs` 测试中 3 处 `..ConfigStore::default()` 因字段已全赋值触发 `clippy::needless_update`，已删除；仅测试使用的 `serialize_config_value` 触发 lib 目标 `dead_code`，加 `#[cfg(test)]` 限定。
+
 ## [0.0.2] - 2026-07-14
 
 ### 新增功能
@@ -34,5 +49,6 @@
 ### 说明
 - 本版本仅提供 Windows 安装包（`.exe` NSIS / `.msi`），无需预先安装 Node / Rust。
 
+[0.0.3]: https://github.com/GDWhisper/oh-my-llama/releases/tag/v0.0.3
 [0.0.2]: https://github.com/GDWhisper/oh-my-llama/releases/tag/v0.0.2
 [0.0.1]: https://github.com/GDWhisper/oh-my-llama/releases/tag/v0.0.1
