@@ -45,7 +45,7 @@ export function NameDialog({ open, mode, defaultValue, onConfirm, onCancel }: Pr
   const hint = isRename
     ? '请输入新的配置名称。'
     : mode === 'save-as-new'
-      ? '当前是默认配置，将生成一个新的配置。'
+      ? '将以当前参数生成一个新的配置（不影响原配置）。'
       : '将创建一个空白（默认参数）的新配置。';
 
   return (

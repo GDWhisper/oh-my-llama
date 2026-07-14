@@ -134,6 +134,7 @@ pub fn run() {
             read_logs,
             clear_logs,
             file_exists,
+            file_size,
             list_models
         ])
         .setup(|app| {
@@ -599,6 +600,16 @@ async fn clear_logs(app: AppHandle) -> Result<(), String> {
 #[tauri::command]
 fn file_exists(path: String) -> bool {
     !path.trim().is_empty() && std::path::Path::new(&path).exists()
+}
+
+// 同步命令：返回文件字节大小；路径为空或文件不存在时返回 None。
+// 前端用于在当前模型行后展示模型大小（GB）。
+#[tauri::command]
+fn file_size(path: String) -> Option<u64> {
+    if path.trim().is_empty() {
+        return None;
+    }
+    std::fs::metadata(&path).ok().map(|m| m.len())
 }
 
 // 列出指定目录下的所有 .gguf 模型（仅返回文件名，不返回绝对路径，

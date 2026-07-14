@@ -6,6 +6,7 @@ interface Props {
   status: ServerStatus | null;
   config: ServerConfig | null;
   modelMissing: boolean;
+  modelSize: number | null;
   starting: boolean;
   stopping: boolean;
   previewUrl: string;
@@ -18,6 +19,7 @@ export function ControlPanel({
   status,
   config,
   modelMissing,
+  modelSize,
   starting,
   stopping,
   previewUrl,
@@ -42,6 +44,16 @@ export function ControlPanel({
     }
   }
 
+  // 是否禁用了 Web UI：自定义参数（extra_args 成对 [flag, value, ...]）中出现 --no-webui。
+  const noWebui =
+    !!config && config.extra_args.some((flag, i) => i % 2 === 0 && flag === '--no-webui');
+
+  // 模型大小（字节 → GB），仅文件存在且已取到大小时展示。
+  const modelSizeGb =
+    modelSize != null && !modelMissing && config?.model.trim()
+      ? (modelSize / 1024 / 1024 / 1024).toFixed(1)
+      : null;
+
   return (
     <div className="header-controls">
       <div className="header-info">
@@ -50,18 +62,30 @@ export function ControlPanel({
             className={`field-hint control-hint${modelHintTone === 'error' ? ' field-hint-error' : ''}`}
           >
             {modelHint}
+            {modelSizeGb != null && <span className="model-size"> · {modelSizeGb} GB</span>}
           </div>
         )}
-        <div className="preview-url">{previewUrl ? `预览地址：${previewUrl}` : '请先启动服务'}</div>
+        <div className="preview-url">
+          {previewUrl ? `服务地址：${previewUrl}` : '服务地址：服务未启动'}
+        </div>
       </div>
       <div className="actions">
-        <Button onClick={onStart} disabled={starting || status?.running}>
+        <Button variant="secondary" onClick={onStart} disabled={starting || status?.running}>
           {starting ? '正在启动...' : '启动'}
         </Button>
-        <Button variant="secondary" onClick={onStop} disabled={stopping || !status?.running}>
+        <Button
+          variant={status?.running ? 'danger' : 'secondary'}
+          onClick={onStop}
+          disabled={stopping || !status?.running}
+        >
           {stopping ? '正在停止...' : '停止'}
         </Button>
-        <Button variant="secondary" onClick={onOpenPreview} disabled={!status?.running}>
+        <Button
+          variant="secondary"
+          onClick={onOpenPreview}
+          disabled={!status?.running || noWebui}
+          title={noWebui ? '预览因参数已禁用' : undefined}
+        >
           打开预览
         </Button>
       </div>

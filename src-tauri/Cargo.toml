@@ -1,6 +1,6 @@
 [package]
 name = "oh-my-llama"
-version = "0.1.0"
+version = "0.0.2"
 description = "Oh My Llama"
 authors = ["GDWhisper"]
 edition = "2021"

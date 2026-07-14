@@ -3,14 +3,16 @@ import { buildPlan, parseLlamaArgs, type ApplyPlan } from '../lib/parseArgs';
 import { Button } from './Button';
 
 interface Props {
-  // 确认后把套用计划交给上层（App）真正写入配置
-  onConfirm: (plan: ApplyPlan) => void;
+  // 覆盖：把套用计划整体替换进配置（与旧「确认添加」一致）；
+  // 追加：仅把自定义参数接到现有自定义参数之后，已知字段仍套用。
+  onOverwrite: (plan: ApplyPlan) => void;
+  onAppend: (plan: ApplyPlan) => void;
   onClose: () => void;
 }
 
 // 「一键传参」面板：粘贴 llama-server 完整命令行，实时解析预览，
 // 确认后把已知 flag 套用到对应高级参数、未知 flag 以自定义参数形式写入启动命令。
-export function ParamPaste({ onConfirm, onClose }: Props) {
+export function ParamPaste({ onOverwrite, onAppend, onClose }: Props) {
   const [text, setText] = useState('');
 
   // 实时把输入解析成套用计划，确认前即可核对「会变成什么」。
@@ -56,11 +58,20 @@ export function ParamPaste({ onConfirm, onClose }: Props) {
           取消
         </Button>
         <Button
+          variant="secondary"
           type="button"
           disabled={!plan || plan.rows.length === 0}
-          onClick={() => plan && onConfirm(plan)}
+          onClick={() => plan && onOverwrite(plan)}
         >
-          确认添加
+          覆盖参数
+        </Button>
+        <Button
+          variant="secondary"
+          type="button"
+          disabled={!plan || plan.rows.length === 0}
+          onClick={() => plan && onAppend(plan)}
+        >
+          追加参数
         </Button>
       </div>
     </div>
