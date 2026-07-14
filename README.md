@@ -1,30 +1,108 @@
 # Oh My Llama
 
-让 `llama-server` 的启动与参数管理变得简单：支持**多配置一键切换**、**一键粘贴完整命令行自动解析传参**、**一键分享启动参数**，告别手动拼命令。
+> 让 `llama-server` 的启动与参数管理变得简单。
 
-## 功能亮点
+Oh My Llama 是一款桌面工具，用于集中管理 `llama-server` 的启动配置、参数和日志。支持多配置切换、一键解析命令行、一键分享参数，以及实时进程控制，帮助你告别手拼命令行的痛苦。
+
+---
+
+## ✨ 核心亮点
 
 ### 多配置切换
-支持多配置切换，不用再在笔记本中翻找你那一堆参数配置了，这里统一管理。可新增、重命名、删除与保存；内置默认配置为只读模板，在其上修改保存时会提示另存为新配置，不污染原模板。
+
+支持多配置切换，不用再在笔记本中翻找你那一堆参数配置了——这里统一管理。可新增、重命名、删除与保存。
+
+![配置管理]()
 
 ### 一键传参
+
 看累了各种 llama-serve-launcher 自以为是的把所有参数分成独立输入框而头大？这里支持你把所有参数一键粘贴，Oh My Llama 帮你解析——已知参数归位、识别启动器路径，不认识的参数也原样保留为自定义参数。
 
 ### 配置分享
-oops，你调出了非常棒的参数，想立刻分享给社区好友，Oh My Llama 碰巧支持你一键复制所有启动参数，这是一个正循环。复制出的命令行与后端启动逻辑完全一致，对方粘过去就能跑。
 
-## 常规功能
-顶部服务控制（启动 / 停止 / 打开预览）、必要参数与高级参数编辑（含自定义参数可编辑可删除）、右侧实时日志（自动置底、显示启动命令行、可清空）。
+Oops，你调出了非常棒的参数，想立刻分享给社区好友，Oh My Llama 碰巧支持你一键复制所有启动参数——这是一个正循环。复制出的命令行与后端启动逻辑完全一致，对方粘过去就能跑。
 
-## 配置存储
-所有配置持久化在 `%APPDATA%/OhMyLlama/configs.toml`（`%APPDATA%` 通常为 `C:\Users\<用户名>\AppData\Roaming`）。
+---
 
-## 开发
+## 🚀 快速开始
+
+### 下载
+
+前往 [GitHub Releases](https://github.com/GDWhisper/oh-my-llama/releases) 下载最新安装包。
+
+---
+
+
+## ⚙️ 配置存储
+
+所有配置持久化在以下位置：
+
+```
+%APPDATA%/OhMyLlama/configs.toml
+```
+
+其中 `%APPDATA%` 通常为：
+
+```
+C:\Users\<用户名>\AppData\Roaming
+```
+
+配置文件采用 TOML 格式，包含默认配置和所有命名配置。
+
+---
+
+## 🛠️ 技术栈
+
+| 层 | 技术 |
+|---|---|
+| 框架 | [Tauri 2](https://tauri.app/) |
+| 前端 | React 19 + TypeScript + Vite |
+| 后端 | Rust |
+| 配置格式 | TOML |
+| 进程管理 | 原生进程管理（含 Job Object 兜底） |
+
+---
+
+## 🤝 贡献
+
+欢迎以任何方式参与本项目，优先通过 [Issues](https://github.com/GDWhisper/oh-my-llama/issues) 提出需求或反馈问题，也欢迎提交 PR。
+
+### 开发环境
+
+**环境要求：**
+
+- Node.js >= 18
+- Rust >= 1.75（通过 [rustup](https://rustup.rs/) 安装）
+- Tauri CLI：`cargo install tauri-cli`
+
+### 本地开发
+
 ```bash
+# 安装依赖
 npm install
+
+# 启动开发服务器（前端端口 6060）
 npm run tauri dev
 ```
-预览端口统一为 `6060`。验证：前端 `npm run check`，后端 `cargo test --lib --manifest-path src-tauri/Cargo.toml`。
 
-## 技术栈
-基于 Tauri 2 构建，前端使用 React + TypeScript，后端使用 Rust。
+### 验证与构建
+
+```bash
+# 前端类型检查 + lint
+npm run check:frontend
+
+# 后端测试
+cargo test --lib --manifest-path src-tauri/Cargo.toml
+
+# 全量检查（前端 + 后端）
+npm run check
+
+# 构建
+npm run tauri build
+```
+
+---
+
+## 📄 License
+
+[FSL-1.1-MIT](license.md)

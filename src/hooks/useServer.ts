@@ -59,6 +59,8 @@ export function useServer() {
   const [adjustingAdvanced, setAdjustingAdvanced] = useState(false);
   // 模型路径指向的文件是否存在：null=未判定（含空路径），true=存在，false=已移走/删除
   const [modelExists, setModelExists] = useState<boolean | null>(null);
+  // 当前模型文件字节大小：null=未判定/不存在（标题卡片用于展示 GB）
+  const [modelSize, setModelSize] = useState<number | null>(null);
   // 模型目录下检测到的 .gguf 模型文件名列表（仅文件名，用于下拉框展示）
   const [models, setModels] = useState<string[]>([]);
   // 后端默认配置（ServerConfig::default()）：既作为「默认配置」只读模板，
@@ -143,6 +145,20 @@ export function useServer() {
     }
   };
 
+  // 调用后端 file_size 命令取当前模型文件的字节大小，供标题卡片展示 GB。
+  const loadModelSize = async (path: string) => {
+    if (!path.trim()) {
+      setModelSize(null);
+      return;
+    }
+    try {
+      const size = await invoke<number | null>('file_size', { path });
+      setModelSize(size ?? null);
+    } catch {
+      setModelSize(null);
+    }
+  };
+
   // 调用后端 list_models 命令，拉取指定目录下的 .gguf 模型文件名列表。
   // 目录读取属于后端职责（前端严守分层，不直接读文件系统）。
   const loadModels = async (dir: string) => {
@@ -211,8 +227,10 @@ export function useServer() {
   useEffect(() => {
     if (config?.model?.trim()) {
       void checkModelExists(config.model);
+      void loadModelSize(config.model);
     } else {
       setModelExists(null);
+      setModelSize(null);
     }
   }, [config?.model]);
 
@@ -232,8 +250,10 @@ export function useServer() {
     // 顺带轮询模型文件是否存在，覆盖"应用开着时被外部移走"的情况
     if (config?.model?.trim()) {
       void checkModelExists(config.model);
+      void loadModelSize(config.model);
     } else {
       setModelExists(null);
+      setModelSize(null);
     }
   }, 1500);
 
@@ -270,6 +290,12 @@ export function useServer() {
     [advancedEnabled],
   );
 
+  // 另存为：无论当前是默认还是命名配置，都基于「当前表单内容」弹命名窗，
+  // 以新名称生成一个独立的新配置（不覆盖当前激活的配置）。
+  const requestSaveAsNew = () => {
+    setNameDialog({ open: true, mode: 'save-as-new' });
+  };
+
   // 集中式保存：当前是默认配置时不能直接覆盖，改为弹出命名框生成新配置；
   // 当前是命名配置时直接覆盖原配置。
   const handleSave = async () => {
@@ -277,7 +303,7 @@ export function useServer() {
       return;
     }
     if (activeName === 'default') {
-      setNameDialog({ open: true, mode: 'save-as-new' });
+      requestSaveAsNew();
       return;
     }
     setError(null);
@@ -556,6 +582,7 @@ export function useServer() {
     showToast,
     models,
     modelMissing,
+    modelSize,
     saving,
     starting,
     stopping,
@@ -576,6 +603,7 @@ export function useServer() {
     nameDialog,
     selectConfig,
     requestCreateEmpty,
+    requestSaveAsNew,
     requestRename,
     confirmName,
     cancelName,

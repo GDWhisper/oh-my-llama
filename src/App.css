@@ -567,6 +567,15 @@ button:disabled {
   border-color: #d1d5db;
 }
 
+/* 禁用态保持白底（否则会被通用 button:disabled 的浅蓝覆盖）：灰字 + 浅灰边，
+   视觉上与「不可点」一致但不再发蓝。覆盖 ControlPanel 的启动/打开预览等按钮。 */
+.btn-secondary:disabled {
+  background: #ffffff;
+  color: #9ca3af;
+  border-color: #e5e7eb;
+  cursor: not-allowed;
+}
+
 /* 高级参数面板：添加/移除模式激活时的高亮态，让“点击后状态变化”一目了然 */
 .btn-secondary-active {
   background: #2563eb;
@@ -607,6 +616,13 @@ button:disabled {
   font-size: 12px;
   color: #374151;
   word-break: break-all;
+}
+
+/* 标题卡片「当前模型」行后附带的模型大小（GB），淡色小字、左间距 */
+.model-size {
+  margin-left: 10px;
+  color: #6b7280;
+  font-weight: 400;
 }
 
 /* 内嵌终端面板：直接展示所有打印内容 */

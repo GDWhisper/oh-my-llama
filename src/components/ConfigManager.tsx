@@ -15,6 +15,7 @@ interface Props {
   onCreateEmpty: () => void;
   onParamPaste: () => void;
   onShare: () => void;
+  onSaveAsNew: () => void;
   onSave: () => void;
   saving: boolean;
   onRename: (name: string) => void;
@@ -36,6 +37,7 @@ export function ConfigManager({
   onCreateEmpty,
   onParamPaste,
   onShare,
+  onSaveAsNew,
   onSave,
   saving,
   onRename,
@@ -148,6 +150,9 @@ export function ConfigManager({
           </Button>
           <Button variant="secondary" type="button" onClick={onShare}>
             分享参数
+          </Button>
+          <Button variant="secondary" type="button" onClick={onSaveAsNew}>
+            保存为新配置
           </Button>
           <Button type="button" onClick={onSave} disabled={saving}>
             {saving ? '保存中...' : '保存配置'}
