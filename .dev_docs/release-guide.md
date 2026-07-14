@@ -100,6 +100,8 @@
 4. **版本号两处**（`Cargo.toml` + `tauri.conf.json`）必须与 tag 一致，`latest.json` 才指向正确版本。
 
 ### 常见坑
+- **缺 `bundle.createUpdaterArtifacts`（v0.0.3 踩过）**：Tauri v2 **必须**在 `tauri.conf.json` 的 `bundle` 里显式设 `"createUpdaterArtifacts": true`，否则即使配了签名私钥，构建也**不产出 `.sig`**，Release 只有 `setup.exe`/`.msi`，更新通道失效。
+- **`release.yml` 用错输入名 `includeUpdaterArtifacts`（v0.0.3 踩过）**：`tauri-action` **无**此输入（CI 日志会警告 `Unexpected input(s) 'includeUpdaterArtifacts'` 并忽略），正确的是 **`includeUpdaterJson: true`**（生成并上传 `latest.json`）。`.sig` 由上面的 `createUpdaterArtifacts` 产出，二者缺一不可。
 - **未配 `TAURI_SIGNING_PRIVATE_KEY`**：构建不报错，但无 `.sig`、无 `latest.json` → 更新检查永远「已是最新」。先确认 Secret 已填。
 - **公钥与私钥不匹配**（如换过密钥没同步 pubkey）：旧客户端校验签名失败，更新报错。pubkey 必须与签名所用私钥配对。
 - **`latest.json` 下载地址 404**：检查 `endpoints` 与 Release 资产名（`latest.json`）是否一致、Release 是否已发布（草稿态对外不可见）。
