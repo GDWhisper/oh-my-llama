@@ -49,7 +49,8 @@ jobs:
           releaseDraft: true
           prerelease: false
           args: ${{ matrix.args }}
-          # 更新通道：产出 .sig 签名文件并生成 latest.json（自动上传为 Release 资产），
+          # 更新通道：.sig 签名文件由 tauri 构建（bundle.createUpdaterArtifacts=true）产出，
+          # includeUpdaterJson 让 tauri-action 生成 latest.json 并自动上传为 Release 资产，
           # 与 tauri.conf.json 的 plugins.updater.endpoints 对应。
-          includeUpdaterArtifacts: true
+          includeUpdaterJson: true
           updaterJsonPreferNsis: true
