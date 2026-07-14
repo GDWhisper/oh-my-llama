@@ -157,3 +157,12 @@ oh-my-llama/                    # 前端 React/TS + 构建配置
 6. **提交纪律**
    - 禁止 `git commit --no-verify`、`npm install --ignore-scripts` 等绕过门禁的手段。
    - 重大改动先落 dev 分支，勿直提交 main；一次 commit 单一职责。
+
+---
+
+## 八、文档索引（Document Index）
+
+本项目的详细参考文档位于 `.dev_docs/`。当任务触及下列任一触发条件时，**必须**先阅读对应文档再动手，不得凭默认习惯推进。
+
+- **`.dev_docs/release-guide.md`** — 当需要进行版本发布（提交 / 打标签 / 触发 CI / 编写 Release Note 或更新 CHANGELOG）时，**必须**阅读该文档。内含发布全流程、Git worktree 合并约定、`gh` 代理坑、以及「CHANGELOG=详细改动历史 / Release Note=总结性三段式（新增功能·功能优化·Bug 修复，不放下载栏目）」的硬性分工。
+- **`.dev_docs/engineering-readiness.md`** — 当评估工程化就绪状态、审计 P3 门禁（lint/format/测试/安全配置），或判断是否可进入需求开发阶段时，**必须**阅读该文档。
