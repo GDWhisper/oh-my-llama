@@ -55,6 +55,32 @@ body {
   gap: 12px;
 }
 
+.header-title {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.gear-btn {
+  flex: 0 0 auto;
+  width: 32px;
+  height: 32px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 1px solid #d1d5db;
+  border-radius: 8px;
+  background: #ffffff;
+  color: #374151;
+  cursor: pointer;
+}
+
+.gear-btn:hover {
+  background: #f3f4f6;
+  color: #111827;
+}
+
 /* 服务控制合并进标题卡片：左侧信息（当前模型 + 预览地址），右侧操作按钮 */
 .header-controls {
   display: flex;
@@ -537,6 +563,89 @@ body {
   font-size: 13px;
   line-height: 1.5;
   color: #374151;
+}
+
+.modal-close {
+  flex: 0 0 auto;
+  width: 26px;
+  height: 26px;
+  margin-left: auto;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: #6b7280;
+  cursor: pointer;
+}
+
+.modal-close:hover {
+  background: #f3f4f6;
+  color: #111827;
+}
+
+.modal-title {
+  display: flex;
+  align-items: center;
+  font-size: 15px;
+  font-weight: 600;
+  color: #111827;
+}
+
+.settings-section {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.settings-section-head {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.settings-label {
+  font-size: 13px;
+  font-weight: 500;
+  color: #111827;
+}
+
+.settings-hint {
+  font-size: 12px;
+  color: #6b7280;
+}
+
+.lang-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.lang-list-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid #d1d5db;
+  border-radius: 8px;
+  background: #ffffff;
+  font-size: 13px;
+  color: #374151;
+  cursor: pointer;
+}
+
+.lang-list-item.active {
+  border-color: #2563eb;
+  color: #111827;
+  font-weight: 500;
+  background: #eff6ff;
+}
+
+.lang-list-item svg {
+  color: #2563eb;
 }
 
 .modal-actions {

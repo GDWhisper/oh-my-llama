@@ -1,5 +1,6 @@
 import { useEffect } from 'react';
 import type { ReactNode } from 'react';
+import { useI18n } from '../i18n';
 import { Button } from './Button';
 
 interface ConfirmDialogProps {
@@ -22,12 +23,13 @@ export function ConfirmDialog({
   open,
   title,
   message,
-  confirmText = '确认',
-  cancelText = '取消',
+  confirmText,
+  cancelText,
   danger = false,
   onConfirm,
   onCancel,
 }: ConfirmDialogProps) {
+  const { t } = useI18n();
   useEffect(() => {
     if (!open) return;
     const onKey = (event: KeyboardEvent) => {
@@ -52,10 +54,10 @@ export function ConfirmDialog({
         <div className="modal-body">{message}</div>
         <div className="modal-actions">
           <Button variant="secondary" type="button" onClick={onCancel}>
-            {cancelText}
+            {cancelText ?? t('common.cancel')}
           </Button>
           <Button variant={danger ? 'danger' : 'primary'} type="button" onClick={onConfirm}>
-            {confirmText}
+            {confirmText ?? t('common.confirm')}
           </Button>
         </div>
       </div>

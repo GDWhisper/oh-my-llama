@@ -1,4 +1,5 @@
 import { open } from '@tauri-apps/plugin-dialog';
+import { useI18n } from '../i18n';
 
 interface DialogFilter {
   name: string;
@@ -19,6 +20,7 @@ interface Props {
 // directory=true 时打开目录选择（用于模型目录）；否则打开文件选择。
 // 前端只负责触发原生能力并把结果交回上层，不在此实现任何文件读写逻辑（严守分层）。
 export function PathField({ label, value, onChange, filters, directory, hint, hintTone }: Props) {
+  const { t } = useI18n();
   const pick = async () => {
     const selected = directory
       ? await open({ directory: true })
@@ -34,7 +36,7 @@ export function PathField({ label, value, onChange, filters, directory, hint, hi
       <div className="field-path">
         <input value={value} onChange={(event) => onChange(event.currentTarget.value)} />
         <button type="button" className="browse-btn" onClick={pick}>
-          浏览…
+          {t('common.browse')}
         </button>
       </div>
       {hint && (

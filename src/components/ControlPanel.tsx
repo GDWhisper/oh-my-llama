@@ -1,5 +1,6 @@
 import type { ServerConfig, ServerStatus } from '../types';
 import { modelBasename } from '../lib/advanced';
+import { useI18n } from '../i18n';
 import { Button } from './Button';
 
 interface Props {
@@ -27,20 +28,21 @@ export function ControlPanel({
   onStop,
   onOpenPreview,
 }: Props) {
+  const { t } = useI18n();
   // 当前模型小字提示：空路径显示"未选择"，文件不存在红字告警，否则显示当前模型文件名。
   // 置于服务控制内、预览地址上方，启动前即可看到将要加载哪个模型。
   let modelHint: string | undefined;
   let modelHintTone: 'default' | 'error' = 'default';
   if (config) {
     const modelEmpty = !config.model.trim();
-    const modelLabel = modelBasename(config.model) || '模型文件';
+    const modelLabel = modelBasename(config.model) || t('control.modelFileFallback');
     if (modelEmpty) {
-      modelHint = '当前模型：未选择';
+      modelHint = t('control.modelNone');
     } else if (modelMissing) {
-      modelHint = '模型文件不存在';
+      modelHint = t('control.modelMissing');
       modelHintTone = 'error';
     } else {
-      modelHint = `当前模型：${modelLabel}`;
+      modelHint = t('control.currentModel', { name: modelLabel });
     }
   }
 
@@ -66,27 +68,29 @@ export function ControlPanel({
           </div>
         )}
         <div className="preview-url">
-          {previewUrl ? `服务地址：${previewUrl}` : '服务地址：服务未启动'}
+          {previewUrl
+            ? t('control.serverAddr', { url: previewUrl })
+            : t('control.serverAddrStopped')}
         </div>
       </div>
       <div className="actions">
         <Button variant="secondary" onClick={onStart} disabled={starting || status?.running}>
-          {starting ? '正在启动...' : '启动'}
+          {starting ? t('control.starting') : t('control.start')}
         </Button>
         <Button
           variant={status?.running ? 'danger' : 'secondary'}
           onClick={onStop}
           disabled={stopping || !status?.running}
         >
-          {stopping ? '正在停止...' : '停止'}
+          {stopping ? t('control.stopping') : t('control.stop')}
         </Button>
         <Button
           variant="secondary"
           onClick={onOpenPreview}
           disabled={!status?.running || noWebui}
-          title={noWebui ? '预览因参数已禁用' : undefined}
+          title={noWebui ? t('control.previewDisabled') : undefined}
         >
-          打开预览
+          {t('control.openPreview')}
         </Button>
       </div>
     </div>

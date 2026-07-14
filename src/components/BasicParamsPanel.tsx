@@ -1,5 +1,6 @@
 import type { ServerConfig } from '../types';
 import { modelBasename } from '../lib/advanced';
+import { useI18n } from '../i18n';
 import { PathField } from './PathField';
 import { Button } from './Button';
 
@@ -12,16 +13,16 @@ interface Props {
   onChange: (config: ServerConfig) => void;
 }
 
-const SERVER_FILTERS = [
-  { name: '可执行文件', extensions: ['exe'] },
-  { name: '所有文件', extensions: ['*'] },
-];
-
 // 目录路径与模型名拼接为完整模型文件路径（llama-server 需要的 --model 参数）。
 // 用 / 作分隔符，Windows 与 llama.cpp 均接受。
 const joinModelPath = (dir: string, name: string): string => `${dir.replace(/[\\/]$/, '')}/${name}`;
 
 export function BasicParamsPanel({ config, models, saving, onSave, onChange }: Props) {
+  const { t } = useI18n();
+  const serverFilters = [
+    { name: t('basic.filterExe'), extensions: ['exe'] },
+    { name: t('basic.filterAll'), extensions: ['*'] },
+  ];
   const dirSet = !!config.model_dir.trim();
   const selectedBasename = config.model ? modelBasename(config.model) : '';
 
@@ -36,17 +37,22 @@ export function BasicParamsPanel({ config, models, saving, onSave, onChange }: P
 
   return (
     <div className="panel">
-      <h2>必要参数</h2>
+      <h2>{t('basic.title')}</h2>
       <div className="fields">
         <PathField
-          label="llama-server 路径"
+          label={t('basic.serverPath')}
           value={config.llama_server_path}
-          filters={SERVER_FILTERS}
+          filters={serverFilters}
           onChange={(value) => onChange({ ...config, llama_server_path: value })}
         />
-        <PathField label="模型目录" value={config.model_dir} directory onChange={handleDirChange} />
+        <PathField
+          label={t('basic.modelDir')}
+          value={config.model_dir}
+          directory
+          onChange={handleDirChange}
+        />
         <div className="field">
-          <label>选择模型</label>
+          <label>{t('basic.selectModel')}</label>
           <select
             className="model-select"
             value={selectedBasename}
@@ -55,10 +61,10 @@ export function BasicParamsPanel({ config, models, saving, onSave, onChange }: P
           >
             <option value="" disabled>
               {!dirSet
-                ? '请先选择模型目录'
+                ? t('basic.pickDirFirst')
                 : models.length > 0
-                  ? '选择模型…'
-                  : '该目录下无 .gguf 模型'}
+                  ? t('basic.selectModelPlaceholder')
+                  : t('basic.noModels')}
             </option>
             {models.map((name) => (
               <option key={name} value={name}>
@@ -68,14 +74,14 @@ export function BasicParamsPanel({ config, models, saving, onSave, onChange }: P
           </select>
         </div>
         <div className="field">
-          <label>监听地址</label>
+          <label>{t('basic.host')}</label>
           <input
             value={config.host}
             onChange={(event) => onChange({ ...config, host: event.currentTarget.value })}
           />
         </div>
         <div className="field">
-          <label>监听端口</label>
+          <label>{t('basic.port')}</label>
           <input
             type="number"
             value={config.port}
@@ -87,7 +93,7 @@ export function BasicParamsPanel({ config, models, saving, onSave, onChange }: P
       </div>
       <div className="panel-actions">
         <Button onClick={onSave} disabled={saving}>
-          {saving ? '保存中...' : '保存配置'}
+          {saving ? t('common.saving') : t('config.save')}
         </Button>
       </div>
     </div>
