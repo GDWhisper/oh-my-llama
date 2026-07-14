@@ -1,5 +1,6 @@
 import type { ServerConfig } from '../types';
 import type { AdvancedKey } from './advanced';
+import type { Translator } from '../i18n/messages';
 
 // 解析「一键传参」文本框里用户粘贴的 llama-server 命令行，产出可直接套用到
 // 配置的补丁（已知 flag 映射到高级参数）+ 自定义参数（未知 flag 原样进入启动命令）。
@@ -171,7 +172,8 @@ const toFloat = (v: string | null): number | null => {
 
 // 把解析出的参数整理成「套用计划」：已知 flag 落入对应字段并启用高级键；
 // 未知 / 位置参数原样进 extra_args；rows 供确认前的预览。
-export function buildPlan(args: ParsedArg[]): ApplyPlan {
+// 预览行文案走 i18n：调用方传入 t（翻译函数），本函数只负责组织数据与拼装 key。
+export function buildPlan(args: ParsedArg[], t: Translator): ApplyPlan {
   const patch: Partial<ServerConfig> = {};
   const enableSet = new Set<AdvancedKey>();
   const extraArgs: string[] = [];
@@ -181,7 +183,7 @@ export function buildPlan(args: ParsedArg[]): ApplyPlan {
     if (arg.kind === 'exe') {
       if (arg.value) {
         patch.llama_server_path = arg.value;
-        rows.push({ text: `启动器路径 → ${arg.value}`, custom: false });
+        rows.push({ text: t('preview.serverPath', { value: arg.value }), custom: false });
       }
       continue;
     }
@@ -191,7 +193,7 @@ export function buildPlan(args: ParsedArg[]): ApplyPlan {
         patch.model = arg.value;
         const idx = Math.max(arg.value.lastIndexOf('/'), arg.value.lastIndexOf('\\'));
         patch.model_dir = idx > 0 ? arg.value.slice(0, idx) : '';
-        rows.push({ text: `模型路径 → ${arg.value}`, custom: false });
+        rows.push({ text: t('preview.model', { value: arg.value }), custom: false });
       }
       continue;
     }
@@ -202,16 +204,19 @@ export function buildPlan(args: ParsedArg[]): ApplyPlan {
         case 'host':
           if (arg.value) {
             patch.host = arg.value;
-            rows.push({ text: `监听地址 → ${arg.value}`, custom: false });
+            rows.push({ text: t('preview.host', { value: arg.value }), custom: false });
           }
           break;
         case 'port': {
           const n = toInt(arg.value);
           if (n != null) {
             patch.port = n;
-            rows.push({ text: `监听端口 → ${n}`, custom: false });
+            rows.push({ text: t('preview.port', { value: n }), custom: false });
           } else {
-            rows.push({ text: `监听端口：数值无效，已忽略（${arg.value}）`, custom: false });
+            rows.push({
+              text: t('preview.portInvalid', { value: arg.value ?? '' }),
+              custom: false,
+            });
           }
           break;
         }
@@ -220,9 +225,9 @@ export function buildPlan(args: ParsedArg[]): ApplyPlan {
           if (n != null) {
             patch.ctx_size = n;
             enableSet.add('ctx_size');
-            rows.push({ text: `上下文长度 → ${n}`, custom: false });
+            rows.push({ text: t('preview.ctx', { value: n }), custom: false });
           } else {
-            rows.push({ text: `上下文长度：数值无效，已忽略（${arg.value}）`, custom: false });
+            rows.push({ text: t('preview.ctxInvalid', { value: arg.value ?? '' }), custom: false });
           }
           break;
         }
@@ -232,9 +237,15 @@ export function buildPlan(args: ParsedArg[]): ApplyPlan {
           if (n != null) {
             patch.n_predict = n;
             enableSet.add('n_predict');
-            rows.push({ text: `最大生成数 → ${n === -1 ? 'unlimited' : n}`, custom: false });
+            rows.push({
+              text: t('preview.predict', { value: n === -1 ? 'unlimited' : n }),
+              custom: false,
+            });
           } else {
-            rows.push({ text: `最大生成数：数值无效，已忽略（${arg.value}）`, custom: false });
+            rows.push({
+              text: t('preview.predictInvalid', { value: arg.value ?? '' }),
+              custom: false,
+            });
           }
           break;
         }
@@ -243,9 +254,9 @@ export function buildPlan(args: ParsedArg[]): ApplyPlan {
           if (n != null) {
             patch.n_gpu_layers = n;
             enableSet.add('n_gpu_layers');
-            rows.push({ text: `GPU 层数 → ${n}`, custom: false });
+            rows.push({ text: t('preview.gpu', { value: n }), custom: false });
           } else {
-            rows.push({ text: `GPU 层数：数值无效，已忽略（${arg.value}）`, custom: false });
+            rows.push({ text: t('preview.gpuInvalid', { value: arg.value ?? '' }), custom: false });
           }
           break;
         }
@@ -254,9 +265,12 @@ export function buildPlan(args: ParsedArg[]): ApplyPlan {
           if (n != null) {
             patch.threads = n;
             enableSet.add('threads');
-            rows.push({ text: `CPU 线程数 → ${n}`, custom: false });
+            rows.push({ text: t('preview.threads', { value: n }), custom: false });
           } else {
-            rows.push({ text: `CPU 线程数：数值无效，已忽略（${arg.value}）`, custom: false });
+            rows.push({
+              text: t('preview.threadsInvalid', { value: arg.value ?? '' }),
+              custom: false,
+            });
           }
           break;
         }
@@ -265,9 +279,12 @@ export function buildPlan(args: ParsedArg[]): ApplyPlan {
           if (n != null) {
             patch.batch_size = n;
             enableSet.add('batch_size');
-            rows.push({ text: `批处理大小 → ${n}`, custom: false });
+            rows.push({ text: t('preview.batch', { value: n }), custom: false });
           } else {
-            rows.push({ text: `批处理大小：数值无效，已忽略（${arg.value}）`, custom: false });
+            rows.push({
+              text: t('preview.batchInvalid', { value: arg.value ?? '' }),
+              custom: false,
+            });
           }
           break;
         }
@@ -276,9 +293,12 @@ export function buildPlan(args: ParsedArg[]): ApplyPlan {
           if (n != null) {
             patch.temp = n;
             enableSet.add('temp');
-            rows.push({ text: `温度 → ${n}`, custom: false });
+            rows.push({ text: t('preview.temp', { value: n }), custom: false });
           } else {
-            rows.push({ text: `温度：数值无效，已忽略（${arg.value}）`, custom: false });
+            rows.push({
+              text: t('preview.tempInvalid', { value: arg.value ?? '' }),
+              custom: false,
+            });
           }
           break;
         }
@@ -287,7 +307,7 @@ export function buildPlan(args: ParsedArg[]): ApplyPlan {
           const norm = v === 'on' ? 'on' : v === 'off' ? 'off' : 'auto';
           patch.flash_attn = norm;
           enableSet.add('flash_attn');
-          rows.push({ text: `Flash Attention → ${norm}`, custom: false });
+          rows.push({ text: t('preview.flash', { value: norm }), custom: false });
           break;
         }
       }
@@ -296,14 +316,15 @@ export function buildPlan(args: ParsedArg[]): ApplyPlan {
 
     if (arg.kind === 'bool') {
       const field = arg.field as keyof ServerConfig;
+      const state = arg.boolValue ? t('preview.on') : t('preview.off');
       if (field === 'mmap') {
         patch.mmap = !!arg.boolValue;
         enableSet.add('mmap');
-        rows.push({ text: `mmap → ${arg.boolValue ? '开' : '关'}`, custom: false });
+        rows.push({ text: t('preview.mmap', { value: state }), custom: false });
       } else if (field === 'mlock') {
         patch.mlock = !!arg.boolValue;
         enableSet.add('mlock');
-        rows.push({ text: `mlock → ${arg.boolValue ? '开' : '关'}`, custom: false });
+        rows.push({ text: t('preview.mlock', { value: state }), custom: false });
       }
       continue;
     }
@@ -313,13 +334,15 @@ export function buildPlan(args: ParsedArg[]): ApplyPlan {
       extraArgs.push(arg.flag);
       extraArgs.push(arg.value ?? '');
       rows.push({
-        text: `自定义参数 → ${arg.value != null ? `${arg.flag} ${arg.value}` : arg.flag}`,
+        text: t('preview.custom', {
+          value: arg.value != null ? `${arg.flag} ${arg.value}` : arg.flag,
+        }),
         custom: true,
       });
     } else if (arg.kind === 'positional' && arg.value) {
       extraArgs.push(arg.value);
       extraArgs.push('');
-      rows.push({ text: `位置参数 → ${arg.value}`, custom: true });
+      rows.push({ text: t('preview.positional', { value: arg.value }), custom: true });
     }
   }
 

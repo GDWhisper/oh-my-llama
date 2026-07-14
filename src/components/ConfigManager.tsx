@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import type { ServerConfig } from '../types';
+import { useI18n } from '../i18n';
 import { Button } from './Button';
 import { NameDialog } from './NameDialog';
 import { ConfirmDialog } from './ConfirmDialog';
@@ -46,6 +47,7 @@ export function ConfigManager({
   onNameConfirm,
   onNameCancel,
 }: Props) {
+  const { t } = useI18n();
   const names = Object.keys(configs).sort();
   const [open, setOpen] = useState(false);
   // 当前正在请求删除的配置名；非 null 时展示删除确认弹窗。
@@ -65,7 +67,7 @@ export function ConfigManager({
     return () => document.removeEventListener('mousedown', onDown);
   }, [open]);
 
-  const currentLabel = activeName === 'default' ? '默认配置' : activeName;
+  const currentLabel = activeName === 'default' ? t('config.default') : activeName;
 
   const choose = (name: string) => {
     onSelect(name);
@@ -82,10 +84,10 @@ export function ConfigManager({
 
   return (
     <div className="panel config-manager">
-      <h2>配置管理</h2>
+      <h2>{t('config.title')}</h2>
       <div className="fields">
         <div className="field">
-          <label>选择配置</label>
+          <label>{t('config.select')}</label>
           <div className={`select-box${open ? ' open' : ''}`} ref={boxRef}>
             <button
               type="button"
@@ -105,7 +107,7 @@ export function ConfigManager({
                     className={`option-main${activeName === 'default' ? ' selected' : ''}`}
                     onClick={() => choose('default')}
                   >
-                    默认配置
+                    {t('config.default')}
                   </button>
                 </li>
                 {names.map((name) => (
@@ -120,8 +122,8 @@ export function ConfigManager({
                     <button
                       type="button"
                       className="option-rename"
-                      title={`重命名「${name}」`}
-                      aria-label={`重命名配置 ${name}`}
+                      title={t('config.renameTitle', { name })}
+                      aria-label={t('config.renameAria', { name })}
                       onClick={() => onRename(name)}
                     >
                       ✎
@@ -129,8 +131,8 @@ export function ConfigManager({
                     <button
                       type="button"
                       className="option-delete"
-                      title={`删除「${name}」`}
-                      aria-label={`删除配置 ${name}`}
+                      title={t('config.deleteTitle', { name })}
+                      aria-label={t('config.deleteAria', { name })}
                       onClick={() => setDeleteTarget(name)}
                     >
                       ×
@@ -143,19 +145,19 @@ export function ConfigManager({
         </div>
         <div className="config-actions">
           <Button variant="secondary" type="button" onClick={onCreateEmpty}>
-            新增配置
+            {t('config.createNew')}
           </Button>
           <Button variant="secondary" type="button" onClick={onParamPaste}>
-            一键传参
+            {t('config.paramPaste')}
           </Button>
           <Button variant="secondary" type="button" onClick={onShare}>
-            分享参数
+            {t('config.share')}
           </Button>
           <Button variant="secondary" type="button" onClick={onSaveAsNew}>
-            保存为新配置
+            {t('config.saveAsNew')}
           </Button>
           <Button type="button" onClick={onSave} disabled={saving}>
-            {saving ? '保存中...' : '保存配置'}
+            {saving ? t('common.saving') : t('config.save')}
           </Button>
         </div>
       </div>
@@ -169,10 +171,10 @@ export function ConfigManager({
       />
       <ConfirmDialog
         open={deleteTarget !== null}
-        title="删除配置"
-        message={`确认永久删除配置「${deleteTarget ?? ''}」吗？此操作不可撤销，删除后该配置的所有参数都将丢失。`}
-        confirmText="删除"
-        cancelText="取消"
+        title={t('config.deleteDialogTitle')}
+        message={t('config.deleteConfirm', { name: deleteTarget ?? '' })}
+        confirmText={t('common.delete')}
+        cancelText={t('common.cancel')}
         danger
         onConfirm={confirmDelete}
         onCancel={() => setDeleteTarget(null)}

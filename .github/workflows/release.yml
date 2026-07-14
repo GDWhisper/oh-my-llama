@@ -37,6 +37,10 @@ jobs:
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # 更新签名私钥（内容）。公钥已写进 src-tauri/tauri.conf.json 的
+          # plugins.updater.pubkey。私钥仅存于此仓库 Secrets，绝不入库。
+          # 缺失该变量时构建仍成功，但产物无 .sig、不会生成 latest.json，更新不可用。
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
         with:
           tagName: ${{ github.ref_name }}
           releaseName: 'Oh My Llama v__VERSION__'
@@ -45,3 +49,7 @@ jobs:
           releaseDraft: true
           prerelease: false
           args: ${{ matrix.args }}
+          # 更新通道：产出 .sig 签名文件并生成 latest.json（自动上传为 Release 资产），
+          # 与 tauri.conf.json 的 plugins.updater.endpoints 对应。
+          includeUpdaterArtifacts: true
+          updaterJsonPreferNsis: true

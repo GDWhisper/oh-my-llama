@@ -1,5 +1,7 @@
 # Oh My Llama
 
+**中文** | [English](README_En.md)
+
 > 让 `llama-server` 的启动与参数管理变得简单。
 
 Oh My Llama 是一款桌面工具，用于集中管理 `llama-server` 的启动配置、参数和日志。支持多配置切换、一键解析命令行、一键分享参数，以及实时进程控制，帮助你告别手拼命令行的痛苦。

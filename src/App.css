@@ -55,6 +55,32 @@ body {
   gap: 12px;
 }
 
+.header-title {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.gear-btn {
+  flex: 0 0 auto;
+  width: 32px;
+  height: 32px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 1px solid #d1d5db;
+  border-radius: 8px;
+  background: #ffffff;
+  color: #374151;
+  cursor: pointer;
+}
+
+.gear-btn:hover {
+  background: #f3f4f6;
+  color: #111827;
+}
+
 /* 服务控制合并进标题卡片：左侧信息（当前模型 + 预览地址），右侧操作按钮 */
 .header-controls {
   display: flex;
@@ -534,9 +560,179 @@ body {
 }
 
 .modal-body {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
   font-size: 13px;
   line-height: 1.5;
   color: #374151;
+}
+
+.modal-close {
+  flex: 0 0 auto;
+  width: 26px;
+  height: 26px;
+  margin-left: auto;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: #6b7280;
+  cursor: pointer;
+}
+
+.modal-close:hover {
+  background: #f3f4f6;
+  color: #111827;
+}
+
+.modal-title {
+  display: flex;
+  align-items: center;
+  font-size: 15px;
+  font-weight: 600;
+  color: #111827;
+}
+
+.settings-section {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.settings-section-head {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.settings-label {
+  font-size: 13px;
+  font-weight: 500;
+  color: #111827;
+}
+
+.settings-hint {
+  font-size: 12px;
+  color: #6b7280;
+}
+
+.lang-list {
+  display: flex;
+  flex-direction: row;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.lang-list-item {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  width: auto;
+  /* 按字体大小自适应内边距与高度，避免固定大尺寸 */
+  padding: 0.55em 1.1em;
+  border: 1px solid #d1d5db;
+  border-radius: 8px;
+  background: #ffffff;
+  font-size: 13px;
+  line-height: 1.2;
+  color: #374151;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.lang-list-item.active {
+  border-color: #2563eb;
+  color: #111827;
+  font-weight: 500;
+  background: #eff6ff;
+}
+
+.lang-list-item svg {
+  color: #2563eb;
+  width: 1em;
+  height: 1em;
+  flex-shrink: 0;
+}
+
+/* 关于分组（设置浮窗内） */
+.about-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+.about-value {
+  font-weight: 600;
+  color: #111827;
+}
+.about-actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+/* 更新浮窗 */
+.update-versions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 4px 0 12px;
+}
+.update-ver {
+  font-weight: 600;
+  font-size: 15px;
+}
+.update-ver.old {
+  color: #6b7280;
+}
+.update-ver.new {
+  color: #2563eb;
+}
+.update-arrow {
+  color: #9ca3af;
+}
+.update-notes {
+  max-height: 220px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  background: #f8fafc;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  padding: 10px 12px;
+  margin: 0 0 16px;
+  font-size: 12.5px;
+  line-height: 1.6;
+  color: #374151;
+}
+.update-ready-text {
+  margin: 4px 0 16px;
+  color: #374151;
+}
+
+/* 下载进度条（可见、可感知） */
+.progress {
+  height: 8px;
+  border-radius: 999px;
+  background: #e5e7eb;
+  overflow: hidden;
+  margin: 12px 0 6px;
+}
+.progress-bar {
+  height: 100%;
+  background: #2563eb;
+  border-radius: 999px;
+  transition: width 0.2s ease;
+}
+.progress-label {
+  font-size: 12px;
+  color: #6b7280;
+  margin-bottom: 14px;
 }
 
 .modal-actions {

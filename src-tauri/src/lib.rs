@@ -118,6 +118,7 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(tauri::async_runtime::Mutex::new(ServerStatus::default()))
         .manage(std::sync::Mutex::new(Vec::<ServerLogLine>::new()))
         .invoke_handler(tauri::generate_handler![
@@ -862,6 +863,8 @@ fn parse_config_value(text: &str) -> Result<ServerConfig, String> {
     Ok(config)
 }
 
+// 仅测试使用（tests 模块内断言序列化往返），标 cfg(test) 避免 lib 目标编译出死代码。
+#[cfg(test)]
 fn serialize_config_value(config: &ServerConfig) -> Result<String, String> {
     let mut text = toml::to_string(config).map_err(|err| format!("序列化配置失败: {err}"))?;
     if !text.ends_with('\n') {
@@ -1236,7 +1239,12 @@ enabled_advanced_params = ["ctx_size"]
             mmap: true,
             mlock: false,
             enabled_advanced_params: vec!["ctx_size".into()],
-            extra_args: vec!["--main-gpu".into(), "0".into(), "--alias".into(), "demo".into()],
+            extra_args: vec![
+                "--main-gpu".into(),
+                "0".into(),
+                "--alias".into(),
+                "demo".into(),
+            ],
         };
         let joined = build_server_args(&config).join(" ");
         // 未知/自定义参数被原样追加到启动命令，确保与用户传入一致
@@ -1264,13 +1272,15 @@ enabled_advanced_params = ["ctx_size"]
                     ServerConfig {
                         port: 9999,
                         n_gpu_layers: 20,
-                        enabled_advanced_params: vec![String::from("ctx_size"), String::from("n_gpu_layers")],
+                        enabled_advanced_params: vec![
+                            String::from("ctx_size"),
+                            String::from("n_gpu_layers"),
+                        ],
                         ..ServerConfig::default()
                     },
                 );
                 m
             },
-            ..ConfigStore::default()
         };
         save_store(&path, &store).expect("save");
 
@@ -1308,7 +1318,6 @@ enabled_advanced_params = ["ctx_size"]
                 m.insert("real".into(), ServerConfig::default());
                 m
             },
-            ..ConfigStore::default()
         };
         save_store(&path, &store).expect("save");
 
@@ -1330,7 +1339,6 @@ enabled_advanced_params = ["ctx_size"]
                 m.insert("b".into(), ServerConfig::default());
                 m
             },
-            ..ConfigStore::default()
         };
         // 改名并同步 active
         assert!(rename_named_config_in_store(&mut store, "a", "renamed").is_ok());

@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import type { ServerLogLine } from '../types';
+import { useI18n } from '../i18n';
 import { Button } from './Button';
 
 type LogMode = 'brief' | 'raw';
@@ -32,6 +33,7 @@ const findScroller = (term: HTMLElement | null): HTMLElement | null => {
 };
 
 export function LogPanel({ logs, commandLine, onClear }: Props) {
+  const { t } = useI18n();
   const [mode, setMode] = useState<LogMode>('raw');
 
   const termRef = useRef<HTMLDivElement>(null);
@@ -94,26 +96,26 @@ export function LogPanel({ logs, commandLine, onClear }: Props) {
   return (
     <div className="panel">
       <div className="section-header">
-        <h2>日志</h2>
+        <h2>{t('log.title')}</h2>
         <div className="log-toolbar">
-          <div className="seg" role="tablist" aria-label="日志模式">
+          <div className="seg" role="tablist" aria-label={t('log.modeAria')}>
             <button
               type="button"
               className={mode === 'brief' ? 'seg-btn active' : 'seg-btn'}
               onClick={() => setMode('brief')}
             >
-              简要
+              {t('log.brief')}
             </button>
             <button
               type="button"
               className={mode === 'raw' ? 'seg-btn active' : 'seg-btn'}
               onClick={() => setMode('raw')}
             >
-              原生
+              {t('log.raw')}
             </button>
           </div>
           <Button variant="secondary" onClick={onClear}>
-            清空日志
+            {t('log.clear')}
           </Button>
         </div>
       </div>
@@ -126,7 +128,7 @@ export function LogPanel({ logs, commandLine, onClear }: Props) {
           </div>
         )}
         {visible.length === 0 && (mode !== 'raw' || !commandLine) && (
-          <div className="terminal-empty">暂无日志输出…</div>
+          <div className="terminal-empty">{t('log.empty')}</div>
         )}
         {visible.map((line, index) => (
           <div className={`term-line ${line.level}`} key={`${line.ts}-${index}`}>
@@ -143,7 +145,7 @@ export function LogPanel({ logs, commandLine, onClear }: Props) {
         ))}
         {showJump && (
           <button type="button" className="term-jump" onClick={jumpToBottom}>
-            ↓ 回到底部
+            {t('log.backToBottom')}
           </button>
         )}
       </div>

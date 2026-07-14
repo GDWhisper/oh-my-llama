@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
 import type { ServerConfig } from '../types';
-import { ADVANCED_LABELS, type AdvancedKey, type AdvancedOption } from '../lib/advanced';
+import { ADVANCED_LABEL_KEYS, type AdvancedKey, type AdvancedOption } from '../lib/advanced';
 import { groupExtraArgs } from '../lib/parseArgs';
+import { useI18n } from '../i18n';
 import { Button } from './Button';
 import { ConfirmDialog } from './ConfirmDialog';
 
@@ -17,6 +18,7 @@ function ExtraArgRow({
   onCommit: (value: string) => void;
   onRemove: () => void;
 }) {
+  const { t } = useI18n();
   const [draft, setDraft] = useState(text);
   useEffect(() => {
     setDraft(text);
@@ -24,16 +26,16 @@ function ExtraArgRow({
   return (
     <div className="field extra-args">
       <div className="field-header">
-        <label>自定义参数</label>
+        <label>{t('advanced.customParam')}</label>
         <Button variant="danger" type="button" onClick={onRemove}>
-          删除
+          {t('common.delete')}
         </Button>
       </div>
       <input
         className="extra-value-input"
         value={draft}
         spellCheck={false}
-        placeholder="例如 --foo bar"
+        placeholder={t('advanced.customPlaceholder')}
         onChange={(event) => setDraft(event.currentTarget.value)}
         onBlur={() => {
           if (draft !== text) {
@@ -85,20 +87,21 @@ export function AdvancedParamsPanel(props: Props) {
     onSave,
     onChange,
   } = props;
+  const { t } = useI18n();
   // 清空高级参数需二次确认：点击「清空参数」弹出确认弹窗，确认后才执行。
   const [showClearDialog, setShowClearDialog] = useState(false);
 
   return (
     <div className="panel">
       <div className="section-header">
-        <h2>高级参数</h2>
+        <h2>{t('advanced.title')}</h2>
         <div className="actions">
           <Button
             variant={adjustingAdvanced ? 'secondary-active' : 'secondary'}
             type="button"
             onClick={onToggleAdjust}
           >
-            {adjustingAdvanced ? '完成调整' : '调整参数'}
+            {adjustingAdvanced ? t('advanced.doneAdjust') : t('advanced.adjust')}
           </Button>
         </div>
       </div>
@@ -111,7 +114,7 @@ export function AdvancedParamsPanel(props: Props) {
               type="button"
               onClick={() => onAddKey(option.key)}
             >
-              {option.label}
+              {t(ADVANCED_LABEL_KEYS[option.key])}
             </button>
           ))}
         </div>
@@ -121,10 +124,10 @@ export function AdvancedParamsPanel(props: Props) {
         return (
           <div className="field" key={key}>
             <div className="field-header">
-              <label>{ADVANCED_LABELS[key]}</label>
+              <label>{t(ADVANCED_LABEL_KEYS[key])}</label>
               {removable && (
                 <Button variant="danger" type="button" onClick={() => onRemoveKey(key)}>
-                  删除
+                  {t('common.delete')}
                 </Button>
               )}
             </div>
@@ -152,7 +155,7 @@ export function AdvancedParamsPanel(props: Props) {
                     }
                   }}
                 />
-                <div className="field-hint">输入 unlimited 表示不限制生成长度</div>
+                <div className="field-hint">{t('advanced.predictHint')}</div>
               </>
             )}
             {key === 'n_gpu_layers' && (
@@ -168,10 +171,10 @@ export function AdvancedParamsPanel(props: Props) {
                   <option value="16">16</option>
                   <option value="32">32</option>
                   <option value="99">99</option>
-                  <option value="999">全部</option>
+                  <option value="999">{t('advanced.gpuAll')}</option>
                 </select>
                 <div className="field-hint">
-                  当前自动映射 Flash Attention 为 {advancedFlashAttn}
+                  {t('advanced.flashHint', { value: advancedFlashAttn })}
                 </div>
               </>
             )}
@@ -190,7 +193,7 @@ export function AdvancedParamsPanel(props: Props) {
                     }
                   }}
                 />
-                <div className="field-hint">留空或输入 auto 时由 llama-server 自动选择</div>
+                <div className="field-hint">{t('advanced.threadsHint')}</div>
               </>
             )}
             {key === 'batch_size' && (
@@ -208,7 +211,7 @@ export function AdvancedParamsPanel(props: Props) {
                     }
                   }}
                 />
-                <div className="field-hint">留空或输入 auto 时使用默认批处理大小</div>
+                <div className="field-hint">{t('advanced.batchHint')}</div>
               </>
             )}
             {key === 'temp' && (
@@ -262,23 +265,21 @@ export function AdvancedParamsPanel(props: Props) {
           onRemove={() => onRemoveExtraArg(group.start)}
         />
       ))}
-      <div className="empty">
-        高级参数按需添加；未加入的参数不会写入配置，启动时由 llama-server 自动决定。
-      </div>
+      <div className="empty">{t('advanced.empty')}</div>
       <div className="panel-actions">
         <Button variant="danger" type="button" onClick={() => setShowClearDialog(true)}>
-          清空参数
+          {t('advanced.clear')}
         </Button>
         <Button onClick={onSave} disabled={saving}>
-          {saving ? '保存中...' : '保存配置'}
+          {saving ? t('common.saving') : t('config.save')}
         </Button>
       </div>
       <ConfirmDialog
         open={showClearDialog}
-        title="清空所有高级参数"
+        title={t('advanced.clearTitle')}
         danger
-        confirmText="确认清空"
-        message="将移除全部已启用的高级参数，并把各高级值复位为默认值。此操作需点「保存配置」才会生效。"
+        confirmText={t('advanced.clearConfirm')}
+        message={t('advanced.clearMessage')}
         onConfirm={() => {
           onClearAdvanced();
           setShowClearDialog(false);

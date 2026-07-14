@@ -8,6 +8,7 @@ import {
   isUnlimitedPredict,
   type AdvancedKey,
 } from '../lib/advanced';
+import { useI18n } from '../i18n';
 
 function useInterval(callback: () => void, delay: number | null) {
   useEffect(() => {
@@ -31,6 +32,7 @@ const EMPTY_ADVANCED_ENABLED = (): Record<AdvancedKey, boolean> =>
   );
 
 export function useServer() {
+  const { t } = useI18n();
   // 初始为 null：挂载后由后端默认值填充，加载完成前由 App 渲染加载占位。
   const [config, setConfig] = useState<ServerConfig | null>(null);
   const [status, setStatus] = useState<ServerStatus | null>(null);
@@ -115,7 +117,7 @@ export function useServer() {
       setConfig({ ...def, ...base });
       applyEnabled(base);
     } catch (err) {
-      setError('读取配置失败');
+      setError(t('err.loadConfig'));
       console.error(err);
     }
   };
@@ -312,9 +314,9 @@ export function useServer() {
       await invoke('save_named_config', { name: activeName, config });
       configsRef.current = { ...configsRef.current, [activeName]: config };
       setConfigs(configsRef.current);
-      showToast('保存成功');
+      showToast(t('toast.saveSuccess'));
     } catch (err) {
-      setError('保存配置失败');
+      setError(t('err.saveConfig'));
       console.error(err);
     } finally {
       setSaving(false);
@@ -357,7 +359,7 @@ export function useServer() {
   const autoConfigName = () => {
     const d = new Date();
     const p = (n: number) => String(n).padStart(2, '0');
-    return `配置 ${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
+    return `${t('config.autoNamePrefix')} ${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
   };
 
   // 命名弹窗确认：把 base 配置以给定名存为命名配置并切换过去。
@@ -396,7 +398,7 @@ export function useServer() {
       } catch (err) {
         // 透出真实错误（如「命令不存在」说明后端未重编，或「配置名已存在」等），便于定位。
         const message = err instanceof Error ? err.message : String(err);
-        setError(`重命名失败：${message}`);
+        setError(t('err.rename', { message }));
         console.error(err);
       } finally {
         setSaving(false);
@@ -418,9 +420,9 @@ export function useServer() {
       await invoke('set_active', { name });
       setConfig({ ...def, ...base });
       applyEnabled(base);
-      showToast('保存成功');
+      showToast(t('toast.saveSuccess'));
     } catch (err) {
-      setError('保存配置失败');
+      setError(t('err.saveConfig'));
       console.error(err);
     } finally {
       setSaving(false);
@@ -447,7 +449,7 @@ export function useServer() {
         }
       }
     } catch (err) {
-      setError('删除配置失败');
+      setError(t('err.deleteConfig'));
       console.error(err);
     }
   };
@@ -462,7 +464,7 @@ export function useServer() {
       await invoke('start_server', { config });
       await loadStatus();
     } catch (err) {
-      const message = err instanceof Error ? err.message : '启动失败';
+      const message = err instanceof Error ? err.message : t('err.startFallback');
       setError(message);
       console.error(err);
     } finally {
@@ -477,7 +479,7 @@ export function useServer() {
       await invoke('stop_server');
       await loadStatus();
     } catch (err) {
-      setError('停止失败');
+      setError(t('err.stop'));
       console.error(err);
     } finally {
       setStopping(false);
@@ -491,7 +493,7 @@ export function useServer() {
     try {
       await invoke('open_preview');
     } catch (err) {
-      setError('打开预览失败');
+      setError(t('err.openPreview'));
       console.error(err);
     }
   };
