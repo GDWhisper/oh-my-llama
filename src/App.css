@@ -560,6 +560,9 @@ body {
 }
 
 .modal-body {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
   font-size: 13px;
   line-height: 1.5;
   color: #374151;
@@ -619,22 +622,27 @@ body {
 
 .lang-list {
   display: flex;
-  flex-direction: column;
+  flex-direction: row;
+  flex-wrap: wrap;
   gap: 8px;
 }
 
 .lang-list-item {
-  display: flex;
+  display: inline-flex;
   align-items: center;
-  justify-content: space-between;
-  width: 100%;
-  padding: 10px 12px;
+  justify-content: center;
+  gap: 6px;
+  width: auto;
+  /* 按字体大小自适应内边距与高度，避免固定大尺寸 */
+  padding: 0.55em 1.1em;
   border: 1px solid #d1d5db;
   border-radius: 8px;
   background: #ffffff;
   font-size: 13px;
+  line-height: 1.2;
   color: #374151;
   cursor: pointer;
+  white-space: nowrap;
 }
 
 .lang-list-item.active {
@@ -646,6 +654,85 @@ body {
 
 .lang-list-item svg {
   color: #2563eb;
+  width: 1em;
+  height: 1em;
+  flex-shrink: 0;
+}
+
+/* 关于分组（设置浮窗内） */
+.about-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+.about-value {
+  font-weight: 600;
+  color: #111827;
+}
+.about-actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+/* 更新浮窗 */
+.update-versions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 4px 0 12px;
+}
+.update-ver {
+  font-weight: 600;
+  font-size: 15px;
+}
+.update-ver.old {
+  color: #6b7280;
+}
+.update-ver.new {
+  color: #2563eb;
+}
+.update-arrow {
+  color: #9ca3af;
+}
+.update-notes {
+  max-height: 220px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  background: #f8fafc;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  padding: 10px 12px;
+  margin: 0 0 16px;
+  font-size: 12.5px;
+  line-height: 1.6;
+  color: #374151;
+}
+.update-ready-text {
+  margin: 4px 0 16px;
+  color: #374151;
+}
+
+/* 下载进度条（可见、可感知） */
+.progress {
+  height: 8px;
+  border-radius: 999px;
+  background: #e5e7eb;
+  overflow: hidden;
+  margin: 12px 0 6px;
+}
+.progress-bar {
+  height: 100%;
+  background: #2563eb;
+  border-radius: 999px;
+  transition: width 0.2s ease;
+}
+.progress-label {
+  font-size: 12px;
+  color: #6b7280;
+  margin-bottom: 14px;
 }
 
 .modal-actions {

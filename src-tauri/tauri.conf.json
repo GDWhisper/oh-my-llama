@@ -33,5 +33,16 @@
     "devUrl": "http://localhost:6060",
     "beforeBuildCommand": "npm run build",
     "frontendDist": "../dist"
+  },
+  "plugins": {
+    "updater": {
+      "endpoints": [
+        "https://github.com/GDWhisper/oh-my-llama/releases/latest/download/latest.json"
+      ],
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpY2tleTogM0Q4QzM5RkFCQjgwMzE1Q0YKUldUUEZRTzQraldjUHhVcE1KU3lZc2cwOUdCbkovS2FNcStZemJ3VHA3UzZzNU01cS8wc0FhMXoK",
+      "windows": {
+        "installMode": "passive"
+      }
+    }
   }
 }

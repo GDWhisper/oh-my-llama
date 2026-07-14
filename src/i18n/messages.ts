@@ -181,6 +181,28 @@ export const zh = {
   'settings.language': '语言',
   'settings.languageHint': '切换后立即生效，并记住你的选择。',
   'settings.close': '关闭设置',
+
+  // 更新（方案 A：手动检查、可见可取消）
+  'update.check': '检查更新',
+  'update.checking': '正在检查更新…',
+  'update.title': '发现新版本',
+  'update.current': '当前版本',
+  'update.latest': '最新版本',
+  'update.notes': '更新说明',
+  'update.download': '下载并安装',
+  'update.downloading': '正在下载…',
+  'update.later': '稍后',
+  'update.ready': '下载完成，重启以安装',
+  'update.installNow': '重启安装',
+  'update.noUpdate': '已是最新版本',
+  'update.error': '更新检查失败',
+  'update.errorBody': '无法连接更新服务器，请稍后重试。',
+  'update.retry': '重试',
+
+  // 关于
+  'about.title': '关于',
+  'about.version': '版本',
+  'about.repo': '项目仓库',
 } as const;
 
 export type MessageKey = keyof typeof zh;
@@ -353,4 +375,26 @@ export const en: Record<MessageKey, string> = {
   'settings.language': 'Language',
   'settings.languageHint': 'Changes apply immediately and your choice is remembered.',
   'settings.close': 'Close Settings',
+
+  // 更新（方案 A：手动检查、可见可取消）
+  'update.check': 'Check for updates',
+  'update.checking': 'Checking for updates…',
+  'update.title': 'Update available',
+  'update.current': 'Current',
+  'update.latest': 'Latest',
+  'update.notes': 'Release notes',
+  'update.download': 'Download & install',
+  'update.downloading': 'Downloading…',
+  'update.later': 'Later',
+  'update.ready': 'Download complete. Restart to install',
+  'update.installNow': 'Restart to install',
+  'update.noUpdate': 'You are on the latest version',
+  'update.error': 'Update check failed',
+  'update.errorBody': 'Could not reach the update server. Try again later.',
+  'update.retry': 'Retry',
+
+  // 关于
+  'about.title': 'About',
+  'about.version': 'Version',
+  'about.repo': 'Repository',
 };

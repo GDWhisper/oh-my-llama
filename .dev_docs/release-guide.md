@@ -73,3 +73,35 @@
 - [ ] `CHANGELOG.md` 已更新（详细、三类分段）
 - [ ] Release Note 已用 `--notes-file` 写入（三段式、无下载栏目、底部「详细改动参考 CHANGELOG」），并 `--draft=false --latest`
 - [ ] 资产（`setup.exe` + `.msi`）已生成
+- [ ] 本地已生成签名私钥 `~/.tauri/oh-my-llama.key`（公钥已写入 `src-tauri/tauri.conf.json` 的 `plugins.updater.pubkey`）
+- [ ] GitHub 仓库 **Secrets** 已配置 `TAURI_SIGNING_PRIVATE_KEY`（内容为私钥文件全文）；缺失时构建仍成功，但产物无 `.sig`、不生成 `latest.json`，更新通道不可用
+
+---
+
+## 六、更新机制（方案 A：tauri-plugin-updater）
+
+> 更新通道采用 Tauri v2 官方 `tauri-plugin-updater`：**手动触发**（设置浮窗「关于」里的「检查更新」按钮），**不**做启动自动检查、也**不**提供「是否检查更新」开关（早期需求/bug 较多，用户明确要求先不做开关）。下载**可见、可取消**（进度条 + 取消按钮，取消经 `Update.close()` best-effort 中断），安装**必须显式确认**（下载完成弹「重启以安装」），绝不后台静默安装。
+
+### 密钥与签名（一次性）
+- 生成本地私钥（**不入库**，仅存开发者机器）：`npx tauri signer generate --write-keys ~/.tauri/oh-my-llama.key --ci`（无密码；有密码则需同时配 `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`）。
+- 公钥（`.key.pub` 内容）已写入 `src-tauri/tauri.conf.json` 的 `plugins.updater.pubkey`。**改公钥必须同步重新签名**，否则旧签名校验失败、更新无法安装。
+- 私钥全文存入 GitHub 仓库 **Secrets** → `TAURI_SIGNING_PRIVATE_KEY`。`release.yml` 已通过环境变量把它注入 `tauri-action`，由其自动对安装包签名。
+- **私钥丢失 = 无法再签发更新**（用户将收不到后续更新）。务必备份 `~/.tauri/oh-my-llama.key`。
+
+### CI 产物（release.yml 已配）
+- `includeUpdaterArtifacts: true`：构建后自动用上述私钥对安装包签名生成 `.sig`，并生成 `latest.json`（含版本、平台、签名、下载地址）。
+- `updaterJsonPreferNsis: true`：偏好 NSIS 安装包作为更新载体（与本项目 Windows-only 一致）。
+- `latest.json` 与 `.sig` 作为 Release 资产上传；`tauri.conf.json` 的 `plugins.updater.endpoints` 指向 `https://github.com/GDWhisper/oh-my-llama/releases/latest/download/latest.json`，与上传位置对应。
+
+### 发版时更新通道如何生效
+1. 照常打 `vX.Y.Z` 标签触发 `release.yml`（仅 Windows）构建。
+2. 构建产出 `setup.exe`/`.msi` + 对应 `.sig` + `latest.json`，作为草稿 Release 资产。
+3. `gh release edit --draft=false` 发布后，已装旧版用户在「设置 → 关于 → 检查更新」即可看到新版本并可视化下载安装。
+4. **版本号两处**（`Cargo.toml` + `tauri.conf.json`）必须与 tag 一致，`latest.json` 才指向正确版本。
+
+### 常见坑
+- **未配 `TAURI_SIGNING_PRIVATE_KEY`**：构建不报错，但无 `.sig`、无 `latest.json` → 更新检查永远「已是最新」。先确认 Secret 已填。
+- **公钥与私钥不匹配**（如换过密钥没同步 pubkey）：旧客户端校验签名失败，更新报错。pubkey 必须与签名所用私钥配对。
+- **`latest.json` 下载地址 404**：检查 `endpoints` 与 Release 资产名（`latest.json`）是否一致、Release 是否已发布（草稿态对外不可见）。
+- **手动改 `tauri.conf.json` 的 version 却不打 tag**：`latest.json` 由 CI 按 tag 生成，本地手改无效。
+

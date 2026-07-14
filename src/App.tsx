@@ -11,6 +11,8 @@ import { configToCommand, splitExtraArg, type ApplyPlan } from './lib/parseArgs'
 import { useI18n } from './i18n';
 import type { MessageKey } from './i18n/messages';
 import { SettingsDialog } from './components/SettingsDialog';
+import { UpdateDialog } from './components/UpdateDialog';
+import { useUpdater } from './hooks/useUpdater';
 import type { ServerConfig } from './types';
 import './App.css';
 
@@ -44,6 +46,8 @@ async function copyToClipboard(text: string): Promise<boolean> {
 export default function App() {
   const { t } = useI18n();
   const server = useServer();
+  // 更新（方案 A）：手动检查、下载可见且可取消、安装需显式确认。
+  const updater = useUpdater();
   const {
     config,
     status,
@@ -402,7 +406,20 @@ export default function App() {
 
       {error && <div className="error-banner">{error}</div>}
       {toast && <div className="toast">{toast}</div>}
-      <SettingsDialog open={showSettings} onClose={() => setShowSettings(false)} />
+      <SettingsDialog
+        open={showSettings}
+        onClose={() => setShowSettings(false)}
+        onCheckUpdate={updater.check}
+        checking={updater.status.kind === 'checking'}
+      />
+      <UpdateDialog
+        status={updater.status}
+        onDownload={updater.download}
+        onCancel={updater.cancel}
+        onInstall={updater.install}
+        onDismiss={updater.dismiss}
+        onRetry={updater.check}
+      />
     </main>
   );
 }
