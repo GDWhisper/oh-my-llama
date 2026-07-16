@@ -4,6 +4,17 @@
 
 > 本文件为**详细改动历史**（含涉及的文件与实现机制）；GitHub Release 页面为对应版本的**总结性**说明。
 
+## [0.0.4] - 2026-07-16
+
+### 功能优化
+- **日志面板交互重构**：「回到底部」按钮由滚动容器内的绝对定位改为固定在日志区右下角（新增不滚动的 `.terminal-viewport` 包裹层，相对其定位），始终可见可点；自动跟随改用 `useLayoutEffect` 在绘制前同步置底，消除流式输出下的滚动竞态，阈值由 24px 放宽至 32px；新增 `wheel`（上滚即时解锁）与 `pointerdown/up`（拖拽期间暂停）监听以精确识别用户意图；切模式（简要/原生）后若处锁定态则重新贴底。`LogPanel.tsx` + `App.css`。
+- **「一键传参」面板常驻显示**：移除配置管理卡片的「一键传参」入口按钮（及 `onParamPaste` prop），面板改为始终渲染于配置管理与必要参数卡片之间；移除面板自身的关闭 × 与「取消」按钮，套用后清空输入框避免重复套用；清理 `messages.ts` 的 `config.paramPaste` 键（中/英）与 `App.css` 的 `.param-close` 样式。`App.tsx` / `ConfigManager.tsx` / `ParamPaste.tsx` / `i18n/messages.ts`。
+- **保存配置按钮统一并常驻顶部**：移除「必要参数」「高级参数」两张卡片内的「保存配置」按钮及其 `saving`/`onSave` prop；仅保留配置管理卡片右侧一处。配置管理卡片加 `position:sticky; top:0; z-index:5`，侧栏滚动时（含下拉列表 `z-index:20` 与全屏弹窗 `z-index:1000`）仍钉在顶部，始终可点保存。`BasicParamsPanel.tsx` / `AdvancedParamsPanel.tsx` / `App.tsx` / `App.css`。
+
+### Bug 修复
+- **日志「回到底部」按钮不可点**：原 `.term-jump` 绝对定位在会滚动的 `.terminal` 内部，仅滚到底时落在视口内可见，而上滚查阅历史时正需该按钮却已被滚出视口，形同虚设。已通过新增不滚动包裹层并相对其定位修正。
+- **流式输出下自动跟随被误解除**：原 `useEffect` 异步置底 + 24px 阈值在日志快速追加时，程序化置底触发的 scroll 事件读到尚未一致的 `scrollHeight`/`scrollTop`，误判为用户上滚而中断自动跟随；改用 `useLayoutEffect` 与 32px 阈值消除竞态。
+
 ## [0.0.3] - 2026-07-14
 
 ### 新增功能
@@ -49,6 +60,7 @@
 ### 说明
 - 本版本仅提供 Windows 安装包（`.exe` NSIS / `.msi`），无需预先安装 Node / Rust。
 
+[0.0.4]: https://github.com/GDWhisper/oh-my-llama/releases/tag/v0.0.4
 [0.0.3]: https://github.com/GDWhisper/oh-my-llama/releases/tag/v0.0.3
 [0.0.2]: https://github.com/GDWhisper/oh-my-llama/releases/tag/v0.0.2
 [0.0.1]: https://github.com/GDWhisper/oh-my-llama/releases/tag/v0.0.1

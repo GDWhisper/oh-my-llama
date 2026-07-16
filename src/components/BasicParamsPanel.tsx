@@ -2,14 +2,11 @@ import type { ServerConfig } from '../types';
 import { modelBasename } from '../lib/advanced';
 import { useI18n } from '../i18n';
 import { PathField } from './PathField';
-import { Button } from './Button';
 
 interface Props {
   config: ServerConfig;
   // 检测到的 .gguf 模型文件名列表（不含绝对路径，仅用于下拉框展示）
   models: string[];
-  saving: boolean;
-  onSave: () => void;
   onChange: (config: ServerConfig) => void;
 }
 
@@ -17,7 +14,7 @@ interface Props {
 // 用 / 作分隔符，Windows 与 llama.cpp 均接受。
 const joinModelPath = (dir: string, name: string): string => `${dir.replace(/[\\/]$/, '')}/${name}`;
 
-export function BasicParamsPanel({ config, models, saving, onSave, onChange }: Props) {
+export function BasicParamsPanel({ config, models, onChange }: Props) {
   const { t } = useI18n();
   const serverFilters = [
     { name: t('basic.filterExe'), extensions: ['exe'] },
@@ -90,11 +87,6 @@ export function BasicParamsPanel({ config, models, saving, onSave, onChange }: P
             }
           />
         </div>
-      </div>
-      <div className="panel-actions">
-        <Button onClick={onSave} disabled={saving}>
-          {saving ? t('common.saving') : t('config.save')}
-        </Button>
       </div>
     </div>
   );

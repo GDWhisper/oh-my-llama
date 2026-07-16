@@ -342,14 +342,22 @@ body {
   margin-top: 12px;
 }
 
-/* 配置管理卡片：下拉(左) + 新增配置/一键传参/分享参数(右)，二者同处于 .fields 网格的同一行 */
+/* 配置管理卡片：常驻侧栏顶部，滚动时始终可见（保存按钮随之固定） */
+.config-manager {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+}
+
+/* 配置管理卡片：下拉(左) + 新增配置/分享参数/保存为新配置/保存配置(右)，
+   同处于 .fields 网格的同一行 */
 .config-actions {
   display: flex;
   flex-wrap: wrap;
   gap: 12px;
   /* .fields 是 2 列网格，默认 align-items:stretch 会把本行按钮竖向拉伸到与左侧
      下拉字段同高（标签+触发框≈56px），导致按钮明显偏高。用 align-self:end 让其保持
-     自身高度并底对齐下拉触发框，视觉上与「一键传参」等其它按钮一致。 */
+     自身高度并底对齐下拉触发框，视觉上各按钮一致。 */
   align-self: end;
 }
 
@@ -821,6 +829,15 @@ button:disabled {
   font-weight: 400;
 }
 
+/* 终端视口：不滚动的定位容器，内含滚动的 .terminal 与悬浮的“回到底部”按钮。
+   按钮相对本层定位，才能始终固定在日志区右下角、不随内容滚走。 */
+.terminal-viewport {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
 /* 内嵌终端面板：直接展示所有打印内容 */
 .terminal {
   position: relative;
@@ -1005,20 +1022,6 @@ button:disabled {
   outline-offset: 0;
 }
 
-.param-close {
-  border: none;
-  background: transparent;
-  font-size: 20px;
-  line-height: 1;
-  color: #6b7280;
-  cursor: pointer;
-  padding: 0 4px;
-}
-
-.param-close:hover {
-  color: #111827;
-}
-
 .param-preview {
   border: 1px solid #e5e7eb;
   border-radius: 8px;
@@ -1148,7 +1151,7 @@ button:disabled {
   min-height: 0;
 }
 
-.log-side > .panel:has(.terminal) .terminal {
+.log-side > .panel:has(.terminal) .terminal-viewport {
   flex: 1 1 auto;
   min-height: 0;
 }

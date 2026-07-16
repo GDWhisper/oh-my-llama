@@ -8,12 +8,11 @@ interface Props {
   // 追加：仅把自定义参数接到现有自定义参数之后，已知字段仍套用。
   onOverwrite: (plan: ApplyPlan) => void;
   onAppend: (plan: ApplyPlan) => void;
-  onClose: () => void;
 }
 
 // 「一键传参」面板：粘贴 llama-server 完整命令行，实时解析预览，
 // 确认后把已知 flag 套用到对应高级参数、未知 flag 以自定义参数形式写入启动命令。
-export function ParamPaste({ onOverwrite, onAppend, onClose }: Props) {
+export function ParamPaste({ onOverwrite, onAppend }: Props) {
   const { t } = useI18n();
   const [text, setText] = useState('');
 
@@ -24,14 +23,6 @@ export function ParamPaste({ onOverwrite, onAppend, onClose }: Props) {
     <div className="panel param-paste">
       <div className="section-header">
         <h2>{t('paramPaste.title')}</h2>
-        <button
-          className="param-close"
-          type="button"
-          onClick={onClose}
-          aria-label={t('common.close')}
-        >
-          ×
-        </button>
       </div>
       <p className="param-desc">
         {t('paramPaste.descPre')}
@@ -58,14 +49,16 @@ export function ParamPaste({ onOverwrite, onAppend, onClose }: Props) {
         </div>
       )}
       <div className="panel-actions">
-        <Button variant="secondary" type="button" onClick={onClose}>
-          {t('common.cancel')}
-        </Button>
         <Button
           variant="secondary"
           type="button"
           disabled={!plan || plan.rows.length === 0}
-          onClick={() => plan && onOverwrite(plan)}
+          onClick={() => {
+            if (plan) {
+              onOverwrite(plan);
+              setText('');
+            }
+          }}
         >
           {t('paramPaste.overwrite')}
         </Button>
@@ -73,7 +66,12 @@ export function ParamPaste({ onOverwrite, onAppend, onClose }: Props) {
           variant="secondary"
           type="button"
           disabled={!plan || plan.rows.length === 0}
-          onClick={() => plan && onAppend(plan)}
+          onClick={() => {
+            if (plan) {
+              onAppend(plan);
+              setText('');
+            }
+          }}
         >
           {t('paramPaste.append')}
         </Button>
