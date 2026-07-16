@@ -14,7 +14,6 @@ interface Props {
   renameTarget: string;
   onSelect: (name: string) => void;
   onCreateEmpty: () => void;
-  onParamPaste: () => void;
   onShare: () => void;
   onSaveAsNew: () => void;
   onSave: () => void;
@@ -36,7 +35,6 @@ export function ConfigManager({
   renameTarget,
   onSelect,
   onCreateEmpty,
-  onParamPaste,
   onShare,
   onSaveAsNew,
   onSave,
@@ -146,9 +144,6 @@ export function ConfigManager({
         <div className="config-actions">
           <Button variant="secondary" type="button" onClick={onCreateEmpty}>
             {t('config.createNew')}
-          </Button>
-          <Button variant="secondary" type="button" onClick={onParamPaste}>
-            {t('config.paramPaste')}
           </Button>
           <Button variant="secondary" type="button" onClick={onShare}>
             {t('config.share')}

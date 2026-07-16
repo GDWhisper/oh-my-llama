@@ -62,8 +62,6 @@ interface Props {
   onAddKey: (key: AdvancedKey) => void;
   onRemoveKey: (key: AdvancedKey) => void;
   onClearAdvanced: () => void;
-  saving: boolean;
-  onSave: () => void;
   onChange: (config: ServerConfig) => void;
 }
 
@@ -83,8 +81,6 @@ export function AdvancedParamsPanel(props: Props) {
     onAddKey,
     onRemoveKey,
     onClearAdvanced,
-    saving,
-    onSave,
     onChange,
   } = props;
   const { t } = useI18n();
@@ -269,9 +265,6 @@ export function AdvancedParamsPanel(props: Props) {
       <div className="panel-actions">
         <Button variant="danger" type="button" onClick={() => setShowClearDialog(true)}>
           {t('advanced.clear')}
-        </Button>
-        <Button onClick={onSave} disabled={saving}>
-          {saving ? t('common.saving') : t('config.save')}
         </Button>
       </div>
       <ConfirmDialog

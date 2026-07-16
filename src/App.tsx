@@ -94,8 +94,6 @@ export default function App() {
     setAdvancedEnabled,
   } = server;
 
-  // 「一键传参」窗口开关：在配置管理卡片与必要参数卡片之间展开。
-  const [showParamPaste, setShowParamPaste] = useState(false);
   // 追加参数前的提醒弹窗状态：非 null 时展示，列出将被剔除的必要参数与重复的自定义参数。
   const [appendWarn, setAppendWarn] = useState<{
     plan: ApplyPlan;
@@ -172,7 +170,6 @@ export default function App() {
       });
       return next;
     });
-    setShowParamPaste(false);
   };
 
   // 点击【追加参数】：先收集「必要参数」与「重复自定义参数」两项提醒；
@@ -284,7 +281,6 @@ export default function App() {
             renameTarget={renameTarget}
             onSelect={selectConfig}
             onCreateEmpty={requestCreateEmpty}
-            onParamPaste={() => setShowParamPaste(true)}
             onShare={shareConfig}
             onSaveAsNew={requestSaveAsNew}
             onSave={handleSave}
@@ -295,13 +291,10 @@ export default function App() {
             onNameConfirm={confirmName}
             onNameCancel={cancelName}
           />
-          {showParamPaste && (
-            <ParamPaste
-              onOverwrite={(p) => applyPlan(p, 'overwrite')}
-              onAppend={(p) => handleAppend(p)}
-              onClose={() => setShowParamPaste(false)}
-            />
-          )}
+          <ParamPaste
+            onOverwrite={(p) => applyPlan(p, 'overwrite')}
+            onAppend={(p) => handleAppend(p)}
+          />
           {appendWarn && (
             <div className="modal-overlay" onClick={() => setAppendWarn(null)}>
               <div
@@ -371,13 +364,7 @@ export default function App() {
               </div>
             </div>
           )}
-          <BasicParamsPanel
-            config={config}
-            models={models}
-            saving={saving}
-            onSave={handleSave}
-            onChange={setConfig}
-          />
+          <BasicParamsPanel config={config} models={models} onChange={setConfig} />
           <AdvancedParamsPanel
             config={config}
             adjustingAdvanced={adjustingAdvanced}
@@ -393,8 +380,6 @@ export default function App() {
             onAddKey={addAdvancedKey}
             onRemoveKey={removeAdvancedKey}
             onClearAdvanced={clearAdvanced}
-            saving={saving}
-            onSave={handleSave}
             onChange={setConfig}
           />
         </section>
