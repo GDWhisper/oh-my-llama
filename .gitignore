@@ -36,13 +36,4 @@ dist-ssr
 openspec/
 .dev_docs/changes/
 
-# EXCEPTION: track the codegraph config we author (converted from .claude).
-# Un-ignore ONLY these; the rest of .codebuddy/ (foreign OpenSpec scaffolding:
-# commands/opsx/*, skills/openspec-*) stays ignored per the rule above.
-!.codebuddy/
-!.codebuddy/settings.json
-!.codebuddy/skills/
-!.codebuddy/skills/codegraph/
-# Re-ignore the foreign OpenSpec scaffolding inside .codebuddy/
-.codebuddy/commands/
-.codebuddy/skills/openspec-*/
+# Whole .codebuddy/ is foreign AI-tool scaffolding (not project source) — fully ignored, do not track or push.
