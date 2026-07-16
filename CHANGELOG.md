@@ -4,6 +4,19 @@
 
 > 本文件为**详细改动历史**（含涉及的文件与实现机制）；GitHub Release 页面为对应版本的**总结性**说明。
 
+## [0.0.5] - 2026-07-16
+
+### 新增功能
+- **更新代理设置（显式可选）**：设置浮窗新增「更新代理」输入项，仅当用户主动填写 `http(s)://` 地址时，更新检查才经由该代理；留空则更新直连系统网络（启动时主动 `remove_var` 清掉 `HTTPS_PROXY/HTTP_PROXY` 等，避免被未运行的本地代理坑住）。后端新增 `AppSettings` 结构（与服务器启动配置 `ServerConfig` 解耦）及 `read_settings`/`save_settings` 两个命令，单独持久化到 `APPDATA/OhMyLlama/settings.json`，不污染 `configs.toml`，也不干预用户代理客户端的全局/规则模式；`save_settings` 写入后立即 `apply_update_proxy_env` 生效，无需重启。`src-tauri/src/lib.rs` + `src/types.ts`（`AppSettings` 接口）+ `src/components/SettingsDialog.tsx` + `i18n/messages.ts`（中/英 `settings.updateProxy*`）。
+
+### 功能优化
+- **更新失败报错细化**：`UpdateDialog` 新增 `classifyUpdateError`，将底层 Rust/reqwest 抛出的原始错误归类为代理未连通 / 连接超时 / 404 未发布 / 签名校验失败 / 通用，给出对应中文提示，并以等宽文本 `<pre>` 原样展示底层英文错误供排查；新增 `update.errProxy`/`errTimeout`/`errNotFound`/`errSignature`/`errGeneric`/`errorDetail` 等 i18n 键（中/英）。`src/components/UpdateDialog.tsx` + `i18n/messages.ts`。
+- **布尔参数表现优化**：`mmap`/`mlock` 由「字段内额外占一行的独立 checkbox（名称 `mmap` 文字hardcode）」改为与参数名称**同行**的紧凑复选框（名称在前、复选框紧贴名称），`AdvancedParamsPanel` 通过 `isBool` 分支渲染 `.bool-field`，并移除原 field 内冗余的 `mmap`/`mlock` checkbox 块；`App.css` 新增 `.bool-field`。`src/components/AdvancedParamsPanel.tsx` + `App.css`。
+- **分享参数改为带边框图标**：「分享参数」按钮由文字按钮改为带边框 SVG 图标（仿设置齿轮按钮的 `.icon-btn` 白底灰边方盒样式），置于配置管理卡片标题行右上角；同步提取公共组件 `IconButton`（`label` 同时驱动 `title` 与 `aria-label`，`children` 传 SVG），标题栏齿轮按钮与配置管理分享按钮均改用之。`src/components/IconButton.tsx`（新建）+ `src/components/ConfigManager.tsx` + `src/App.tsx` + `App.css`（`.icon-btn`/`.panel-header`/`.settings-*`)。
+
+### Bug 修复
+- （本版本无专门缺陷修复；更新报错细化与布尔参数排版归为功能优化。）
+
 ## [0.0.4] - 2026-07-16
 
 ### 功能优化

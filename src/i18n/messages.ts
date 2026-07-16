@@ -13,6 +13,7 @@ export const zh = {
   'common.saving': '保存中...',
   'common.browse': '浏览…',
   'common.close': '关闭',
+  'common.save': '保存',
 
   // App 顶层
   'app.loading': '加载配置中…',
@@ -180,6 +181,10 @@ export const zh = {
   'settings.language': '语言',
   'settings.languageHint': '切换后立即生效，并记住你的选择。',
   'settings.close': '关闭设置',
+  'settings.updateProxy': '更新代理',
+  'settings.updateProxyHint':
+    '留空则更新直接走系统网络（不使用任何代理）；填写地址后，更新检查将经由该代理。',
+  'settings.updateProxySaved': '已保存，下次检查更新即生效。',
 
   // 更新（方案 A：手动检查、可见可取消）
   'update.check': '检查更新',
@@ -197,6 +202,13 @@ export const zh = {
   'update.error': '更新检查失败',
   'update.errorBody': '无法连接更新服务器，请稍后重试。',
   'update.retry': '重试',
+  'update.errProxy':
+    '可能是网络代理（HTTPS_PROXY 等）未运行或无法连通，请检查代理/网络设置后重试。',
+  'update.errTimeout': '连接更新服务器超时，可能是网络较慢或被防火墙拦截，请检查网络后重试。',
+  'update.errNotFound': '未找到更新信息（404），可能该版本尚未发布或地址有误。',
+  'update.errSignature': '更新包签名校验失败，可能是公钥不匹配，请联系开发者。',
+  'update.errGeneric': '更新检查失败，请稍后重试或检查网络连接。',
+  'update.errorDetail': '错误详情',
 
   // 关于
   'about.title': '关于',
@@ -217,6 +229,7 @@ export const en: Record<MessageKey, string> = {
   'common.saving': 'Saving...',
   'common.browse': 'Browse…',
   'common.close': 'Close',
+  'common.save': 'Save',
 
   'app.loading': 'Loading configuration…',
   'app.share.copied': 'Launch parameters copied to clipboard',
@@ -373,6 +386,10 @@ export const en: Record<MessageKey, string> = {
   'settings.language': 'Language',
   'settings.languageHint': 'Changes apply immediately and your choice is remembered.',
   'settings.close': 'Close Settings',
+  'settings.updateProxy': 'Update Proxy',
+  'settings.updateProxyHint':
+    'Leave empty to connect directly (no proxy). If set, update checks will go through this proxy address.',
+  'settings.updateProxySaved': 'Saved. Takes effect on the next update check.',
 
   // 更新（方案 A：手动检查、可见可取消）
   'update.check': 'Check for updates',
@@ -390,6 +407,16 @@ export const en: Record<MessageKey, string> = {
   'update.error': 'Update check failed',
   'update.errorBody': 'Could not reach the update server. Try again later.',
   'update.retry': 'Retry',
+  'update.errProxy':
+    'Likely a network proxy (HTTPS_PROXY etc.) is not running or unreachable. Check proxy/network settings and retry.',
+  'update.errTimeout':
+    'Timed out connecting to the update server. Your network may be slow or blocked by a firewall. Check and retry.',
+  'update.errNotFound':
+    'Update info not found (404). The version may not be published yet or the URL is wrong.',
+  'update.errSignature':
+    'Update signature verification failed; the public key may not match. Contact the developer.',
+  'update.errGeneric': 'Update check failed. Retry later or check your network connection.',
+  'update.errorDetail': 'Error detail',
 
   // 关于
   'about.title': 'About',

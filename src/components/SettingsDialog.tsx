@@ -1,9 +1,11 @@
 import { useEffect, useState } from 'react';
 import { getVersion } from '@tauri-apps/api/app';
 import { openUrl } from '@tauri-apps/plugin-opener';
+import { invoke } from '@tauri-apps/api/core';
 import { useI18n } from '../i18n';
 import { LangSwitch } from './LangSwitch';
 import { Button } from './Button';
+import type { AppSettings } from '../types';
 
 interface Props {
   open: boolean;
@@ -20,6 +22,9 @@ const REPO_URL = 'https://github.com/GDWhisper/oh-my-llama';
 export function SettingsDialog({ open, onClose, onCheckUpdate, checking }: Props) {
   const { t } = useI18n();
   const [version, setVersion] = useState('');
+  const [proxy, setProxy] = useState('');
+  const [proxySaved, setProxySaved] = useState(false);
+  const [proxyError, setProxyError] = useState('');
 
   useEffect(() => {
     if (!open) return;
@@ -43,6 +48,30 @@ export function SettingsDialog({ open, onClose, onCheckUpdate, checking }: Props
       alive = false;
     };
   }, [open]);
+
+  // 打开时读取「更新代理」设置。
+  useEffect(() => {
+    if (!open) return;
+    setProxySaved(false);
+    setProxyError('');
+    invoke<AppSettings>('read_settings')
+      .then((s) => setProxy(s.update_proxy ?? ''))
+      .catch(() => setProxy(''));
+  }, [open]);
+
+  const onSaveProxy = async () => {
+    setProxySaved(false);
+    setProxyError('');
+    try {
+      const s = await invoke<AppSettings>('save_settings', {
+        update_proxy: proxy,
+      });
+      setProxy(s.update_proxy);
+      setProxySaved(true);
+    } catch (e) {
+      setProxyError(String(e));
+    }
+  };
 
   if (!open) return null;
 
@@ -81,6 +110,32 @@ export function SettingsDialog({ open, onClose, onCheckUpdate, checking }: Props
               <span className="settings-hint">{t('settings.languageHint')}</span>
             </div>
             <LangSwitch variant="list" />
+          </div>
+
+          <div className="settings-section">
+            <div className="settings-section-head">
+              <span className="settings-label">{t('settings.updateProxy')}</span>
+              <span className="settings-hint">{t('settings.updateProxyHint')}</span>
+            </div>
+            <div className="settings-proxy-row">
+              <input
+                className="settings-proxy-input"
+                type="text"
+                placeholder="http://127.0.0.1:7897"
+                value={proxy}
+                onChange={(event) => {
+                  setProxy(event.target.value);
+                  setProxySaved(false);
+                }}
+              />
+              <Button variant="secondary" type="button" onClick={onSaveProxy}>
+                {t('common.save')}
+              </Button>
+            </div>
+            {proxySaved && (
+              <div className="settings-proxy-ok">{t('settings.updateProxySaved')}</div>
+            )}
+            {proxyError && <div className="settings-proxy-err">{proxyError}</div>}
           </div>
 
           <div className="settings-section">

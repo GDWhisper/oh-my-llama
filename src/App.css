@@ -61,26 +61,6 @@ body {
   gap: 12px;
 }
 
-.gear-btn {
-  flex: 0 0 auto;
-  width: 32px;
-  height: 32px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  padding: 0;
-  border: 1px solid #d1d5db;
-  border-radius: 8px;
-  background: #ffffff;
-  color: #374151;
-  cursor: pointer;
-}
-
-.gear-btn:hover {
-  background: #f3f4f6;
-  color: #111827;
-}
-
 /* 服务控制合并进标题卡片：左侧信息（当前模型 + 预览地址），右侧操作按钮 */
 .header-controls {
   display: flex;
@@ -150,6 +130,46 @@ body {
   letter-spacing: 0.08em;
 }
 
+/* 卡片头部：标题(左) + 分享图标按钮(右) */
+.panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+/* 图标按钮：白底灰边方盒，与齿轮(设置)按钮同款样式；用于配置管理卡片右上角的分享图标 */
+.icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: 1px solid #d1d5db;
+  border-radius: 8px;
+  background: #ffffff;
+  color: #374151;
+  cursor: pointer;
+  transition:
+    color 120ms ease,
+    background-color 120ms ease,
+    border-color 120ms ease;
+}
+
+.icon-btn:hover {
+  color: #111827;
+  background: #f3f4f6;
+  border-color: #9ca3af;
+}
+
+.icon-btn svg {
+  display: block;
+  width: 18px;
+  height: 18px;
+}
+
 .section-header {
   display: flex;
   align-items: center;
@@ -203,6 +223,13 @@ body {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
+}
+
+/* 布尔型参数：复选框紧贴配置名称、与其同一行（不再独占整行）。 */
+.bool-field {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
 }
 
 .field label {
@@ -628,6 +655,42 @@ body {
   color: #6b7280;
 }
 
+.settings-proxy-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.settings-proxy-input {
+  flex: 1 1 220px;
+  min-width: 0;
+  height: 32px;
+  padding: 0 10px;
+  font-size: 13px;
+  color: #111827;
+  background: #fff;
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+}
+
+.settings-proxy-input:focus {
+  outline: none;
+  border-color: #6366f1;
+  box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.2);
+}
+
+.settings-proxy-ok {
+  font-size: 12px;
+  color: #16a34a;
+}
+
+.settings-proxy-err {
+  font-size: 12px;
+  color: #dc2626;
+  word-break: break-all;
+}
+
 .lang-list {
   display: flex;
   flex-direction: row;
@@ -721,6 +784,34 @@ body {
 .update-ready-text {
   margin: 4px 0 16px;
   color: #374151;
+}
+
+/* 更新失败时的真实错误详情：等宽、可滚动、便于复制反馈 */
+.update-error-detail {
+  margin: 0 0 16px;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  background: #f9fafb;
+  padding: 8px 10px;
+}
+.update-error-label {
+  display: block;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: #9ca3af;
+  margin-bottom: 4px;
+}
+.update-error-detail pre {
+  margin: 0;
+  max-height: 140px;
+  overflow: auto;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  color: #b91c1c;
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 
 /* 下载进度条（可见、可感知） */

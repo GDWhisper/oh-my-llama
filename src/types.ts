@@ -39,3 +39,9 @@ export interface ServerLogLine {
   level: string;
   text: string;
 }
+
+// 应用级设置（与服务器启动配置 ServerConfig 解耦）。
+// update_proxy 留空 = 更新直连；填写 = 仅走该代理地址。
+export interface AppSettings {
+  update_proxy: string;
+}
