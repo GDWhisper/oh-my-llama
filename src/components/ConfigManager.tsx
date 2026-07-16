@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import type { ServerConfig } from '../types';
 import { useI18n } from '../i18n';
 import { Button } from './Button';
+import { IconButton } from './IconButton';
 import { NameDialog } from './NameDialog';
 import { ConfirmDialog } from './ConfirmDialog';
 
@@ -82,7 +83,28 @@ export function ConfigManager({
 
   return (
     <div className="panel config-manager">
-      <h2>{t('config.title')}</h2>
+      <div className="panel-header">
+        <h2>{t('config.title')}</h2>
+        <IconButton label={t('config.share')} onClick={onShare}>
+          <svg
+            viewBox="0 0 24 24"
+            width="18"
+            height="18"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            aria-hidden
+          >
+            <circle cx="18" cy="5" r="3" />
+            <circle cx="6" cy="12" r="3" />
+            <circle cx="18" cy="19" r="3" />
+            <line x1="8.59" y1="13.51" x2="15.42" y2="17.49" />
+            <line x1="15.41" y1="6.51" x2="8.59" y2="10.49" />
+          </svg>
+        </IconButton>
+      </div>
       <div className="fields">
         <div className="field">
           <label>{t('config.select')}</label>
@@ -144,9 +166,6 @@ export function ConfigManager({
         <div className="config-actions">
           <Button variant="secondary" type="button" onClick={onCreateEmpty}>
             {t('config.createNew')}
-          </Button>
-          <Button variant="secondary" type="button" onClick={onShare}>
-            {t('config.share')}
           </Button>
           <Button variant="secondary" type="button" onClick={onSaveAsNew}>
             {t('config.saveAsNew')}

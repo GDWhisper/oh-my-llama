@@ -117,10 +117,26 @@ export function AdvancedParamsPanel(props: Props) {
       )}
       {enabledAdvancedKeys.map((key) => {
         const removable = adjustingAdvanced && key !== 'ctx_size';
+        const isBool = key === 'mmap' || key === 'mlock';
         return (
           <div className="field" key={key}>
             <div className="field-header">
-              <label>{t(ADVANCED_LABEL_KEYS[key])}</label>
+              {isBool ? (
+                <label className="bool-field">
+                  {t(ADVANCED_LABEL_KEYS[key])}
+                  <input
+                    type="checkbox"
+                    checked={key === 'mmap' ? config.mmap : config.mlock}
+                    onChange={
+                      key === 'mmap'
+                        ? (event) => onChange({ ...config, mmap: event.currentTarget.checked })
+                        : (event) => onChange({ ...config, mlock: event.currentTarget.checked })
+                    }
+                  />
+                </label>
+              ) : (
+                <label>{t(ADVANCED_LABEL_KEYS[key])}</label>
+              )}
               {removable && (
                 <Button variant="danger" type="button" onClick={() => onRemoveKey(key)}>
                   {t('common.delete')}
@@ -229,26 +245,6 @@ export function AdvancedParamsPanel(props: Props) {
                 <option value="on">on</option>
                 <option value="off">off</option>
               </select>
-            )}
-            {key === 'mmap' && (
-              <label>
-                <input
-                  type="checkbox"
-                  checked={config.mmap}
-                  onChange={(event) => onChange({ ...config, mmap: event.currentTarget.checked })}
-                />
-                mmap
-              </label>
-            )}
-            {key === 'mlock' && (
-              <label>
-                <input
-                  type="checkbox"
-                  checked={config.mlock}
-                  onChange={(event) => onChange({ ...config, mlock: event.currentTarget.checked })}
-                />
-                mlock
-              </label>
             )}
           </div>
         );

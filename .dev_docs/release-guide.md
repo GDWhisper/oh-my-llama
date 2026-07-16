@@ -30,9 +30,18 @@
 4. **合并到 main 工作树**：`cd F:/llama_run/tauri-launcher && git fetch origin && git merge --no-ff dev -m "Merge dev into main for vX.Y.Z"`。用 `--no-ff` 保留合并记录；**不要**在 `dev` 工作树 checkout main。
 5. **推送 main**：`git push origin main`。
 6. **打标签触发 CI**：`git tag -a vX.Y.Z -m "Oh My Llama vX.Y.Z"` + `git push origin vX.Y.Z`。推送标签即触发 `release.yml`（仅 Windows）构建。
-7. **等待构建**：`unset` 代理后 `gh run watch <run_id> --repo GDWhisper/oh-my-llama --exit-status`。构建约 **7 分钟**；成功后 Release 以**草稿**形式生成（`releaseDraft: true`）。
+7. **等待构建（前台，不可拆成两轮）**：`unset` 代理后在**前台**执行 `gh run watch <run_id> --repo GDWhisper/oh-my-llama --exit-status`（单次最长约 7-8 分钟，Bash 命令超时给足 600000ms）。**禁止用 `run_in_background` 把等待拆到后台**——后台返回后控制权已交还用户，发布步骤极易被漏掉；必须等到构建结束**在同一轮对话里**继续后续步骤。构建成功时 Release 以**草稿**形式生成（`releaseDraft: true`），这只是中间态，**不是终点**。
 8. **更新 CHANGELOG.md**（见第三节分工）。
-9. **发布 Release**：`gh release edit vX.Y.Z --notes-file <path> --draft=false --latest`。**必须**补 notes（草稿默认 body 是占位符 `See the assets to download and install.`）。
+9. **发布 Release（强制收尾，不可省略 / 不可推迟）**：构建一结束（同一轮）**立即**执行 `gh release edit vX.Y.Z --notes-file <path> --draft=false --latest`。**必须**补 notes（草稿默认 body 是占位符 `See the assets to download and install.`）。**这是发布流程的最后一个动作；在它完成前，任务视为未完成，不得向用户报告「已发布 / 完成 / 可直接下载」。**
+10. **验证已正式发布**：`gh release view vX.Y.Z --repo GDWhisper/oh-my-llama`，确认输出含 `draft: false` 且 `Latest` 标记存在。只有亲眼看到 `draft: false`，才算发布成功、才能回复用户。
+
+> ## ⛔ 强制收尾铁律（历史踩坑）
+> CI 默认生成 **草稿** Release（`releaseDraft: true`），这是设计使然，**每次都会是 draft**。草稿=未发布，用户看到的就是「draft、没内容」。
+> **发布流程到「`gh release edit --draft=false` 成功 + `gh release view` 确认 `draft: false`」才结束。** 在此之前：
+> - **不得**把"构建成功 / 标签已推送 / 资产已生成"当作"已发布"告知用户；
+> - **不得**用 `run_in_background` 等构建后把发布推迟到下一轮——那轮往往不会自己回来执行；
+> - 若构建时间过长必须等待，用前台 `gh run watch`（超时 600000ms），在同一轮内紧接着发布。
+> 一句话：**draft 就是没发布，看到 `draft: false` 才算数。**
 
 ---
 
@@ -53,7 +62,7 @@
 ## 四、常见坑（Gotchas）
 
 - **gh 报 EOF** → 先 `unset HTTPS_PROXY HTTP_PROXY https_proxy http_proxy`。
-- **草稿 body 是占位符** → 必须 `gh release edit --notes-file` 补正式说明并 `--draft=false`。
+- **草稿 ≠ 已发布** → CI 永远先生成 draft（`releaseDraft: true`）。必须 `gh release edit --notes-file ... --draft=false --latest` 并 `gh release view` 确认 `draft: false` 才算发布成功。构建成功、资产齐全都**不算**发布完成。
 - **资产 URL 显示 `untagged-...`** → 属 tauri-action 上传时的内部路径，Release 仍正确挂在 tag 下，无需处理。
 - **`dev` 不能 checkout main** → 合并去 `main` 工作树执行 `git merge --no-ff dev`。
 - **提交排除 `.claude/`、`.mcp.json`**。
@@ -72,6 +81,7 @@
 - [ ] tag `vX.Y.Z` 已推送并触发 CI
 - [ ] `CHANGELOG.md` 已更新（详细、三类分段）
 - [ ] Release Note 已用 `--notes-file` 写入（三段式、无下载栏目、底部「详细改动参考 CHANGELOG」），并 `--draft=false --latest`
+- [ ] `gh release view vX.Y.Z` 确认输出含 `draft: false`（**未确认前不得回复用户「已发布」**）
 - [ ] 资产（`setup.exe` + `.msi`）已生成
 - [ ] 本地已生成签名私钥 `~/.tauri/oh-my-llama.key`（公钥已写入 `src-tauri/tauri.conf.json` 的 `plugins.updater.pubkey`）
 - [ ] GitHub 仓库 **Secrets** 已配置 `TAURI_SIGNING_PRIVATE_KEY`（内容为私钥文件全文）；缺失时构建仍成功，但产物无 `.sig`、不生成 `latest.json`，更新通道不可用

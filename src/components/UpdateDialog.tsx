@@ -1,5 +1,5 @@
 import { useEffect } from 'react';
-import { useI18n } from '../i18n';
+import { useI18n, type Translator } from '../i18n';
 import { Button } from './Button';
 import type { UpdaterStatus } from '../hooks/useUpdater';
 
@@ -18,6 +18,19 @@ const fmtBytes = (n: number): string => {
   if (kb < 1024) return `${kb.toFixed(0)} KB`;
   return `${(kb / 1024).toFixed(1)} MB`;
 };
+
+// 将底层 Rust/reqwest 抛出的原始错误归类成用户可读的提示。
+// 原始错误（英文）仍会在弹窗中以等宽文本展示，便于排查与反馈。
+function classifyUpdateError(raw: string, t: Translator): string {
+  const m = raw.toLowerCase();
+  if (/proxy|connection refused|econnrefused|tunnel/.test(m)) return t('update.errProxy');
+  if (/timed? ?out|timeout|etimedout|deadline|operation timed/.test(m))
+    return t('update.errTimeout');
+  if (/404|not found|no route|dns|resolve|name or service not known|getaddrinfo/.test(m))
+    return t('update.errNotFound');
+  if (/signature|verify|public key|pubkey|invalid.*key/.test(m)) return t('update.errSignature');
+  return t('update.errGeneric');
+}
 
 // 更新浮窗（方案 A）：仅在有结果时渲染（available / downloading / ready / no-update / error）。
 // idle / checking 为瞬态，由设置里的「检查更新」按钮承担。
@@ -141,7 +154,11 @@ export function UpdateDialog({
         {status.kind === 'error' && (
           <div className="modal-body">
             <div className="modal-title">{t('update.error')}</div>
-            <p className="update-ready-text">{t('update.errorBody')}</p>
+            <p className="update-ready-text">{classifyUpdateError(status.message, t)}</p>
+            <div className="update-error-detail">
+              <span className="update-error-label">{t('update.errorDetail')}</span>
+              <pre>{status.message}</pre>
+            </div>
             <div className="modal-actions">
               <Button variant="secondary" type="button" onClick={onDismiss}>
                 {t('common.close')}

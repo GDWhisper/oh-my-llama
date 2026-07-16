@@ -114,7 +114,84 @@ pub struct ServerLogLine {
     pub text: String,
 }
 
+// ── 应用级设置（与服务器启动配置 ServerConfig 解耦）────────────────────
+// 当前仅含「更新代理」一项：留空 = 更新直连（不读任何代理环境变量）；
+// 填写 = 仅走用户显式指定的代理地址。仅持久化到 APPDATA/OhMyLlama/settings.json，
+// 不污染 configs.toml，也不干预用户代理客户端的全局/规则模式。
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct AppSettings {
+    #[serde(default)]
+    pub update_proxy: String,
+}
+
+fn settings_path(app_data: &std::path::Path) -> std::path::PathBuf {
+    app_data.join("OhMyLlama").join("settings.json")
+}
+
+fn load_settings(app_data: &std::path::Path) -> AppSettings {
+    let path = settings_path(app_data);
+    if path.exists() {
+        if let Ok(text) = std::fs::read_to_string(&path) {
+            if let Ok(s) = serde_json::from_str::<AppSettings>(&text) {
+                return s;
+            }
+        }
+    }
+    AppSettings::default()
+}
+
+// 将「更新代理」映射到进程的环境变量：更新器底层用 reqwest 的 ClientBuilder::new()，
+// 默认会读取 HTTPS_PROXY/HTTP_PROXY。因此——
+// 留空 → 移除这些变量，更新器直连（避免被未运行的本地代理坑住）；
+// 填写 → 写入该地址，更新器才走此代理。整个过程不读取/不干预用户代理的全局或规则模式。
+fn apply_update_proxy_env(proxy: &str) {
+    let proxy = proxy.trim();
+    let vars = ["HTTPS_PROXY", "HTTP_PROXY", "https_proxy", "http_proxy"];
+    if proxy.is_empty() {
+        for var in vars {
+            std::env::remove_var(var);
+        }
+    } else {
+        for var in vars {
+            std::env::set_var(var, proxy);
+        }
+    }
+}
+
+#[tauri::command]
+async fn read_settings(_app: AppHandle) -> Result<AppSettings, String> {
+    let app_data = resolve_app_data()?;
+    Ok(load_settings(&app_data))
+}
+
+#[tauri::command]
+async fn save_settings(_app: AppHandle, update_proxy: String) -> Result<AppSettings, String> {
+    let proxy = update_proxy.trim().to_string();
+    if !proxy.is_empty() && !proxy.starts_with("http://") && !proxy.starts_with("https://") {
+        return Err("代理地址需以 http:// 或 https:// 开头。".into());
+    }
+    let app_data = resolve_app_data()?;
+    let path = settings_path(&app_data);
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).map_err(|err| format!("创建设置目录失败: {err}"))?;
+    }
+    let settings = AppSettings {
+        update_proxy: proxy.clone(),
+    };
+    let text =
+        serde_json::to_string_pretty(&settings).map_err(|err| format!("序列化设置失败: {err}"))?;
+    std::fs::write(&path, text).map_err(|err| format!("写入设置失败: {err}"))?;
+    // 立即生效：本次会话内下一次「检查更新」即按新代理策略（无需重启）。
+    apply_update_proxy_env(&proxy);
+    Ok(settings)
+}
+
 pub fn run() {
+    // 启动即按持久化的「更新代理」决定更新器是否走代理（详见 apply_update_proxy_env）。
+    if let Ok(app_data) = resolve_app_data() {
+        let settings = load_settings(&app_data);
+        apply_update_proxy_env(&settings.update_proxy);
+    }
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
@@ -136,7 +213,9 @@ pub fn run() {
             clear_logs,
             file_exists,
             file_size,
-            list_models
+            list_models,
+            read_settings,
+            save_settings
         ])
         .setup(|app| {
             let app_handle = app.handle().clone();
