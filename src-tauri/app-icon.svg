@@ -1,0 +1,56 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 25 25" width="1024" height="1024" shape-rendering="crispEdges">
+  <!-- 黑色圆角背景 -->
+  <rect x="0" y="0" width="25" height="25" rx="4" fill="#0a0a0a"/>
+
+  <!-- 像素风 OML 字母（白色） -->
+  <g fill="#ffffff">
+    <!-- O (cols 3-7, rows 9-15) -->
+    <rect x="4" y="9" width="1" height="1"/>
+    <rect x="5" y="9" width="1" height="1"/>
+    <rect x="6" y="9" width="1" height="1"/>
+    <rect x="3" y="10" width="1" height="1"/>
+    <rect x="7" y="10" width="1" height="1"/>
+    <rect x="3" y="11" width="1" height="1"/>
+    <rect x="7" y="11" width="1" height="1"/>
+    <rect x="3" y="12" width="1" height="1"/>
+    <rect x="7" y="12" width="1" height="1"/>
+    <rect x="3" y="13" width="1" height="1"/>
+    <rect x="7" y="13" width="1" height="1"/>
+    <rect x="3" y="14" width="1" height="1"/>
+    <rect x="7" y="14" width="1" height="1"/>
+    <rect x="4" y="15" width="1" height="1"/>
+    <rect x="5" y="15" width="1" height="1"/>
+    <rect x="6" y="15" width="1" height="1"/>
+
+    <!-- M (cols 10-14, rows 9-15) -->
+    <rect x="10" y="9" width="1" height="1"/>
+    <rect x="14" y="9" width="1" height="1"/>
+    <rect x="10" y="10" width="1" height="1"/>
+    <rect x="12" y="10" width="1" height="1"/>
+    <rect x="14" y="10" width="1" height="1"/>
+    <rect x="10" y="11" width="1" height="1"/>
+    <rect x="12" y="11" width="1" height="1"/>
+    <rect x="14" y="11" width="1" height="1"/>
+    <rect x="10" y="12" width="1" height="1"/>
+    <rect x="14" y="12" width="1" height="1"/>
+    <rect x="10" y="13" width="1" height="1"/>
+    <rect x="14" y="13" width="1" height="1"/>
+    <rect x="10" y="14" width="1" height="1"/>
+    <rect x="14" y="14" width="1" height="1"/>
+    <rect x="10" y="15" width="1" height="1"/>
+    <rect x="14" y="15" width="1" height="1"/>
+
+    <!-- L (cols 17-21, rows 9-15) -->
+    <rect x="17" y="9" width="1" height="1"/>
+    <rect x="17" y="10" width="1" height="1"/>
+    <rect x="17" y="11" width="1" height="1"/>
+    <rect x="17" y="12" width="1" height="1"/>
+    <rect x="17" y="13" width="1" height="1"/>
+    <rect x="17" y="14" width="1" height="1"/>
+    <rect x="17" y="15" width="1" height="1"/>
+    <rect x="18" y="15" width="1" height="1"/>
+    <rect x="19" y="15" width="1" height="1"/>
+    <rect x="20" y="15" width="1" height="1"/>
+    <rect x="21" y="15" width="1" height="1"/>
+  </g>
+</svg>
