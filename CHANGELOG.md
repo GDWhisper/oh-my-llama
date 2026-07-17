@@ -4,6 +4,17 @@
 
 > 本文件为**详细改动历史**（含涉及的文件与实现机制）；GitHub Release 页面为对应版本的**总结性**说明。
 
+## [0.0.6] - 2026-07-18
+
+### 功能优化
+- **替换应用图标为像素风 OML 品牌图标**：弃用 Tauri 默认图标，改为极客像素风——黑底圆角方 + 白色像素字体 **OML**（Oh My Llama 缩写）。新增矢量母版 `src-tauri/app-icon.svg`（逐像素 `<rect>` 手工绘制、`shape-rendering="crispEdges"` 保证硬边像素感、无 AI 水印），由其渲染 1024² PNG 源图后通过 `tauri icon` 一键重生成 `src-tauri/icons` 全套平台图标（ico/icns/png/Windows StoreLogo/64×64/iOS/Android），覆盖原默认图标；前端 favicon 改用同源 `public/llama.png`，移除占位的 `public/vite.svg`，`index.html` 引用同步更新。经实测确认运行图标（标题栏/任务栏/Dock）与安装图标（安装器 exe / .app 包）均统一为新图标。
+
+### 新增功能
+- （本版本无新增功能。）
+
+### Bug 修复
+- （本版本无专门缺陷修复。）
+
 ## [0.0.5] - 2026-07-16
 
 ### 新增功能
@@ -73,6 +84,8 @@
 ### 说明
 - 本版本仅提供 Windows 安装包（`.exe` NSIS / `.msi`），无需预先安装 Node / Rust。
 
+[0.0.6]: https://github.com/GDWhisper/oh-my-llama/releases/tag/v0.0.6
+[0.0.5]: https://github.com/GDWhisper/oh-my-llama/releases/tag/v0.0.5
 [0.0.4]: https://github.com/GDWhisper/oh-my-llama/releases/tag/v0.0.4
 [0.0.3]: https://github.com/GDWhisper/oh-my-llama/releases/tag/v0.0.3
 [0.0.2]: https://github.com/GDWhisper/oh-my-llama/releases/tag/v0.0.2
