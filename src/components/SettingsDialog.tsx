@@ -64,7 +64,7 @@ export function SettingsDialog({ open, onClose, onCheckUpdate, checking }: Props
     setProxyError('');
     try {
       const s = await invoke<AppSettings>('save_settings', {
-        update_proxy: proxy,
+        updateProxy: proxy,
       });
       setProxy(s.update_proxy);
       setProxySaved(true);
