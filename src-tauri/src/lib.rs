@@ -18,6 +18,9 @@ use windows_sys::Win32::System::JobObjects::{
     JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
 };
 
+mod metrics;
+use metrics::get_system_metrics;
+
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
 pub struct ServerConfig {
     pub llama_server_path: String,
@@ -215,7 +218,8 @@ pub fn run() {
             file_size,
             list_models,
             read_settings,
-            save_settings
+            save_settings,
+            get_system_metrics
         ])
         .setup(|app| {
             let app_handle = app.handle().clone();
