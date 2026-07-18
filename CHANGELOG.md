@@ -4,6 +4,17 @@
 
 > 本文件为**详细改动历史**（含涉及的文件与实现机制）；GitHub Release 页面为对应版本的**总结性**说明。
 
+## [0.0.7] - 2026-07-18
+
+### 新增功能
+- （本版本无新增功能。）
+
+### 功能优化
+- （本版本无功能优化。）
+
+### Bug 修复
+- **「更新代理」设置保存报错**：正式版在「设置 → 更新代理」填写地址（如 `127.0.0.1:7897`）点保存，报错 `invalid args updateProxy for command save_settings: command save_settings missing required key updateProxy`，导致代理设置无法保存。根因为 Tauri v2 默认把命令的蛇形形参名（Rust 侧 `save_settings(_app, update_proxy)`）按**驼峰**暴露给 JS，而前端 `invoke` 当初错传蛇形 `update_proxy`。修复仅改前端传参键名为驼峰 `{ updateProxy: proxy }`（`src/components/SettingsDialog.tsx`），与项目其它命令（`oldName`/`newName`/`config` 等）约定一致；Rust 侧 `save_settings` 及返回值结构体 `AppSettings` 的 `update_proxy` 字段均不变。
+
 ## [0.0.6] - 2026-07-18
 
 ### 功能优化
@@ -84,6 +95,7 @@
 ### 说明
 - 本版本仅提供 Windows 安装包（`.exe` NSIS / `.msi`），无需预先安装 Node / Rust。
 
+[0.0.7]: https://github.com/GDWhisper/oh-my-llama/releases/tag/v0.0.7
 [0.0.6]: https://github.com/GDWhisper/oh-my-llama/releases/tag/v0.0.6
 [0.0.5]: https://github.com/GDWhisper/oh-my-llama/releases/tag/v0.0.5
 [0.0.4]: https://github.com/GDWhisper/oh-my-llama/releases/tag/v0.0.4
