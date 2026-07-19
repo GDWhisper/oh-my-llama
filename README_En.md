@@ -8,13 +8,13 @@ Oh My Llama is a desktop tool for centrally managing `llama-server` launch confi
 
 ---
 
+![Oh My Llama Overview](public/overview.png)
+
 ## ✨ Highlights
 
 ### Multi-configuration switching
 
 Switch between multiple configurations so you no longer have to dig through your notes for that pile of parameter presets — everything is managed in one place. Create, rename, delete, and save configurations with ease.
-
-![Configuration management]()
 
 ### One-click parameter import
 
