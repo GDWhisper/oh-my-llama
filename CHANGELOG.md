@@ -4,6 +4,23 @@
 
 > 本文件为**详细改动历史**（含涉及的文件与实现机制）；GitHub Release 页面为对应版本的**总结性**说明。
 
+## [0.0.9] - 2026-07-20
+
+### 新增功能
+- **「原始参数」卡片（替代「一键传参」）**：配置管理下方新增只读卡片，以 `configToCommand(config)` 实时派生完整启动命令行，与「必要参数 / 高级参数」卡片共用同一 `config` 工作态，天然实时同步。点击【编辑】进入编辑态——textarea 预填当前命令，改动经 ~300ms 防抖实时回写 `config` 并即时反映到必要/高级卡片；【复原】回到进入编辑时的配置快照（`onRestore` = `setConfig` + `applyEnabled`），【完成】退出并做最终归一化（清掉打字中途产生的脏 `extra_args`）。`src/components/RawParams.tsx`（由 `ParamPaste.tsx` `git mv` 重命名）+ `src/App.tsx` + `src/lib/parseArgs.ts`。
+- **未保存改动提示**：`useServer` 新增派生 `isDirty`（`JSON.stringify(config)` 与已落盘基线 `configsRef[name]`/默认配置深比较），覆盖所有面板改动；配置管理标题旁常驻带圈 i 图标，脏时亮起。`src/hooks/useServer.ts` + `src/components/ConfigManager.tsx` + `App.css`（`.unsaved-icon`/`.panel-header-left`）。
+- **「恢复配置」按钮**：选择配置下拉框右侧新增环形箭头图标按钮，将当前 live 配置回滚为当前选中配置的已保存版本（`selectConfig(activeName)`）；干净时置灰禁用，有未保存改动时点击弹红色确认框，避免误丢。`src/components/ConfigManager.tsx` + `src/App.tsx`（守卫 `requestRestore`）+ `i18n/messages.ts`（新增 `config.restore*`）。
+
+### 功能优化
+- **启动命令展示位置调整**：原生日志置顶的启动参数展示已彻底移除（`useServer` 的 `commandLine` state、相关监听与 `LogPanel` 置顶块全删），统一由「原始参数」卡片展示。`src/hooks/useServer.ts` + `src/components/LogPanel.tsx` + `src/App.tsx`。
+- **「原始参数」只读/编辑框体统一**：两态提炼为同一 `.raw-box` 基类（几何/配色/字体只写一处），差异仅 `.raw-box--edit` 修饰符（可拖拽缩放/光标/聚焦描边），根除手动同步导致的尺寸漂移；滚动条改为优雅隐身（`scrollbar-width:none` + `::-webkit-scrollbar{width:0}`），零宽度不占排版空间，切换时文字零位移仍可滚轮/拖选滚动。`src/App.css` + `src/components/RawParams.tsx`。
+- **复制按钮提示**：「原始参数」卡片【复制】复制后弹 toast（成功/失败），复用 `app.share.copied`/`copyFailed` 文案。`src/components/RawParams.tsx` + `src/App.tsx`（注入 `showToast`）。
+- **`--timeout` 无损往返**：`parseArgs.ts` 注册 `--timeout` 为 `ignore` 类已知 flag，复制出的命令粘回时不污染 `extra_args`，保证往返一致。`src/lib/parseArgs.ts`。
+- **文档**：双语 README 核心亮点之上添加概览图，删除英文版空 src 错误图片引用（commit 6360691）。`README.md` / `README_En.md` / `public/overview.png`。
+
+### Bug 修复
+- **切配置串台**：在「原始参数」编辑态切换/恢复配置时，残留的旧配置编辑文本与待触发防抖定时器会把旧参数误写进新配置。`useServer` 新增 `configEpoch`，每次从已落盘版本载入 `config` 时 +1；`RawParams` 编辑态重置 effect 依赖由 `[configName]` 扩为 `[configName, configEpoch]`，切换/恢复时强制退出编辑态、清空草稿、清理防抖；自身防抖回写不 bump epoch，不会误重置进行中的编辑。`src/hooks/useServer.ts` + `src/components/RawParams.tsx`。
+
 ## [0.0.8] - 2026-07-19
 
 ### 新增功能
@@ -105,6 +122,7 @@
 ### 说明
 - 本版本仅提供 Windows 安装包（`.exe` NSIS / `.msi`），无需预先安装 Node / Rust。
 
+[0.0.9]: https://github.com/GDWhisper/oh-my-llama/releases/tag/v0.0.9
 [0.0.8]: https://github.com/GDWhisper/oh-my-llama/releases/tag/v0.0.8
 [0.0.7]: https://github.com/GDWhisper/oh-my-llama/releases/tag/v0.0.7
 [0.0.6]: https://github.com/GDWhisper/oh-my-llama/releases/tag/v0.0.6

@@ -11,9 +11,13 @@ type DialogMode = 'save-as-new' | 'create-empty' | 'rename';
 interface Props {
   configs: Record<string, ServerConfig>;
   activeName: string;
+  // 当前 live 配置是否与已落盘基线不同（有未保存改动），用于标题旁「未保存」徽标。
+  isDirty: boolean;
   // 重命名弹窗对应的「原名」，供 NameDialog 预填。
   renameTarget: string;
   onSelect: (name: string) => void;
+  // 恢复为当前选中配置的已保存版本（丢弃未保存改动）。
+  onRestoreConfig: () => void;
   onCreateEmpty: () => void;
   onShare: () => void;
   onSaveAsNew: () => void;
@@ -33,8 +37,10 @@ interface Props {
 export function ConfigManager({
   configs,
   activeName,
+  isDirty,
   renameTarget,
   onSelect,
+  onRestoreConfig,
   onCreateEmpty,
   onShare,
   onSaveAsNew,
@@ -84,83 +90,129 @@ export function ConfigManager({
   return (
     <div className="panel config-manager">
       <div className="panel-header">
-        <h2>{t('config.title')}</h2>
-        <IconButton label={t('config.share')} onClick={onShare}>
-          <svg
-            viewBox="0 0 24 24"
-            width="18"
-            height="18"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            aria-hidden
-          >
-            <circle cx="18" cy="5" r="3" />
-            <circle cx="6" cy="12" r="3" />
-            <circle cx="18" cy="19" r="3" />
-            <line x1="8.59" y1="13.51" x2="15.42" y2="17.49" />
-            <line x1="15.41" y1="6.51" x2="8.59" y2="10.49" />
-          </svg>
-        </IconButton>
+        <div className="panel-header-left">
+          <h2>{t('config.title')}</h2>
+          {isDirty && (
+            <span
+              className="unsaved-icon"
+              title={t('config.unsaved')}
+              aria-label={t('config.unsaved')}
+              role="img"
+            >
+              <svg
+                viewBox="0 0 24 24"
+                width="15"
+                height="15"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                aria-hidden
+              >
+                <circle cx="12" cy="12" r="10" />
+                <line x1="12" y1="16" x2="12" y2="12" />
+                <line x1="12" y1="8" x2="12.01" y2="8" />
+              </svg>
+            </span>
+          )}
+        </div>
+        <div className="panel-header-actions">
+          <IconButton label={t('config.share')} onClick={onShare}>
+            <svg
+              viewBox="0 0 24 24"
+              width="18"
+              height="18"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              aria-hidden
+            >
+              <circle cx="18" cy="5" r="3" />
+              <circle cx="6" cy="12" r="3" />
+              <circle cx="18" cy="19" r="3" />
+              <line x1="8.59" y1="13.51" x2="15.42" y2="17.49" />
+              <line x1="15.41" y1="6.51" x2="8.59" y2="10.49" />
+            </svg>
+          </IconButton>
+        </div>
       </div>
       <div className="fields">
         <div className="field">
           <label>{t('config.select')}</label>
-          <div className={`select-box${open ? ' open' : ''}`} ref={boxRef}>
-            <button
-              type="button"
-              className="select-trigger"
-              onClick={() => setOpen((value) => !value)}
-            >
-              <span className="select-value">{currentLabel}</span>
-              <span className="select-caret" aria-hidden>
-                ▾
-              </span>
-            </button>
-            {open && (
-              <ul className="select-list">
-                <li className="select-option">
-                  <button
-                    type="button"
-                    className={`option-main${activeName === 'default' ? ' selected' : ''}`}
-                    onClick={() => choose('default')}
-                  >
-                    {t('config.default')}
-                  </button>
-                </li>
-                {names.map((name) => (
-                  <li key={name} className="select-option">
+          <div className="select-with-restore">
+            <div className={`select-box${open ? ' open' : ''}`} ref={boxRef}>
+              <button
+                type="button"
+                className="select-trigger"
+                onClick={() => setOpen((value) => !value)}
+              >
+                <span className="select-value">{currentLabel}</span>
+                <span className="select-caret" aria-hidden>
+                  ▾
+                </span>
+              </button>
+              {open && (
+                <ul className="select-list">
+                  <li className="select-option">
                     <button
                       type="button"
-                      className={`option-main${activeName === name ? ' selected' : ''}`}
-                      onClick={() => choose(name)}
+                      className={`option-main${activeName === 'default' ? ' selected' : ''}`}
+                      onClick={() => choose('default')}
                     >
-                      {name}
-                    </button>
-                    <button
-                      type="button"
-                      className="option-rename"
-                      title={t('config.renameTitle', { name })}
-                      aria-label={t('config.renameAria', { name })}
-                      onClick={() => onRename(name)}
-                    >
-                      ✎
-                    </button>
-                    <button
-                      type="button"
-                      className="option-delete"
-                      title={t('config.deleteTitle', { name })}
-                      aria-label={t('config.deleteAria', { name })}
-                      onClick={() => setDeleteTarget(name)}
-                    >
-                      ×
+                      {t('config.default')}
                     </button>
                   </li>
-                ))}
-              </ul>
-            )}
+                  {names.map((name) => (
+                    <li key={name} className="select-option">
+                      <button
+                        type="button"
+                        className={`option-main${activeName === name ? ' selected' : ''}`}
+                        onClick={() => choose(name)}
+                      >
+                        {name}
+                      </button>
+                      <button
+                        type="button"
+                        className="option-rename"
+                        title={t('config.renameTitle', { name })}
+                        aria-label={t('config.renameAria', { name })}
+                        onClick={() => onRename(name)}
+                      >
+                        ✎
+                      </button>
+                      <button
+                        type="button"
+                        className="option-delete"
+                        title={t('config.deleteTitle', { name })}
+                        aria-label={t('config.deleteAria', { name })}
+                        onClick={() => setDeleteTarget(name)}
+                      >
+                        ×
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+            <IconButton label={t('config.restore')} onClick={onRestoreConfig} disabled={!isDirty}>
+              <svg
+                viewBox="0 0 24 24"
+                width="18"
+                height="18"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                aria-hidden
+              >
+                <polyline points="1 4 1 10 7 10" />
+                <path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10" />
+              </svg>
+            </IconButton>
           </div>
         </div>
         <div className="config-actions">

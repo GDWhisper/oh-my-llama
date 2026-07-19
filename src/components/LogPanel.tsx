@@ -7,7 +7,6 @@ type LogMode = 'brief' | 'raw';
 
 interface Props {
   logs: ServerLogLine[];
-  commandLine: string | null;
   onClear: () => void;
 }
 
@@ -35,7 +34,7 @@ const findScroller = (term: HTMLElement | null): HTMLElement | null => {
   return term;
 };
 
-export function LogPanel({ logs, commandLine, onClear }: Props) {
+export function LogPanel({ logs, onClear }: Props) {
   const { t } = useI18n();
   const [mode, setMode] = useState<LogMode>('raw');
 
@@ -108,7 +107,7 @@ export function LogPanel({ logs, commandLine, onClear }: Props) {
       pinToBottom(scroller);
       setShowJump(false);
     }
-  }, [logs, commandLine, mode]);
+  }, [logs, mode]);
 
   // 卸载时解绑，避免监听泄漏。
   useEffect(() => {
@@ -126,7 +125,7 @@ export function LogPanel({ logs, commandLine, onClear }: Props) {
   };
 
   // 简要：只显示结构化级别（info/warn/error），排除原生透传行(raw)与命令行(cmd)。
-  // 原生：命令行(cmd)由 commandLine 置顶固定显示；下方滚动区透传 llama-server 的原样输出(raw)。
+  // 原生：下方滚动区透传 llama-server 的原样输出(raw)；启动命令行改由「原始参数」卡片展示。
   const visible =
     mode === 'raw'
       ? logs.filter((line) => line.level === 'raw')
@@ -162,16 +161,7 @@ export function LogPanel({ logs, commandLine, onClear }: Props) {
           按钮放在这一层而非 terminal 内部，才能始终固定在右下角、不随内容滚走。 */}
       <div className="terminal-viewport">
         <div className="terminal" ref={termRef}>
-          {mode === 'raw' && commandLine && (
-            <div className="term-pinned">
-              <div className="term-line cmd">
-                <span className="term-text">{commandLine}</span>
-              </div>
-            </div>
-          )}
-          {visible.length === 0 && (mode !== 'raw' || !commandLine) && (
-            <div className="terminal-empty">{t('log.empty')}</div>
-          )}
+          {visible.length === 0 && <div className="terminal-empty">{t('log.empty')}</div>}
           {visible.map((line, index) => (
             <div className={`term-line ${line.level}`} key={`${line.ts}-${index}`}>
               <span className="term-ts">{line.ts}</span>
