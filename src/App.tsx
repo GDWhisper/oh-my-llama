@@ -292,7 +292,6 @@ export default function App() {
             onOverwrite={(p) => applyPlan(p, 'overwrite')}
             onAppend={(p) => handleAppend(p)}
           />
-          <MetricsPanel />
           {appendWarn && (
             <div className="modal-overlay" onClick={() => setAppendWarn(null)}>
               <div
@@ -383,6 +382,7 @@ export default function App() {
         </section>
 
         <section className="column main log-side">
+          <MetricsPanel />
           <LogPanel logs={logs} commandLine={commandLine} onClear={handleClearLogs} />
         </section>
       </div>
