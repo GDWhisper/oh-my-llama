@@ -183,7 +183,7 @@ export const zh = {
   'settings.close': '关闭设置',
   'settings.updateProxy': '更新代理',
   'settings.updateProxyHint':
-    '留空则更新直接走系统网络（不使用任何代理）；填写地址后，更新检查将经由该代理。',
+    '留空则更新直接走系统网络（不使用任何代理）；填写地址后，更新检查将经由该代理。裸地址（如 127.0.0.1:7897、localhost）自动按 http:// 处理。',
   'settings.updateProxySaved': '已保存，下次检查更新即生效。',
 
   // 更新（方案 A：手动检查、可见可取消）
@@ -401,7 +401,7 @@ export const en: Record<MessageKey, string> = {
   'settings.close': 'Close Settings',
   'settings.updateProxy': 'Update Proxy',
   'settings.updateProxyHint':
-    'Leave empty to connect directly (no proxy). If set, update checks will go through this proxy address.',
+    'Leave empty to connect directly (no proxy). If set, update checks will go through this proxy. Bare addresses (e.g. 127.0.0.1:7897, localhost) are treated as http:// automatically.',
   'settings.updateProxySaved': 'Saved. Takes effect on the next update check.',
 
   // 更新（方案 A：手动检查、可见可取消）
