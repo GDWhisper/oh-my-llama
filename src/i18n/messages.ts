@@ -225,6 +225,8 @@ export const zh = {
   'metrics.vram': '显存',
   'metrics.temp': '温度',
   'metrics.loadError': '性能数据获取失败',
+  'metrics.collapse': '收起',
+  'metrics.expand': '展开',
 } as const;
 
 export type MessageKey = keyof typeof zh;
@@ -444,4 +446,6 @@ export const en: Record<MessageKey, string> = {
   'metrics.vram': 'VRAM',
   'metrics.temp': 'Temp',
   'metrics.loadError': 'Failed to fetch performance data',
+  'metrics.collapse': 'Collapse',
+  'metrics.expand': 'Expand',
 };

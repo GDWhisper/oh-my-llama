@@ -57,3 +57,34 @@
   font-size: 12px;
   color: #dc2626;
 }
+
+/* 收起/展开按钮：右上角朴素文字按钮，无图标 */
+.metrics-toggle {
+  appearance: none;
+  border: none;
+  background: transparent;
+  padding: 2px 4px;
+  font-size: 12px;
+  color: #2563eb;
+  cursor: pointer;
+  line-height: 1.2;
+}
+
+.metrics-toggle:hover {
+  text-decoration: underline;
+}
+
+/* 收起态：单行紧凑数值 */
+.metrics-compact {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+  color: #6b7280;
+}
+
+.metrics-compact .metrics-sep {
+  color: #cbd5e1;
+}
