@@ -12,11 +12,7 @@
 ### 功能优化
 - **性能面板改为纯数值 + 收起/展开**：移除占用条/迷你折线/每核热力条等图形，改为浅色主题纯文本数值（与全局白卡一致）；卡片头部加朴素文字「收起/展开」按钮（无图标）——展开=完整分行列值（CPU% / 内存 used/total% / GPU 名称·显存·温度），收起=单行紧凑（`CPU x% · 内存 x% · GPU x% · 显存 x%`，多卡以 `/` 分隔，无 N 卡/无总量时不显示显存）。i18n 补 `metrics.collapse/expand`。`src/components/MetricsPanel.tsx` + `.css`。
 - **更新代理支持裸本地地址**：`save_settings`（`src-tauri/src/lib.rs`）不再强制要求 `http://` 前缀——填写裸地址（如 `127.0.0.1:7897`、`localhost`）时自动补全为 `http://`；仅当显式写了非 `http`/`https` 的协议（含 `://`）才报错，提示改为「仅支持 http:// 或 https://」。同步去掉设置项中「裸地址自动按 http 处理」的冗余提示文案（`i18n/messages.ts`），交由系统静默处理。
-- **移除无用的 `cpu_cores` 字段**：`MetricsSnapshot` 及前端接口移除未在 UI 展示的每核占用数组（`metrics.rs` + `MetricsPanel.tsx`），减少每次采样的无谓计算与序列化开销。
 - **应用图标改为苹果风圆角正方形**：`src-tauri/app-icon.svg` 圆角半径由直角 `rx=4` 提升至 `rx=5.6`（≈22% 边长，iOS/macOS 图标标准圆角比例），背景平滑圆角、白色 OML 像素字保持硬边；`tauri icon` 重生成 `src-tauri/icons` 全套平台图标并同步 `src-tauri/app-icon.png` 母版与前端 `public/llama.png`(favicon)。
-
-### Bug 修复
-- **移除误加的程序内 UI logo**：修正此前误在标题栏内部塞入的 `<img className="app-logo">`（`src/App.tsx`），应用品牌图标仅指系统任务栏/窗口图标，不在界面内重复展示。
 
 ## [0.0.7] - 2026-07-18
 
