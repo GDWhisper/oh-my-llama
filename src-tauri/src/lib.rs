@@ -18,6 +18,9 @@ use windows_sys::Win32::System::JobObjects::{
     JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
 };
 
+mod metrics;
+use metrics::get_system_metrics;
+
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
 pub struct ServerConfig {
     pub llama_server_path: String,
@@ -166,10 +169,16 @@ async fn read_settings(_app: AppHandle) -> Result<AppSettings, String> {
 
 #[tauri::command]
 async fn save_settings(_app: AppHandle, update_proxy: String) -> Result<AppSettings, String> {
-    let proxy = update_proxy.trim().to_string();
-    if !proxy.is_empty() && !proxy.starts_with("http://") && !proxy.starts_with("https://") {
-        return Err("代理地址需以 http:// 或 https:// 开头。".into());
-    }
+    let raw = update_proxy.trim().to_string();
+    // 裸地址（如 127.0.0.1:7897 / localhost / 127）默认按 http:// 处理；
+    // 仅当显式写了其它协议（含 :// 且非 http/https）时才报错。
+    let proxy = if raw.is_empty() || raw.starts_with("http://") || raw.starts_with("https://") {
+        raw
+    } else if raw.contains("://") {
+        return Err("代理地址仅支持 http:// 或 https:// 协议。".into());
+    } else {
+        format!("http://{raw}")
+    };
     let app_data = resolve_app_data()?;
     let path = settings_path(&app_data);
     if let Some(parent) = path.parent() {
@@ -215,7 +224,8 @@ pub fn run() {
             file_size,
             list_models,
             read_settings,
-            save_settings
+            save_settings,
+            get_system_metrics
         ])
         .setup(|app| {
             let app_handle = app.handle().clone();

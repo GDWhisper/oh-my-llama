@@ -214,6 +214,19 @@ export const zh = {
   'about.title': '关于',
   'about.version': '版本',
   'about.repo': '项目仓库',
+
+  // 系统性能面板
+  'metrics.title': '系统性能',
+  'metrics.cpu': 'CPU',
+  'metrics.cores': '核心',
+  'metrics.memory': '内存',
+  'metrics.gpu': 'GPU',
+  'metrics.gpuNone': '未检测到 NVIDIA 设备',
+  'metrics.vram': '显存',
+  'metrics.temp': '温度',
+  'metrics.loadError': '性能数据获取失败',
+  'metrics.collapse': '收起',
+  'metrics.expand': '展开',
 } as const;
 
 export type MessageKey = keyof typeof zh;
@@ -388,7 +401,7 @@ export const en: Record<MessageKey, string> = {
   'settings.close': 'Close Settings',
   'settings.updateProxy': 'Update Proxy',
   'settings.updateProxyHint':
-    'Leave empty to connect directly (no proxy). If set, update checks will go through this proxy address.',
+    'Leave empty to connect directly (no proxy). If set, update checks will go through this proxy.',
   'settings.updateProxySaved': 'Saved. Takes effect on the next update check.',
 
   // 更新（方案 A：手动检查、可见可取消）
@@ -422,4 +435,17 @@ export const en: Record<MessageKey, string> = {
   'about.title': 'About',
   'about.version': 'Version',
   'about.repo': 'Repository',
+
+  // 系统性能面板
+  'metrics.title': 'System Performance',
+  'metrics.cpu': 'CPU',
+  'metrics.cores': 'Cores',
+  'metrics.memory': 'Memory',
+  'metrics.gpu': 'GPU',
+  'metrics.gpuNone': 'No NVIDIA device detected',
+  'metrics.vram': 'VRAM',
+  'metrics.temp': 'Temp',
+  'metrics.loadError': 'Failed to fetch performance data',
+  'metrics.collapse': 'Collapse',
+  'metrics.expand': 'Expand',
 };

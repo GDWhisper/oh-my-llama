@@ -13,6 +13,7 @@ import { useI18n } from './i18n';
 import type { MessageKey } from './i18n/messages';
 import { SettingsDialog } from './components/SettingsDialog';
 import { UpdateDialog } from './components/UpdateDialog';
+import { MetricsPanel } from './components/MetricsPanel';
 import { useUpdater } from './hooks/useUpdater';
 import type { ServerConfig } from './types';
 import './App.css';
@@ -381,6 +382,7 @@ export default function App() {
         </section>
 
         <section className="column main log-side">
+          <MetricsPanel />
           <LogPanel logs={logs} commandLine={commandLine} onClear={handleClearLogs} />
         </section>
       </div>

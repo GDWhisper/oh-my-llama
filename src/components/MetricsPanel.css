@@ -1,0 +1,90 @@
+.metrics-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.metrics-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+
+.metrics-row {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+
+.metrics-label {
+  color: #6b7280;
+  min-width: 42px;
+  flex-shrink: 0;
+}
+
+.metrics-value {
+  color: #111827;
+  font-weight: 600;
+}
+
+.metrics-muted {
+  color: #9ca3af;
+  font-weight: 400;
+  font-style: italic;
+}
+
+.metrics-gpu {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.metrics-sub {
+  font-size: 12px;
+  color: #6b7280;
+  padding-left: 52px;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.6;
+}
+
+.metrics-sub-line {
+  white-space: nowrap;
+}
+
+.metrics-error {
+  font-size: 12px;
+  color: #dc2626;
+}
+
+/* 收起/展开按钮：右上角朴素文字按钮，无图标 */
+.metrics-toggle {
+  appearance: none;
+  border: none;
+  background: transparent;
+  padding: 2px 4px;
+  font-size: 12px;
+  color: #2563eb;
+  cursor: pointer;
+  line-height: 1.2;
+}
+
+.metrics-toggle:hover {
+  text-decoration: underline;
+}
+
+/* 收起态：单行紧凑数值 */
+.metrics-compact {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+  color: #6b7280;
+}
+
+.metrics-compact .metrics-sep {
+  color: #cbd5e1;
+}
