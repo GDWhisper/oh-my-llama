@@ -13,7 +13,6 @@ interface GpuMetrics {
 
 interface MetricsSnapshot {
   cpu_usage: number;
-  cpu_cores: number[];
   mem_total_mb: number;
   mem_used_mb: number;
   mem_usage: number;

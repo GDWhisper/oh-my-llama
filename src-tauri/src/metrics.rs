@@ -21,8 +21,7 @@ pub struct GpuMetrics {
 
 #[derive(Debug, Clone, Serialize)]
 pub struct MetricsSnapshot {
-    pub cpu_usage: f32,      // 0-100 全局占用
-    pub cpu_cores: Vec<f32>, // 每核占用 0-100
+    pub cpu_usage: f32, // 0-100 全局占用
     pub mem_total_mb: u64,
     pub mem_used_mb: u64,
     pub mem_usage: f32, // 0-100
@@ -94,7 +93,6 @@ pub fn get_system_metrics() -> MetricsSnapshot {
     sys.refresh_memory();
 
     let cpu_usage = sys.global_cpu_info().cpu_usage();
-    let cpu_cores = sys.cpus().iter().map(|c| c.cpu_usage()).collect();
 
     let mem_total = sys.total_memory();
     let mem_used = sys.used_memory();
@@ -111,7 +109,6 @@ pub fn get_system_metrics() -> MetricsSnapshot {
 
     MetricsSnapshot {
         cpu_usage,
-        cpu_cores,
         mem_total_mb: mem_total / (1024 * 1024),
         mem_used_mb: mem_used / (1024 * 1024),
         mem_usage,

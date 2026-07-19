@@ -1,9 +1,9 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 25 25" width="1024" height="1024" shape-rendering="crispEdges">
-  <!-- 黑色圆角背景 -->
-  <rect x="0" y="0" width="25" height="25" rx="4" fill="#0a0a0a"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 25 25" width="1024" height="1024">
+  <!-- 苹果风格圆角正方形背景：圆角半径 ≈ 22% 边长（iOS/macOS 图标标准） -->
+  <rect x="0" y="0" width="25" height="25" rx="5.6" fill="#0a0a0a"/>
 
-  <!-- 像素风 OML 字母（白色） -->
-  <g fill="#ffffff">
+  <!-- 像素风 OML 字母（白色，硬边保持极客感） -->
+  <g fill="#ffffff" shape-rendering="crispEdges">
     <!-- O (cols 3-7, rows 9-15) -->
     <rect x="4" y="9" width="1" height="1"/>
     <rect x="5" y="9" width="1" height="1"/>
