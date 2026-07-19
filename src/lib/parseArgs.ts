@@ -9,7 +9,7 @@ import type { Translator } from '../i18n/messages';
 export interface ParsedArg {
   // '' 表示位置参数（无 flag）
   flag: string;
-  kind: 'value' | 'bool' | 'model' | 'unknown' | 'positional' | 'exe';
+  kind: 'value' | 'bool' | 'model' | 'unknown' | 'positional' | 'exe' | 'ignore';
   field?: keyof ServerConfig;
   key?: AdvancedKey;
   boolValue?: boolean;
@@ -17,9 +17,9 @@ export interface ParsedArg {
 }
 
 interface FlagInfo {
-  kind: 'value' | 'bool' | 'model';
+  kind: 'value' | 'bool' | 'model' | 'ignore';
   key?: AdvancedKey;
-  field: keyof ServerConfig;
+  field?: keyof ServerConfig;
   boolValue?: boolean;
 }
 
@@ -47,6 +47,9 @@ const FLAG_INFO: Record<string, FlagInfo> = {
   '--mlock': { kind: 'bool', key: 'mlock', field: 'mlock', boolValue: true },
   '-m': { kind: 'model', field: 'model' },
   '--model': { kind: 'model', field: 'model' },
+  // 启动器内部常量（由 build_server_args 自动追加）：识别但忽略，不进 patch / extra_args，
+  // 且会吞掉其后的取值 token，避免回写时污染自定义参数。
+  '--timeout': { kind: 'ignore' },
 };
 
 // 引号感知的分词：双引号/单引号内的空格视为值的一部分；引号本身被剥离。
@@ -111,6 +114,15 @@ export function parseLlamaArgs(input: string): ParsedArg[] {
       }
       const info = FLAG_INFO[tok];
       if (info) {
+        // 启动器内部常量（如 --timeout）：识别但忽略；仍需吞掉其后的取值 token
+        // （--flag value 形式），否则会被误判为位置参数进入 extra_args。
+        if (info.kind === 'ignore') {
+          if (value === null && i + 1 < tokens.length && !tokens[i + 1].startsWith('-')) {
+            i++;
+          }
+          out.push({ flag: tok, kind: 'ignore', value: null });
+          continue;
+        }
         if (info.kind === 'bool') {
           out.push({
             flag: tok,
@@ -180,6 +192,8 @@ export function buildPlan(args: ParsedArg[], t: Translator): ApplyPlan {
   const rows: PreviewRow[] = [];
 
   for (const arg of args) {
+    // 启动器内部常量：识别时已忽略，回写不会污染配置，直接跳过。
+    if (arg.kind === 'ignore') continue;
     if (arg.kind === 'exe') {
       if (arg.value) {
         patch.llama_server_path = arg.value;

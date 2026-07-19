@@ -138,6 +138,38 @@ body {
   gap: 8px;
 }
 
+/* 卡片头部左分组：标题「配置管理」与「未保存」提示图标，图标紧贴标题右侧适当距离。 */
+.panel-header-left {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* 卡片头部右侧操作区：分享图标按钮。 */
+.panel-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* 「未保存」提示图标（带圈 i）：当前 live 配置与已落盘基线不同时亮起，
+   紧贴「配置管理」标题右侧，缩小为内联小图标。提示用户有未保存改动
+   （可能忘了或意外改了）。纯指示、不可点击。 */
+.unsaved-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: #b45309;
+  cursor: default;
+  line-height: 0;
+}
+
+.unsaved-icon svg {
+  display: block;
+  width: 15px;
+  height: 15px;
+}
+
 /* 图标按钮：白底灰边方盒，与齿轮(设置)按钮同款样式；用于配置管理卡片右上角的分享图标 */
 .icon-btn {
   display: inline-flex;
@@ -168,6 +200,15 @@ body {
   display: block;
   width: 18px;
   height: 18px;
+}
+
+/* 图标按钮禁用态（如「恢复配置」在无未保存改动时）：淡灰不可点。 */
+.icon-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  background: #f9fafb;
+  color: #9ca3af;
+  border-color: #e5e7eb;
 }
 
 .section-header {
@@ -396,6 +437,16 @@ body {
 /* 自定义下拉框（替代原生 select，便于在选项右侧放 × 删除图标） */
 .select-box {
   position: relative;
+  /* 在「选择配置」行内撑满，右侧恢复按钮自然留在其旁。 */
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+/* 「选择配置」字段：下拉框(撑满) + 右侧恢复按钮，水平同排、垂直居中。 */
+.select-with-restore {
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .select-trigger {
@@ -1077,38 +1128,60 @@ button:disabled {
   font-size: 13px;
 }
 
-/* 「一键传参」富文本窗口：位于必要参数与高级参数两张卡片之间 */
-.param-desc {
-  margin: 0;
-  font-size: 12px;
-  color: #6b7280;
-  line-height: 1.5;
+/* 原始参数卡片：编辑态沿用 .panel 基底，这里只补必要的差异 */
+.raw-params .raw-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
 }
 
-.param-desc code {
-  background: #f3f4f6;
-  padding: 1px 4px;
-  border-radius: 4px;
-  font-size: 11px;
-}
-
-.param-textarea {
+/* 「原始参数」框体：只读(<pre>)与编辑(<textarea>)共用同一套样式，
+   区别仅在于编辑态通过 .raw-box--edit 放开「可输入」。
+   两者几何/配色/字体完全一致，点「编辑」时框体不跳变、命令文字不位移。 */
+.raw-box {
+  display: block;
+  box-sizing: border-box;
   width: 100%;
+  margin: 0;
+  /* 与编辑态同高，切换时不因内容长度变化而跳变 */
   min-height: 140px;
-  resize: vertical;
-  border-radius: 8px;
-  border: 1px solid #d1d5db;
-  padding: 10px 12px;
+  padding: 12px 14px;
+  border-radius: 10px;
+  background: #0b1020;
+  border: 1px solid #1c2540;
+  overflow: auto;
   font-family:
     ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New',
     monospace;
-  font-size: 12px;
-  line-height: 1.5;
-  color: #111827;
-  background: #ffffff;
+  font-size: 12.5px;
+  line-height: 1.6;
+  color: #34d399;
+  white-space: pre-wrap;
+  word-break: break-word;
+  /* 滚动条优雅隐身：零宽度、不占排版空间，两态文本宽度恒定不跳；
+     仍可滚轮 / 拖选滚动。 */
+  scrollbar-width: none; /* Firefox */
+  -ms-overflow-style: none; /* 旧 Edge/IE（保险） */
+}
+.raw-box::-webkit-scrollbar {
+  width: 0;
+  height: 0;
 }
 
-.param-textarea:focus {
+/* 只读态内 <code> 继承等宽，避免默认字体差异 */
+.raw-box code {
+  font-family: inherit;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* 编辑态：在 .raw-box 基础上仅放开输入能力（光标 + 可拖拽缩放） */
+.raw-box--edit {
+  resize: vertical;
+  caret-color: #34d399;
+}
+
+.raw-box--edit:focus {
   outline: 2px solid #2563eb;
   outline-offset: 0;
 }

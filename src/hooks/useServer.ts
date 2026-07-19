@@ -37,9 +37,7 @@ export function useServer() {
   const [config, setConfig] = useState<ServerConfig | null>(null);
   const [status, setStatus] = useState<ServerStatus | null>(null);
   const [logs, setLogs] = useState<ServerLogLine[]>([]);
-  // 我们发送给 llama-server 的命令行（level=cmd）：单独保存，供原生模式置顶固定显示，
-  // 不进日志滚动缓冲、不会随输出增多被挤掉。
-  const [commandLine, setCommandLine] = useState<string | null>(null);
+  // 启动命令行现由「原始参数」卡片从 config 实时派生展示，此处不再单独保存。
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   // 轻量提示（保存成功 / 复制成功等）：固定底部居中，约 2.2s 后自动消失。
@@ -82,6 +80,10 @@ export function useServer() {
   // 用于避免闭包读到过期 state 的镜像 ref。
   const configsRef = useRef<Record<string, ServerConfig>>({});
   const activeRef = useRef<string>('default');
+  // 配置「重载纪元」：每次从已落盘版本载入 config（切换配置 / 恢复配置）时 +1。
+  // 用于让「原始参数」卡片在「回滚到同名已保存配置」时也能感知并重置编辑态，
+  // 避免把旧编辑文本误写回刚恢复的干净配置（切配置时 configName 不变，仅靠它无法触发）。
+  const [configEpoch, setConfigEpoch] = useState(0);
 
   // 根据一份完整配置（含 enabled_advanced_params）重算高级参数开关状态。
   const applyEnabled = (cfg: ServerConfig | null) => {
@@ -181,8 +183,7 @@ export function useServer() {
   }, []);
 
   // 日志实时透传：挂载时先拉一次历史，随后订阅后端 log://line 增量事件逐行追加，
-  // 不再靠轮询——这样进度/输出一产生就实时出现在面板。命令行(level=cmd)单独提取到
-  // commandLine 供置顶显示。log://clear 用于清空同步。
+  // 不再靠轮询——这样进度/输出一产生就实时出现在面板。log://clear 用于清空同步。
   useEffect(() => {
     let unlistenLine: (() => void) | undefined;
     let unlistenClear: (() => void) | undefined;
@@ -192,19 +193,12 @@ export function useServer() {
         const data = await invoke<ServerLogLine[]>('read_logs');
         if (!disposed) {
           setLogs(data);
-          const lastCmd = [...data].reverse().find((line) => line.level === 'cmd');
-          if (lastCmd) {
-            setCommandLine(lastCmd.text);
-          }
         }
       } catch (err) {
         console.error(err);
       }
       unlistenLine = await listen<ServerLogLine>('log://line', (event) => {
         const line = event.payload;
-        if (line.level === 'cmd') {
-          setCommandLine(line.text);
-        }
         setLogs((prev) => {
           const next = [...prev, line];
           if (next.length > 5000) {
@@ -215,7 +209,6 @@ export function useServer() {
       });
       unlistenClear = await listen('log://clear', () => {
         setLogs([]);
-        setCommandLine(null);
       });
     })();
     return () => {
@@ -338,6 +331,7 @@ export function useServer() {
     }
     setConfig({ ...defaultRef.current, ...base });
     applyEnabled(base);
+    setConfigEpoch((value) => value + 1);
   };
 
   // 打开「新建空配置」命名弹窗（空配置 = 工厂默认参数的副本）。
@@ -502,7 +496,6 @@ export function useServer() {
     try {
       await invoke('clear_logs');
       setLogs([]);
-      setCommandLine(null);
     } catch (err) {
       console.error(err);
     }
@@ -574,11 +567,21 @@ export function useServer() {
 
   const isDefault = activeName === 'default';
 
+  // 脏数据检测：当前 live 配置（config）与「已落盘基线」是否不同。
+  // 基线 = 默认配置(defaultRef) 或 当前命名配置(configsRef[activeName])。
+  // 任何面板（必要/高级/原始参数）未保存的改动都会让 isDirty 为 true，
+  // 供「未保存」标识与切配置前的二次确认使用。纯前端派生，不触后端默认值/IPC。
+  const dirtyBaseline =
+    activeName === 'default' ? defaultRef.current : configsRef.current[activeName];
+  const isDirty =
+    !!config && !!dirtyBaseline && JSON.stringify(config) !== JSON.stringify(dirtyBaseline);
+
   return {
     config,
+    isDirty,
+    configEpoch,
     status,
     logs,
-    commandLine,
     error,
     toast,
     showToast,
@@ -611,6 +614,7 @@ export function useServer() {
     cancelName,
     deleteConfig,
     setConfig,
+    applyEnabled,
     setAdvancedEnabled,
     setAdjustingAdvanced,
     handleSave,

@@ -4,18 +4,16 @@ import { ControlPanel } from './components/ControlPanel';
 import { LogPanel } from './components/LogPanel';
 import { BasicParamsPanel } from './components/BasicParamsPanel';
 import { AdvancedParamsPanel } from './components/AdvancedParamsPanel';
-import { ParamPaste } from './components/ParamPaste';
-import { Button } from './components/Button';
+import { RawParams } from './components/RawParams';
 import { IconButton } from './components/IconButton';
 import { ConfigManager } from './components/ConfigManager';
 import { configToCommand, splitExtraArg, type ApplyPlan } from './lib/parseArgs';
 import { useI18n } from './i18n';
-import type { MessageKey } from './i18n/messages';
 import { SettingsDialog } from './components/SettingsDialog';
 import { UpdateDialog } from './components/UpdateDialog';
+import { ConfirmDialog } from './components/ConfirmDialog';
 import { MetricsPanel } from './components/MetricsPanel';
 import { useUpdater } from './hooks/useUpdater';
-import type { ServerConfig } from './types';
 import './App.css';
 
 // 复制到剪切板：优先 navigator.clipboard（安全上下文），失败时回退 execCommand。
@@ -52,9 +50,10 @@ export default function App() {
   const updater = useUpdater();
   const {
     config,
+    configEpoch,
+    isDirty,
     status,
     logs,
-    commandLine,
     error,
     toast,
     showToast,
@@ -84,6 +83,7 @@ export default function App() {
     cancelName,
     deleteConfig,
     setConfig,
+    applyEnabled,
     setAdjustingAdvanced,
     handleSave,
     handleStart,
@@ -96,12 +96,28 @@ export default function App() {
     setAdvancedEnabled,
   } = server;
 
-  // 追加参数前的提醒弹窗状态：非 null 时展示，列出将被剔除的必要参数与重复的自定义参数。
-  const [appendWarn, setAppendWarn] = useState<{
-    plan: ApplyPlan;
-    necessary: string[];
-    dups: string[];
-  } | null>(null);
+  // 切配置守卫：当前有未保存改动时，先弹二次确认而非静默丢弃（脏数据提示）。
+  const [pendingSelect, setPendingSelect] = useState<string | null>(null);
+  const requestSelect = (name: string) => {
+    if (isDirty) {
+      setPendingSelect(name);
+      return;
+    }
+    selectConfig(name);
+  };
+
+  // 恢复为当前选中配置的已保存版本：有未保存改动时弹确认（避免误点丢改动），
+  // 否则直接回滚（此时回滚是无害的同配置重载）。按钮在干净时 disabled，故通常只脏时触发。
+  const [pendingRestore, setPendingRestore] = useState(false);
+  const requestRestore = () => {
+    if (!isDirty) {
+      selectConfig(activeName);
+      return;
+    }
+    setPendingRestore(true);
+  };
+
+  // （追加参数提醒弹窗已移除：原始参数卡片改为实时回写，不再区分覆盖/追加）
 
   // 设置浮窗开关：齿轮图标触发，承载语言等偏好设置。
   const [showSettings, setShowSettings] = useState(false);
@@ -116,44 +132,15 @@ export default function App() {
     showToast(ok ? t('app.share.copied') : t('app.share.copyFailed'));
   };
 
-  // 追加模式下「必要参数」：用户粘贴了这些字段也不覆盖当前配置（追加只加高级/自定义参数）。
-  const NECESSARY_FIELDS = new Set<keyof ServerConfig>([
-    'model',
-    'host',
-    'port',
-    'llama_server_path',
-    'model_dir',
-  ]);
-  // 弹窗里要提示剔除的必要参数字段（model_dir 是派生字段，无需单列提示）。
-  // 值为 i18n 文案键，渲染时用 t() 取译文。
-  const NECESSARY_LABEL_KEYS: Partial<Record<keyof ServerConfig, MessageKey>> = {
-    model: 'field.model',
-    host: 'field.host',
-    port: 'field.port',
-    llama_server_path: 'field.serverPath',
-  };
-
   // 把解析出的套用计划真正写入配置：已知 flag 落到对应字段并启用高级键，
   // 未知 flag 以自定义参数（extra_args）原样进入启动命令。
-  // mode='overwrite'：所有已知字段套用 + 自定义参数整体替换（与旧「确认添加」一致）；
-  // mode='append'：仅套用高级参数并启用高级键、自定义参数接到现有之后，
-  //   必要参数（model/host/port/启动器路径）保持现有、不覆盖。
-  const applyPlan = (plan: ApplyPlan, mode: 'overwrite' | 'append') => {
+  // 编辑态统一以覆盖方式实时回写配置（含必要参数一并套用，复原按钮负责回退）。
+  const applyPlan = (plan: ApplyPlan) => {
     setConfig((current) => {
       if (!current) return current;
-      const next = { ...current };
-      if (mode === 'append') {
-        // 仅套用非必要字段（即高级参数）；必要参数保持现有，不覆盖。
-        for (const key of Object.keys(plan.patch) as (keyof ServerConfig)[]) {
-          if (!NECESSARY_FIELDS.has(key)) {
-            (next as Record<string, unknown>)[key] = (plan.patch as Record<string, unknown>)[key];
-          }
-        }
-      } else {
-        Object.assign(next, plan.patch);
-      }
-      // -m/--model 附带推导 model_dir，让下拉框仍能定位到模型所在目录（仅覆盖模式）。
-      if (mode === 'overwrite' && plan.patch.model !== undefined) {
+      const next = { ...current, ...plan.patch };
+      // -m/--model 附带推导 model_dir，让下拉框仍能定位到模型所在目录。
+      if (plan.patch.model !== undefined) {
         const v = plan.patch.model as string;
         const idx = Math.max(v.lastIndexOf('/'), v.lastIndexOf('\\'));
         next.model_dir = idx > 0 ? v.slice(0, idx) : current.model_dir;
@@ -161,8 +148,7 @@ export default function App() {
       const enabledSet = new Set(current.enabled_advanced_params);
       plan.enable.forEach((key) => enabledSet.add(key));
       next.enabled_advanced_params = [...enabledSet];
-      next.extra_args =
-        mode === 'append' ? [...current.extra_args, ...plan.extraArgs] : plan.extraArgs;
+      next.extra_args = plan.extraArgs;
       return next;
     });
     setAdvancedEnabled((current) => {
@@ -174,32 +160,7 @@ export default function App() {
     });
   };
 
-  // 点击【追加参数】：先收集「必要参数」与「重复自定义参数」两项提醒；
-  // 都为空则直接追加、不打断；否则弹窗让用户决定「仍要追加 / 覆盖参数 / 取消」。
-  const handleAppend = (plan: ApplyPlan) => {
-    const necessary = (Object.keys(plan.patch) as (keyof ServerConfig)[]).filter(
-      (k) => k in NECESSARY_LABEL_KEYS,
-    );
-    const currentPairs: [string, string][] = [];
-    if (config) {
-      for (let i = 0; i + 1 < config.extra_args.length; i += 2) {
-        currentPairs.push([config.extra_args[i], config.extra_args[i + 1]]);
-      }
-    }
-    const dups: string[] = [];
-    for (let i = 0; i + 1 < plan.extraArgs.length; i += 2) {
-      const flag = plan.extraArgs[i];
-      const value = plan.extraArgs[i + 1];
-      if (currentPairs.some(([f, v]) => f === flag && v === value)) {
-        dups.push(value !== '' ? `${flag} ${value}` : flag);
-      }
-    }
-    if (necessary.length === 0 && dups.length === 0) {
-      applyPlan(plan, 'append');
-      return;
-    }
-    setAppendWarn({ plan, necessary, dups });
-  };
+  // （handleAppend 已移除：原始参数卡片编辑态统一覆盖回写，不再区分追加模式）
 
   // 移除某个自定义参数（按扁平数组里的起始下标，连同其值一并删掉）。
   const removeExtraArg = (start: number) => {
@@ -275,8 +236,10 @@ export default function App() {
           <ConfigManager
             configs={configs}
             activeName={activeName}
+            isDirty={isDirty}
             renameTarget={renameTarget}
-            onSelect={selectConfig}
+            onSelect={requestSelect}
+            onRestoreConfig={requestRestore}
             onCreateEmpty={requestCreateEmpty}
             onShare={shareConfig}
             onSaveAsNew={requestSaveAsNew}
@@ -288,79 +251,18 @@ export default function App() {
             onNameConfirm={confirmName}
             onNameCancel={cancelName}
           />
-          <ParamPaste
-            onOverwrite={(p) => applyPlan(p, 'overwrite')}
-            onAppend={(p) => handleAppend(p)}
+          <RawParams
+            config={config}
+            configName={activeName}
+            configEpoch={configEpoch}
+            onApply={(p) => applyPlan(p)}
+            onRestore={(cfg) => {
+              setConfig(cfg);
+              applyEnabled(cfg);
+            }}
+            showToast={showToast}
           />
-          {appendWarn && (
-            <div className="modal-overlay" onClick={() => setAppendWarn(null)}>
-              <div
-                className="modal"
-                role="dialog"
-                aria-modal="true"
-                aria-label={t('append.title')}
-                onClick={(event) => event.stopPropagation()}
-              >
-                <div className="modal-title">{t('append.title')}</div>
-                <div className="modal-body">
-                  {appendWarn.necessary.length > 0 && (
-                    <div>
-                      <p style={{ margin: '0 0 6px' }}>
-                        {t('append.necessaryPre')}
-                        <span style={{ color: '#b91c1c', fontWeight: 600 }}>
-                          {t('append.necessaryStrong')}
-                        </span>
-                        {t('append.necessaryPost')}
-                      </p>
-                      <ul style={{ margin: '0 0 8px', paddingLeft: 18 }}>
-                        {appendWarn.necessary.map((key) => (
-                          <li key={key}>{t(NECESSARY_LABEL_KEYS[key as keyof ServerConfig]!)}</li>
-                        ))}
-                      </ul>
-                      <p style={{ margin: '0 0 8px' }}>{t('append.necessaryHint')}</p>
-                    </div>
-                  )}
-                  {appendWarn.dups.length > 0 && (
-                    <div>
-                      <p style={{ margin: '0 0 6px' }}>{t('append.dupsIntro')}</p>
-                      <ul style={{ margin: '0', paddingLeft: 18 }}>
-                        {appendWarn.dups.map((text) => (
-                          <li key={text}>{text}</li>
-                        ))}
-                      </ul>
-                    </div>
-                  )}
-                </div>
-                <div className="modal-actions">
-                  <Button variant="secondary" type="button" onClick={() => setAppendWarn(null)}>
-                    {t('common.cancel')}
-                  </Button>
-                  <Button
-                    variant="secondary"
-                    type="button"
-                    onClick={() => {
-                      const p = appendWarn.plan;
-                      setAppendWarn(null);
-                      applyPlan(p, 'overwrite');
-                    }}
-                  >
-                    {t('paramPaste.overwrite')}
-                  </Button>
-                  <Button
-                    variant="primary"
-                    type="button"
-                    onClick={() => {
-                      const p = appendWarn.plan;
-                      setAppendWarn(null);
-                      applyPlan(p, 'append');
-                    }}
-                  >
-                    {t('append.stillAppend')}
-                  </Button>
-                </div>
-              </div>
-            </div>
-          )}
+          {/* （追加提醒弹窗已移除） */}
           <BasicParamsPanel config={config} models={models} onChange={setConfig} />
           <AdvancedParamsPanel
             config={config}
@@ -383,7 +285,7 @@ export default function App() {
 
         <section className="column main log-side">
           <MetricsPanel />
-          <LogPanel logs={logs} commandLine={commandLine} onClear={handleClearLogs} />
+          <LogPanel logs={logs} onClear={handleClearLogs} />
         </section>
       </div>
 
@@ -402,6 +304,34 @@ export default function App() {
         onInstall={updater.install}
         onDismiss={updater.dismiss}
         onRetry={updater.check}
+      />
+      <ConfirmDialog
+        open={pendingSelect !== null}
+        title={t('config.dirtySwitch.title')}
+        message={t('config.dirtySwitch.body')}
+        confirmText={t('config.dirtySwitch.confirm')}
+        cancelText={t('common.cancel')}
+        danger
+        onConfirm={() => {
+          if (pendingSelect) selectConfig(pendingSelect);
+          setPendingSelect(null);
+        }}
+        onCancel={() => setPendingSelect(null)}
+      />
+      <ConfirmDialog
+        open={pendingRestore}
+        title={t('config.restoreTitle')}
+        message={t('config.restoreBody', {
+          name: activeName === 'default' ? t('config.default') : activeName,
+        })}
+        confirmText={t('config.restoreConfirm')}
+        cancelText={t('common.cancel')}
+        danger
+        onConfirm={() => {
+          selectConfig(activeName);
+          setPendingRestore(false);
+        }}
+        onCancel={() => setPendingRestore(false)}
       />
     </main>
   );

@@ -53,6 +53,7 @@
   - `### 功能优化`
   - `### Bug 修复`
   **不要混在一起**；也**不要放「下载」栏目**（下载信息已在 Release 资产区自动展示）。
+- **⛔ 内容红线（用户硬性要求）**：Release Note 只写「两个**已发布**版本之间**用户可见**的差异」。**严禁混入开发过程中误添加又删除的内部改动**（如某版本开发期误塞进 UI、随后又移除的元素；或加了又删、从未在 UI 展示过的字段等）。判断标准：该改动在**上一正式版里不存在、在当前正式版里也不存在** → 对版本对比毫无意义，必须剔除。写完逐条自问：「用户从旧版升到新版会注意到这条吗？」回答「不会 / 从未出现过」的，删。
 - Release Note 末尾统一加一行：`> 详细改动参考 CHANGELOG`。
 - **不使用 emoji**（遵循项目无表情符号约定）。
 - 归类示例：按钮禁用态误显蓝底 → 归 **Bug 修复**；`--no-webui` 置灰、停止变红、地址文案统一 → 归 **功能优化**。
@@ -80,7 +81,7 @@
 - [ ] `dev` 已推送、`main` 已合并并推送
 - [ ] tag `vX.Y.Z` 已推送并触发 CI
 - [ ] `CHANGELOG.md` 已更新（详细、三类分段）
-- [ ] Release Note 已用 `--notes-file` 写入（三段式、无下载栏目、底部「详细改动参考 CHANGELOG」），并 `--draft=false --latest`
+- [ ] Release Note 已用 `--notes-file` 写入（三段式、无下载栏目、底部「详细改动参考 CHANGELOG」、**无开发期内部增减类条目**），并 `--draft=false --latest`
 - [ ] `gh release view vX.Y.Z` 确认输出含 `draft: false`（**未确认前不得回复用户「已发布」**）
 - [ ] 资产（`setup.exe` + `.msi`）已生成
 - [ ] 本地已生成签名私钥 `~/.tauri/oh-my-llama.key`（公钥已写入 `src-tauri/tauri.conf.json` 的 `plugins.updater.pubkey`）

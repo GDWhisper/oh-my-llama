@@ -30,14 +30,13 @@ export const zh = {
   'field.port': '监听端口',
   'field.serverPath': '启动器路径',
 
-  // 追加参数提醒弹窗
-  'append.title': '追加参数提醒',
-  'append.necessaryPre': '以下必要参数将',
-  'append.necessaryStrong': '不填入',
-  'append.necessaryPost': '当前配置（追加模式只追加高级参数）：',
-  'append.necessaryHint': '如需填入这些必要参数，请点击【覆盖参数】。',
-  'append.dupsIntro': '以下自定义参数与现有完全相同（已存在）：',
-  'append.stillAppend': '仍要追加',
+  // 原始参数卡片
+  'rawParams.title': '原始参数',
+  'rawParams.copy': '复制',
+  'rawParams.edit': '编辑',
+  'rawParams.restore': '复原',
+  'rawParams.done': '完成',
+  'rawParams.previewTitle': '解析预览（实时回写，点击【完成】后生效）',
 
   // 标题卡片 / 服务控制
   'control.modelFileFallback': '模型文件',
@@ -69,6 +68,14 @@ export const zh = {
   'config.deleteConfirm':
     '确认永久删除配置「{name}」吗？此操作不可撤销，删除后该配置的所有参数都将丢失。',
   'config.autoNamePrefix': '配置',
+  'config.unsaved': '未保存',
+  'config.dirtySwitch.title': '未保存的改动',
+  'config.dirtySwitch.body': '当前配置有未保存的修改，切换到其他配置将丢弃这些改动。仍要切换吗？',
+  'config.dirtySwitch.confirm': '丢弃并切换',
+  'config.restore': '恢复配置',
+  'config.restoreTitle': '恢复配置',
+  'config.restoreBody': '将放弃当前未保存的改动，并恢复为「{name}」已保存的配置。仍要恢复吗？',
+  'config.restoreConfirm': '恢复',
 
   // 命名弹窗
   'name.renameTitle': '重命名配置',
@@ -128,17 +135,6 @@ export const zh = {
   'log.clear': '清空日志',
   'log.empty': '暂无日志输出…',
   'log.backToBottom': '↓ 回到底部',
-
-  // 一键传参面板
-  'paramPaste.title': '一键传参',
-  'paramPaste.descPre': '粘贴 llama-server 的完整命令行（含或不含 ',
-  'paramPaste.descPost':
-    ' 均可）。确认后，支持的高级参数会直接套用，无法识别的参数以「自定义参数」形式一并写入启动命令，确保与真实启动时完全一致。',
-  'paramPaste.placeholder':
-    '例如：\nllama-server.exe -m C:/models/model.gguf --host 0.0.0.0 --port 9999 -c 8192 -ngl 99 --main-gpu 0 --alias demo',
-  'paramPaste.previewTitle': '解析预览（确认后将生效）',
-  'paramPaste.overwrite': '覆盖参数',
-  'paramPaste.append': '追加参数',
 
   // 一键传参解析预览行
   'preview.serverPath': '启动器路径 → {value}',
@@ -256,14 +252,13 @@ export const en: Record<MessageKey, string> = {
   'field.port': 'Listen port',
   'field.serverPath': 'Launcher path',
 
-  'append.title': 'Append Parameters Notice',
-  'append.necessaryPre': 'The following required parameters will ',
-  'append.necessaryStrong': 'NOT be applied to',
-  'append.necessaryPost': ' the current config (append mode only appends advanced parameters):',
-  'append.necessaryHint': 'To fill in these required parameters, click "Overwrite Parameters".',
-  'append.dupsIntro':
-    'The following custom parameters are identical to existing ones (already present):',
-  'append.stillAppend': 'Append Anyway',
+  // Raw Parameters card
+  'rawParams.title': 'Raw Parameters',
+  'rawParams.copy': 'Copy',
+  'rawParams.edit': 'Edit',
+  'rawParams.restore': 'Restore',
+  'rawParams.done': 'Done',
+  'rawParams.previewTitle': 'Parsed preview (live write-back, applied on Done)',
 
   'control.modelFileFallback': 'model file',
   'control.modelNone': 'Current model: none selected',
@@ -293,6 +288,15 @@ export const en: Record<MessageKey, string> = {
   'config.deleteConfirm':
     'Permanently delete config "{name}"? This cannot be undone; all parameters of this config will be lost.',
   'config.autoNamePrefix': 'Config',
+  'config.unsaved': 'Unsaved',
+  'config.dirtySwitch.title': 'Unsaved changes',
+  'config.dirtySwitch.body':
+    'The current config has unsaved changes. Switching will discard them. Continue?',
+  'config.dirtySwitch.confirm': 'Discard & Switch',
+  'config.restore': 'Restore Config',
+  'config.restoreTitle': 'Restore Config',
+  'config.restoreBody': 'Discard unsaved changes and restore config "{name}" to its saved version?',
+  'config.restoreConfirm': 'Restore',
 
   'name.renameTitle': 'Rename Config',
   'name.saveAsNewTitle': 'Save as New Config',
@@ -350,16 +354,6 @@ export const en: Record<MessageKey, string> = {
   'log.clear': 'Clear Logs',
   'log.empty': 'No log output yet…',
   'log.backToBottom': '↓ Back to bottom',
-
-  'paramPaste.title': 'Paste Parameters',
-  'paramPaste.descPre': 'Paste the full llama-server command line (with or without ',
-  'paramPaste.descPost':
-    '). After confirming, supported advanced parameters are applied directly, and unrecognized parameters are written as "custom parameters" into the launch command, ensuring it exactly matches the real launch.',
-  'paramPaste.placeholder':
-    'e.g.\nllama-server.exe -m C:/models/model.gguf --host 0.0.0.0 --port 9999 -c 8192 -ngl 99 --main-gpu 0 --alias demo',
-  'paramPaste.previewTitle': 'Parsed preview (applied after confirming)',
-  'paramPaste.overwrite': 'Overwrite Parameters',
-  'paramPaste.append': 'Append Parameters',
 
   'preview.serverPath': 'Launcher path → {value}',
   'preview.model': 'Model path → {value}',
