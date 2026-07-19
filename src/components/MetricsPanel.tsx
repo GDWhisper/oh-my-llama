@@ -141,6 +141,21 @@ export function MetricsPanel() {
                 ? '—'
                 : snap.gpus.map((g) => g.usage.toFixed(0) + '%').join(' / ')}
             </span>
+            {snap.gpus.length > 0 && (
+              <>
+                <span className="metrics-sep">·</span>
+                <span className="metrics-value">
+                  {t('metrics.vram')}{' '}
+                  {snap.gpus
+                    .map((g) =>
+                      g.vram_total_mb > 0
+                        ? ((g.vram_used_mb / g.vram_total_mb) * 100).toFixed(0) + '%'
+                        : '—',
+                    )
+                    .join(' / ')}
+                </span>
+              </>
+            )}
           </div>
         ))}
     </div>
