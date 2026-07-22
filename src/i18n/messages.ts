@@ -97,6 +97,8 @@ export const zh = {
   'basic.pickDirFirst': '请先选择模型目录',
   'basic.selectModelPlaceholder': '选择模型…',
   'basic.noModels': '该目录下无 .gguf 模型',
+  'basic.searchModel': '搜索模型…',
+  'basic.noMatch': '没有匹配的模型',
   'basic.host': '监听地址',
   'basic.port': '监听端口',
 
@@ -317,6 +319,8 @@ export const en: Record<MessageKey, string> = {
   'basic.pickDirFirst': 'Select a model directory first',
   'basic.selectModelPlaceholder': 'Select a model…',
   'basic.noModels': 'No .gguf models in this directory',
+  'basic.searchModel': 'Search models…',
+  'basic.noMatch': 'No matching models',
   'basic.host': 'Listen address',
   'basic.port': 'Listen port',
 
