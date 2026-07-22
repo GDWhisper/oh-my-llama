@@ -4,6 +4,19 @@
 
 > 本文件为**详细改动历史**（含涉及的文件与实现机制）；GitHub Release 页面为对应版本的**总结性**说明。
 
+## [0.1.0] - 2026-07-22
+
+### 新增功能
+- **模型选择器支持搜索**：原模型下拉框为原生 `<select>`，无法内置搜索，模型较多时难以定位。现新建 `src/components/ModelSelect.tsx` 以可搜索 combobox 替换，复用项目既有 `.select-box` 自定义下拉样式与点击外部关闭交互（`mousedown` 监听）；列表顶部搜索框对 `.gguf` 文件名做大小写不敏感子串过滤，打开时自动聚焦并清空上次查询；支持 `Enter` 选过滤后首项、`Esc` 关闭；区分「该目录下无 .gguf 模型」与「没有匹配的模型」两种空态；未选模型目录时整体禁用。`BasicParamsPanel.tsx`（用 `<ModelSelect>` 替换原生 `<select>`）+ `ModelSelect.tsx`（新建）+ `i18n/messages.ts`（新增 `basic.searchModel` / `basic.noMatch`，中英）+ `App.css`（删旧 `.model-select` 死样式，新增 `.select-trigger:disabled` 与 `.model-search*` 吸顶搜索框样式）。
+
+- **高级参数卡片支持「临时禁用」**：每个高级参数卡片（除常驻必选的上下文长度 ctx_size 外）新增「禁用 / 启用」开关；禁用后卡片仍显示、已填值保留，但本次启动不把该参数写入 llama-server 命令行（默认值由后端 `ServerConfig::default()` 单一真源，前端无硬编码）。自定义参数（extra_args）行同样支持临时禁用，采用双列表方案：`extra_args` 仅存启用项、`disabled_extra_args` 存禁用但保留的文本，切换即在这两列表间移动整组 `[flag, value]`。后端 `build_server_args`（Rust）与前端 `configToCommand`（预览 / 分享）统一按「启用且未禁用」判断，保证启动命令与「原始参数」卡片展示一致。`src-tauri/src/lib.rs`（新增 `disabled_advanced_params` / `disabled_extra_args` 字段含 `#[serde(default)]` 向后兼容旧配置 + `build_server_args` 跳过禁用项 + 单测 `build_server_args_skips_disabled`）+ `src/types.ts` + `src/hooks/useServer.ts`（`disabledAdvancedKeys` 状态、`toggleDisableKey`、`applyEnabled`/`add`/`remove`/`clearAdvanced` 同步禁用态）+ `src/components/AdvancedParamsPanel.tsx`（每卡禁用开关 + 双列表自定义参数行）+ `src/lib/parseArgs.ts`（`configToCommand` 跳过禁用项）+ `src/App.tsx`（`applyPlan` 套用粘帖命令时清空禁用列表、extra-arg 增删改列表感知 + `toggleExtraArg`）+ `i18n/messages.ts`（中/英 `advanced.disable` / `advanced.enable` / `advanced.disabled`）+ `App.css`（`.field.disabled` 置灰 + `.disabled-badge` 徽标 + `.field-actions`）。
+
+### 功能优化
+- **模型下拉框按视口空间自适应展开方向**：原生 `<select>` 无法翻转，自定义 `ModelSelect` 打开时用 `useLayoutEffect`（依赖 `open, models, query`）在绘制前测量 trigger 视口位置、列表实际高度与上下剩余空间——下方放得下则向下（默认），放不下而上方更宽裕则翻转为向上展开（`App.css` 新增 `.select-list.drop-up { top:auto; bottom:calc(100% + 4px) }`）；搜索过滤改变列表高度时重新决策，因在绘制前完成故无闪烁。`ModelSelect.tsx` + `App.css`。
+
+### Bug 修复
+- **运行时往模型目录新增模型后列表不刷新**：原下拉框只在 `config.model_dir` 字符串变化时才通过 `useEffect` 扫描一次目录，导致程序运行期间往同一目录下载新 `.gguf` 后，列表停留于启动时的旧快照、必须重启应用才能看到，且「重新选同一目录」因路径字符串不变也不会重扫。现于 `src/hooks/useServer.ts` 的 `model_dir` effect 内额外监听 `window` 的 `focus` 与 `document` 的 `visibilitychange`（可见态），切回窗口 / 从最小化恢复即调用 `loadModels(dir)` 重新向 `list_models` 后端命令拉取并刷新下拉框，无需重启、纯前端、零新依赖。`src/hooks/useServer.ts`。
+
 ## [0.0.9] - 2026-07-20
 
 ### 新增功能
@@ -122,6 +135,7 @@
 ### 说明
 - 本版本仅提供 Windows 安装包（`.exe` NSIS / `.msi`），无需预先安装 Node / Rust。
 
+[0.1.0]: https://github.com/GDWhisper/oh-my-llama/releases/tag/v0.1.0
 [0.0.9]: https://github.com/GDWhisper/oh-my-llama/releases/tag/v0.0.9
 [0.0.8]: https://github.com/GDWhisper/oh-my-llama/releases/tag/v0.0.8
 [0.0.7]: https://github.com/GDWhisper/oh-my-llama/releases/tag/v0.0.7

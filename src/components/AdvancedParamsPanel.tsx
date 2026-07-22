@@ -6,17 +6,25 @@ import { useI18n } from '../i18n';
 import { Button } from './Button';
 import { ConfirmDialog } from './ConfirmDialog';
 
+// 自定义参数行的归属列表：'enabled' = 启用（写入启动命令行），'disabled' = 临时禁用（保留文本不写入）。
+export type ExtraArgList = 'enabled' | 'disabled';
+
 // 单条「自定义参数」的可编辑行。用本地草稿承接输入、失焦时才提交，
 // 避免「受控输入 + 每次按键重新分词归一化」导致的光标跳动 / 尾随空格被吞。
 // 当外部文本变化（如切换配置、提交后归一化）时通过 effect 同步草稿。
+// disabled 行整体置灰，按钮用于「启用 / 禁用」切换。
 function ExtraArgRow({
   text,
+  disabled,
   onCommit,
   onRemove,
+  onToggle,
 }: {
   text: string;
+  disabled: boolean;
   onCommit: (value: string) => void;
   onRemove: () => void;
+  onToggle: () => void;
 }) {
   const { t } = useI18n();
   const [draft, setDraft] = useState(text);
@@ -24,12 +32,18 @@ function ExtraArgRow({
     setDraft(text);
   }, [text]);
   return (
-    <div className="field extra-args">
+    <div className={`field extra-args${disabled ? ' disabled' : ''}`}>
       <div className="field-header">
         <label>{t('advanced.customParam')}</label>
-        <Button variant="danger" type="button" onClick={onRemove}>
-          {t('common.delete')}
-        </Button>
+        <div className="field-actions">
+          {disabled && <span className="disabled-badge">{t('advanced.disabled')}</span>}
+          <Button variant="secondary" type="button" onClick={onToggle}>
+            {disabled ? t('advanced.enable') : t('advanced.disable')}
+          </Button>
+          <Button variant="danger" type="button" onClick={onRemove}>
+            {t('common.delete')}
+          </Button>
+        </div>
       </div>
       <input
         className="extra-value-input"
@@ -52,15 +66,18 @@ interface Props {
   adjustingAdvanced: boolean;
   availableAdvancedOptions: AdvancedOption[];
   enabledAdvancedKeys: AdvancedKey[];
+  disabledAdvancedKeys: Record<AdvancedKey, boolean>;
   advancedFlashAttn: string;
   advancedThreads: string;
   advancedBatchSize: string;
   advancedPredict: string;
-  onRemoveExtraArg: (index: number) => void;
-  onUpdateExtraArg: (index: number, text: string) => void;
+  onRemoveExtraArg: (list: ExtraArgList, start: number) => void;
+  onUpdateExtraArg: (list: ExtraArgList, start: number, text: string) => void;
   onToggleAdjust: () => void;
   onAddKey: (key: AdvancedKey) => void;
   onRemoveKey: (key: AdvancedKey) => void;
+  onToggleDisableKey: (key: AdvancedKey) => void;
+  onToggleExtraArg: (list: ExtraArgList, start: number) => void;
   onClearAdvanced: () => void;
   onChange: (config: ServerConfig) => void;
 }
@@ -71,6 +88,7 @@ export function AdvancedParamsPanel(props: Props) {
     adjustingAdvanced,
     availableAdvancedOptions,
     enabledAdvancedKeys,
+    disabledAdvancedKeys,
     advancedFlashAttn,
     advancedThreads,
     advancedBatchSize,
@@ -80,6 +98,8 @@ export function AdvancedParamsPanel(props: Props) {
     onToggleAdjust,
     onAddKey,
     onRemoveKey,
+    onToggleDisableKey,
+    onToggleExtraArg,
     onClearAdvanced,
     onChange,
   } = props;
@@ -118,8 +138,9 @@ export function AdvancedParamsPanel(props: Props) {
       {enabledAdvancedKeys.map((key) => {
         const removable = adjustingAdvanced && key !== 'ctx_size';
         const isBool = key === 'mmap' || key === 'mlock';
+        const isDisabled = disabledAdvancedKeys[key];
         return (
-          <div className="field" key={key}>
+          <div className={`field${isDisabled ? ' disabled' : ''}`} key={key}>
             <div className="field-header">
               {isBool ? (
                 <label className="bool-field">
@@ -137,11 +158,19 @@ export function AdvancedParamsPanel(props: Props) {
               ) : (
                 <label>{t(ADVANCED_LABEL_KEYS[key])}</label>
               )}
-              {removable && (
-                <Button variant="danger" type="button" onClick={() => onRemoveKey(key)}>
-                  {t('common.delete')}
-                </Button>
-              )}
+              <div className="field-actions">
+                {isDisabled && <span className="disabled-badge">{t('advanced.disabled')}</span>}
+                {key !== 'ctx_size' && (
+                  <Button variant="secondary" type="button" onClick={() => onToggleDisableKey(key)}>
+                    {isDisabled ? t('advanced.enable') : t('advanced.disable')}
+                  </Button>
+                )}
+                {removable && (
+                  <Button variant="danger" type="button" onClick={() => onRemoveKey(key)}>
+                    {t('common.delete')}
+                  </Button>
+                )}
+              </div>
             </div>
             {key === 'ctx_size' && (
               <input
@@ -251,10 +280,22 @@ export function AdvancedParamsPanel(props: Props) {
       })}
       {groupExtraArgs(config.extra_args).map((group) => (
         <ExtraArgRow
-          key={group.start}
+          key={`enabled-${group.start}`}
           text={group.text}
-          onCommit={(value) => onUpdateExtraArg(group.start, value)}
-          onRemove={() => onRemoveExtraArg(group.start)}
+          disabled={false}
+          onCommit={(value) => onUpdateExtraArg('enabled', group.start, value)}
+          onRemove={() => onRemoveExtraArg('enabled', group.start)}
+          onToggle={() => onToggleExtraArg('enabled', group.start)}
+        />
+      ))}
+      {groupExtraArgs(config.disabled_extra_args).map((group) => (
+        <ExtraArgRow
+          key={`disabled-${group.start}`}
+          text={group.text}
+          disabled
+          onCommit={(value) => onUpdateExtraArg('disabled', group.start, value)}
+          onRemove={() => onRemoveExtraArg('disabled', group.start)}
+          onToggle={() => onToggleExtraArg('disabled', group.start)}
         />
       ))}
       <div className="empty">{t('advanced.empty')}</div>

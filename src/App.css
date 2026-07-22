@@ -266,6 +266,33 @@ body {
   gap: 12px;
 }
 
+.field-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+/* 临时禁用态：整卡置灰，提示该参数本次启动不写入命令行（值仍保留）。 */
+.field.disabled {
+  opacity: 0.55;
+}
+
+.field.disabled input,
+.field.disabled select {
+  background: #f3f4f6;
+}
+
+.disabled-badge {
+  font-size: 11px;
+  font-weight: 600;
+  color: #b45309;
+  background: #fef3c7;
+  border-radius: 999px;
+  padding: 2px 8px;
+  white-space: nowrap;
+}
+
 /* 布尔型参数：复选框紧贴配置名称、与其同一行（不再独占整行）。 */
 .bool-field {
   display: inline-flex;
@@ -310,21 +337,51 @@ body {
   font-weight: 500;
 }
 
-.model-select {
-  width: 100%;
-  padding: 8px 10px;
-  border: 1px solid #d1d5db;
-  border-radius: 8px;
-  font-size: 14px;
-  font-family: inherit;
-  background: #ffffff;
-  color: #111827;
-}
-
-.model-select:disabled {
+.select-trigger:disabled {
   background: #f3f4f6;
   color: #9ca3af;
   cursor: not-allowed;
+}
+
+/* 模型选择器：搜索框（位于下拉列表顶部，滚动时吸顶） */
+.model-search {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  padding: 4px 4px 6px;
+  background: #ffffff;
+  border-bottom: 1px solid #eef0f3;
+}
+
+.model-search-input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 6px 8px;
+  font-size: 13px;
+  font-family: inherit;
+  color: #111827;
+  background: #f9fafb;
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+}
+
+.model-search-input:focus {
+  outline: none;
+  border-color: #6366f1;
+  box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.15);
+}
+
+.model-options {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.model-search-empty {
+  padding: 10px 8px;
+  font-size: 13px;
+  color: #9ca3af;
+  text-align: center;
 }
 
 .field-path {
@@ -503,6 +560,12 @@ body {
   box-shadow: 0 8px 24px rgba(15, 23, 42, 0.12);
   max-height: 240px;
   overflow-y: auto;
+}
+
+/* 空间不足时向上展开（由 ModelSelect 测量视口后加 .drop-up） */
+.select-list.drop-up {
+  top: auto;
+  bottom: calc(100% + 4px);
 }
 
 .select-option {

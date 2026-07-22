@@ -14,8 +14,12 @@ export interface ServerConfig {
   mmap: boolean;
   mlock: boolean;
   enabled_advanced_params: string[];
+  // 临时禁用的高级参数键：卡片仍显示、值保留，但本次启动不写入命令行。
+  disabled_advanced_params: string[];
   // 一键传参写入的自定义参数：原样追加到启动命令行末尾（含未知 flag）。
   extra_args: string[];
+  // 临时禁用的自定义参数（双列表方案）：文本保留但不写入启动命令行。
+  disabled_extra_args: string[];
 }
 
 export interface ServerStatus {

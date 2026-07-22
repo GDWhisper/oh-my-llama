@@ -2,6 +2,7 @@ import type { ServerConfig } from '../types';
 import { modelBasename } from '../lib/advanced';
 import { useI18n } from '../i18n';
 import { PathField } from './PathField';
+import { ModelSelect } from './ModelSelect';
 
 interface Props {
   config: ServerConfig;
@@ -50,25 +51,12 @@ export function BasicParamsPanel({ config, models, onChange }: Props) {
         />
         <div className="field">
           <label>{t('basic.selectModel')}</label>
-          <select
-            className="model-select"
+          <ModelSelect
+            models={models}
             value={selectedBasename}
             disabled={!dirSet}
-            onChange={(event) => handleModelSelect(event.currentTarget.value)}
-          >
-            <option value="" disabled>
-              {!dirSet
-                ? t('basic.pickDirFirst')
-                : models.length > 0
-                  ? t('basic.selectModelPlaceholder')
-                  : t('basic.noModels')}
-            </option>
-            {models.map((name) => (
-              <option key={name} value={name}>
-                {name}
-              </option>
-            ))}
-          </select>
+            onSelect={handleModelSelect}
+          />
         </div>
         <div className="field">
           <label>{t('basic.host')}</label>

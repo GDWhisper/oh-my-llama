@@ -3,7 +3,7 @@ import { useServer } from './hooks/useServer';
 import { ControlPanel } from './components/ControlPanel';
 import { LogPanel } from './components/LogPanel';
 import { BasicParamsPanel } from './components/BasicParamsPanel';
-import { AdvancedParamsPanel } from './components/AdvancedParamsPanel';
+import { AdvancedParamsPanel, type ExtraArgList } from './components/AdvancedParamsPanel';
 import { RawParams } from './components/RawParams';
 import { IconButton } from './components/IconButton';
 import { ConfigManager } from './components/ConfigManager';
@@ -71,6 +71,7 @@ export default function App() {
     advancedPredict,
     availableAdvancedOptions,
     enabledAdvancedKeys,
+    disabledAdvancedKeys,
     configs,
     activeName,
     renameTarget,
@@ -92,6 +93,7 @@ export default function App() {
     handleClearLogs,
     addAdvancedKey,
     removeAdvancedKey,
+    toggleDisableKey,
     clearAdvanced,
     setAdvancedEnabled,
   } = server;
@@ -149,6 +151,10 @@ export default function App() {
       plan.enable.forEach((key) => enabledSet.add(key));
       next.enabled_advanced_params = [...enabledSet];
       next.extra_args = plan.extraArgs;
+      // 套用粘帖命令是「重算整份自定义参数」，临时禁用态无意义：两个禁用列表一并清空，
+      // 避免残留的禁用标记与本次套用结果脱节。
+      next.disabled_advanced_params = [];
+      next.disabled_extra_args = [];
       return next;
     });
     setAdvancedEnabled((current) => {
@@ -162,27 +168,48 @@ export default function App() {
 
   // （handleAppend 已移除：原始参数卡片编辑态统一覆盖回写，不再区分追加模式）
 
+  // 自定义参数的归属列表：'enabled' 写入启动命令行，'disabled' 仅保留文本。
+
   // 移除某个自定义参数（按扁平数组里的起始下标，连同其值一并删掉）。
-  const removeExtraArg = (start: number) => {
+  const removeExtraArg = (list: ExtraArgList, start: number) => {
     setConfig((current) => {
       if (!current) return current;
+      const key = list === 'enabled' ? 'extra_args' : 'disabled_extra_args';
       return {
         ...current,
-        extra_args: current.extra_args.filter((_, i) => i < start || i >= start + 2),
+        [key]: current[key].filter((_, i) => i < start || i >= start + 2),
       };
     });
   };
 
   // 编辑某个自定义参数：把整行文本重新拆成 [flag, value]，就地写回扁平数组的
   // [start, start+1] 两个槽位（保持成对结构不变，不影响其它条目的下标）。
-  const updateExtraArg = (start: number, text: string) => {
+  const updateExtraArg = (list: ExtraArgList, start: number, text: string) => {
     const [flag, value] = splitExtraArg(text);
     setConfig((current) => {
       if (!current) return current;
-      const next = [...current.extra_args];
+      const key = list === 'enabled' ? 'extra_args' : 'disabled_extra_args';
+      const next = [...current[key]];
       next[start] = flag;
       next[start + 1] = value;
-      return { ...current, extra_args: next };
+      return { ...current, [key]: next };
+    });
+  };
+
+  // 临时禁用 / 启用某个自定义参数：把整组 [flag, value]（两个槽位）在两条列表间移动，
+  // 文本保留，仅决定是否写入启动命令行。
+  const toggleExtraArg = (list: ExtraArgList, start: number) => {
+    setConfig((current) => {
+      if (!current) return current;
+      const fromKey = list === 'enabled' ? 'extra_args' : 'disabled_extra_args';
+      const toKey = list === 'enabled' ? 'disabled_extra_args' : 'extra_args';
+      const pair: [string, string] = [
+        current[fromKey][start] ?? '',
+        current[fromKey][start + 1] ?? '',
+      ];
+      const from = current[fromKey].filter((_, i) => i < start || i >= start + 2);
+      const to = [...current[toKey], ...pair];
+      return { ...current, [fromKey]: from, [toKey]: to };
     });
   };
 
@@ -269,15 +296,18 @@ export default function App() {
             adjustingAdvanced={adjustingAdvanced}
             availableAdvancedOptions={availableAdvancedOptions}
             enabledAdvancedKeys={enabledAdvancedKeys}
+            disabledAdvancedKeys={disabledAdvancedKeys}
             advancedFlashAttn={advancedFlashAttn}
             advancedThreads={advancedThreads}
             advancedBatchSize={advancedBatchSize}
             advancedPredict={advancedPredict}
             onRemoveExtraArg={removeExtraArg}
             onUpdateExtraArg={updateExtraArg}
+            onToggleExtraArg={toggleExtraArg}
             onToggleAdjust={() => setAdjustingAdvanced((value) => !value)}
             onAddKey={addAdvancedKey}
             onRemoveKey={removeAdvancedKey}
+            onToggleDisableKey={toggleDisableKey}
             onClearAdvanced={clearAdvanced}
             onChange={setConfig}
           />
