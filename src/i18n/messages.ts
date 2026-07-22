@@ -115,6 +115,9 @@ export const zh = {
   'advanced.gpuAll': '全部',
   'advanced.empty': '高级参数按需添加；未加入的参数不会写入配置，启动时由 llama-server 自动决定。',
   'advanced.clear': '清空参数',
+  'advanced.disable': '禁用',
+  'advanced.enable': '启用',
+  'advanced.disabled': '已禁用',
   'advanced.clearTitle': '清空所有高级参数',
   'advanced.clearConfirm': '确认清空',
   'advanced.clearMessage':
@@ -337,6 +340,9 @@ export const en: Record<MessageKey, string> = {
   'advanced.empty':
     "Add advanced parameters as needed; parameters not added are omitted from the config and left to llama-server's defaults at launch.",
   'advanced.clear': 'Clear',
+  'advanced.disable': 'Disable',
+  'advanced.enable': 'Enable',
+  'advanced.disabled': 'Disabled',
   'advanced.clearTitle': 'Clear all advanced parameters',
   'advanced.clearConfirm': 'Confirm Clear',
   'advanced.clearMessage':

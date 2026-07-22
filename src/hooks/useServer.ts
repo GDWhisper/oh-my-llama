@@ -54,6 +54,11 @@ export function useServer() {
   const [stopping, setStopping] = useState(false);
   const [advancedEnabled, setAdvancedEnabled] =
     useState<Record<AdvancedKey, boolean>>(EMPTY_ADVANCED_ENABLED);
+  // 各高级参数的「临时禁用」开关：与 advancedEnabled 平行；
+  // 仅作用于已启用（显示）的参数，决定本次启动是否把它写入命令行。
+  // ctx_size 是常驻必选参数，不参与禁用（始终生效）。
+  const [disabledAdvancedKeys, setDisabledAdvancedKeys] =
+    useState<Record<AdvancedKey, boolean>>(EMPTY_ADVANCED_ENABLED);
   // 「调整参数」模式：合并了原「添加参数」「移除参数」两种模式。
   // 开启后同时展示「可添加参数」候选片与各已启用参数上的「删除」按钮。
   const [adjustingAdvanced, setAdjustingAdvanced] = useState(false);
@@ -85,7 +90,7 @@ export function useServer() {
   // 避免把旧编辑文本误写回刚恢复的干净配置（切配置时 configName 不变，仅靠它无法触发）。
   const [configEpoch, setConfigEpoch] = useState(0);
 
-  // 根据一份完整配置（含 enabled_advanced_params）重算高级参数开关状态。
+  // 根据一份完整配置（含 enabled_advanced_params / disabled_advanced_params）重算高级参数开关状态。
   const applyEnabled = (cfg: ServerConfig | null) => {
     const base = defaultRef.current;
     const enabledList =
@@ -93,10 +98,23 @@ export function useServer() {
         ? cfg.enabled_advanced_params
         : (base?.enabled_advanced_params ?? ['ctx_size']);
     const enabledSet = new Set(enabledList);
+    const disabledList =
+      cfg?.disabled_advanced_params && cfg.disabled_advanced_params.length > 0
+        ? cfg.disabled_advanced_params
+        : (base?.disabled_advanced_params ?? []);
+    const disabledSet = new Set(disabledList);
     setAdvancedEnabled(() => {
       const next = {} as Record<AdvancedKey, boolean>;
       ADVANCED_ORDER.forEach((key) => {
         next[key] = enabledSet.has(key);
+      });
+      return next;
+    });
+    // 禁用态：仅对「已启用且非 ctx_size」的参数生效，避免给常驻参数加禁用开关。
+    setDisabledAdvancedKeys(() => {
+      const next = {} as Record<AdvancedKey, boolean>;
+      ADVANCED_ORDER.forEach((key) => {
+        next[key] = key !== 'ctx_size' && disabledSet.has(key);
       });
       return next;
     });
@@ -527,12 +545,15 @@ export function useServer() {
       return {
         ...current,
         enabled_advanced_params: [...current.enabled_advanced_params, key],
+        // 新加入的参数默认处于「启用」状态：若它曾在禁用列表中，移除以免矛盾。
+        disabled_advanced_params: current.disabled_advanced_params.filter((k) => k !== key),
       };
     });
   };
 
   const removeAdvancedKey = (key: AdvancedKey) => {
     setAdvancedEnabled((current) => ({ ...current, [key]: false }));
+    setDisabledAdvancedKeys((current) => ({ ...current, [key]: false }));
     setConfig((current) => {
       if (!current) {
         return current;
@@ -540,7 +561,29 @@ export function useServer() {
       return {
         ...current,
         enabled_advanced_params: current.enabled_advanced_params.filter((item) => item !== key),
+        disabled_advanced_params: current.disabled_advanced_params.filter((item) => item !== key),
       };
+    });
+  };
+
+  // 临时禁用/恢复某个高级参数：仅切换 disabled_advanced_params 与本地开关，
+  // 不动用值与启用态（卡片仍显示、值保留）。ctx_size 无禁用开关。
+  const toggleDisableKey = (key: AdvancedKey) => {
+    if (key === 'ctx_size') {
+      return;
+    }
+    setDisabledAdvancedKeys((current) => ({ ...current, [key]: !current[key] }));
+    setConfig((current) => {
+      if (!current) {
+        return current;
+      }
+      const disabledSet = new Set(current.disabled_advanced_params);
+      if (disabledSet.has(key)) {
+        disabledSet.delete(key);
+      } else {
+        disabledSet.add(key);
+      }
+      return { ...current, disabled_advanced_params: [...disabledSet] };
     });
   };
 
@@ -556,6 +599,7 @@ export function useServer() {
       next.ctx_size = true;
       return next;
     });
+    setDisabledAdvancedKeys(() => EMPTY_ADVANCED_ENABLED());
     setConfig((current) => {
       if (!current) {
         return current;
@@ -563,7 +607,13 @@ export function useServer() {
       const d = defaultRef.current;
       if (!d) {
         // defaults 尚未加载时退化为仅清空启用列表（保留常驻 ctx_size），避免用 undefined 覆盖原值。
-        return { ...current, enabled_advanced_params: ['ctx_size'], extra_args: [] };
+        return {
+          ...current,
+          enabled_advanced_params: ['ctx_size'],
+          disabled_advanced_params: [],
+          extra_args: [],
+          disabled_extra_args: [],
+        };
       }
       return {
         ...current,
@@ -577,7 +627,9 @@ export function useServer() {
         mmap: d.mmap,
         mlock: d.mlock,
         enabled_advanced_params: ['ctx_size'],
+        disabled_advanced_params: [],
         extra_args: [],
+        disabled_extra_args: [],
       };
     });
   };
@@ -609,6 +661,7 @@ export function useServer() {
     starting,
     stopping,
     advancedEnabled,
+    disabledAdvancedKeys,
     adjustingAdvanced,
     previewUrl,
     advancedFlashAttn,
@@ -641,6 +694,7 @@ export function useServer() {
     handleClearLogs,
     addAdvancedKey,
     removeAdvancedKey,
+    toggleDisableKey,
     clearAdvanced,
   };
 }

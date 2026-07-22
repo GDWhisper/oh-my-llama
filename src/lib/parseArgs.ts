@@ -405,24 +405,27 @@ const quoteIfNeeded = (value: string): string => (/\s/.test(value) ? `"${value}"
 
 export function configToCommand(config: ServerConfig): string {
   const enabled = new Set(config.enabled_advanced_params);
+  const disabled = new Set(config.disabled_advanced_params);
+  // 仅当「已启用且未临时禁用」时才拼入：与后端 build_server_args 保持一致。
+  const active = (key: string) => enabled.has(key) && !disabled.has(key);
   const parts: string[] = [];
   parts.push('-m', quoteIfNeeded(config.model));
   parts.push('--host', config.host);
   parts.push('--port', String(config.port));
   parts.push('-c', String(config.ctx_size));
   parts.push('--timeout', '2400');
-  if (enabled.has('n_predict')) parts.push('-n', String(config.n_predict));
-  if (enabled.has('n_gpu_layers')) parts.push('-ngl', String(config.n_gpu_layers));
-  if (enabled.has('threads')) parts.push('-t', String(config.threads));
-  if (enabled.has('batch_size')) parts.push('-b', String(config.batch_size));
-  if (enabled.has('temp')) parts.push('--temp', String(config.temp));
-  if (enabled.has('flash_attn')) {
+  if (active('n_predict')) parts.push('-n', String(config.n_predict));
+  if (active('n_gpu_layers')) parts.push('-ngl', String(config.n_gpu_layers));
+  if (active('threads')) parts.push('-t', String(config.threads));
+  if (active('batch_size')) parts.push('-b', String(config.batch_size));
+  if (active('temp')) parts.push('--temp', String(config.temp));
+  if (active('flash_attn')) {
     const fv = FLASH_NORMALIZE[(config.flash_attn || 'auto').toLowerCase()] ?? 'auto';
     parts.push('--flash-attn', fv);
   }
-  if (enabled.has('mmap')) parts.push(config.mmap ? '--mmap' : '--no-mmap');
-  if (enabled.has('mlock') && config.mlock) parts.push('--mlock');
-  // 自定义参数：原样追加（与启动一致），空字符串占位跳过。
+  if (active('mmap')) parts.push(config.mmap ? '--mmap' : '--no-mmap');
+  if (active('mlock') && config.mlock) parts.push('--mlock');
+  // 自定义参数：仅追加「启用」列表（disabled_extra_args 不拼入），空字符串占位跳过。
   for (const arg of config.extra_args) {
     if (arg) parts.push(arg);
   }

@@ -266,6 +266,33 @@ body {
   gap: 12px;
 }
 
+.field-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+/* 临时禁用态：整卡置灰，提示该参数本次启动不写入命令行（值仍保留）。 */
+.field.disabled {
+  opacity: 0.55;
+}
+
+.field.disabled input,
+.field.disabled select {
+  background: #f3f4f6;
+}
+
+.disabled-badge {
+  font-size: 11px;
+  font-weight: 600;
+  color: #b45309;
+  background: #fef3c7;
+  border-radius: 999px;
+  padding: 2px 8px;
+  white-space: nowrap;
+}
+
 /* 布尔型参数：复选框紧贴配置名称、与其同一行（不再独占整行）。 */
 .bool-field {
   display: inline-flex;

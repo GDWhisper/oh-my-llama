@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::env;
 use std::io::Read;
 use std::net::{IpAddr, SocketAddr, TcpListener, UdpSocket};
@@ -39,10 +39,17 @@ pub struct ServerConfig {
     pub mmap: bool,
     pub mlock: bool,
     pub enabled_advanced_params: Vec<String>,
+    // 临时禁用的高级参数键：卡片仍显示、值保留，但本次启动不写入命令行。
+    // 与 enabled_advanced_params 同构；缺省时按空列表解析（向后兼容旧配置）。
+    #[serde(default)]
+    pub disabled_advanced_params: Vec<String>,
     // 一键传参写入的自定义参数：原样追加到启动命令行末尾，
     // 确保用户粘贴的（未知）llama-server 参数与真正启动时完全一致。
     #[serde(default)]
     pub extra_args: Vec<String>,
+    // 临时禁用的自定义参数（双列表方案）：文本保留但不写入启动命令行。
+    #[serde(default)]
+    pub disabled_extra_args: Vec<String>,
 }
 
 impl Default for ServerConfig {
@@ -63,7 +70,9 @@ impl Default for ServerConfig {
             mmap: true,
             mlock: false,
             enabled_advanced_params: vec!["ctx_size".into()],
+            disabled_advanced_params: Vec::new(),
             extra_args: Vec::new(),
+            disabled_extra_args: Vec::new(),
         }
     }
 }
@@ -487,61 +496,52 @@ fn build_server_args(config: &ServerConfig) -> Vec<String> {
         "2400".into(),
     ];
 
-    if config
-        .enabled_advanced_params
-        .contains(&"n_predict".to_string())
-    {
+    // 仅当「已启用且未临时禁用」时才写入对应高级参数。
+    // enabled = 卡片显示；disabled = 卡片仍显示但本次启动不传。
+    let enabled = &config.enabled_advanced_params;
+    let disabled: HashSet<&str> = config
+        .disabled_advanced_params
+        .iter()
+        .map(|s| s.as_str())
+        .collect();
+    let active = |key: &str| enabled.iter().any(|k| k.as_str() == key) && !disabled.contains(key);
+
+    if active("n_predict") {
         args.push("-n".into());
         args.push(config.n_predict.to_string());
     }
-    if config
-        .enabled_advanced_params
-        .contains(&"n_gpu_layers".to_string())
-    {
+    if active("n_gpu_layers") {
         args.push("-ngl".into());
         args.push(config.n_gpu_layers.to_string());
     }
-    if config
-        .enabled_advanced_params
-        .contains(&"threads".to_string())
-    {
+    if active("threads") {
         args.push("-t".into());
         args.push(config.threads.to_string());
     }
-    if config
-        .enabled_advanced_params
-        .contains(&"batch_size".to_string())
-    {
+    if active("batch_size") {
         args.push("-b".into());
         args.push(config.batch_size.to_string());
     }
-    if config.enabled_advanced_params.contains(&"temp".to_string()) {
+    if active("temp") {
         args.push("--temp".into());
         args.push(config.temp.to_string());
     }
-    if config
-        .enabled_advanced_params
-        .contains(&"flash_attn".to_string())
-    {
+    if active("flash_attn") {
         args.push("--flash-attn".into());
         args.push(flash_value(&config.flash_attn).to_string());
     }
-    if config.enabled_advanced_params.contains(&"mmap".to_string()) {
+    if active("mmap") {
         if config.mmap {
             args.push("--mmap".into());
         } else {
             args.push("--no-mmap".into());
         }
     }
-    if config
-        .enabled_advanced_params
-        .contains(&"mlock".to_string())
-        && config.mlock
-    {
+    if active("mlock") && config.mlock {
         args.push("--mlock".into());
     }
-    // 一键传参写入的自定义参数：原样追加到命令行末尾，确保用户传入的参数
-    // 与真正启动时一致（含未知 flag 也会进入 llama-server）。
+    // 一键传参写入的自定义参数：仅追加「启用」列表（disabled_extra_args 不传），
+    // 确保用户传入的参数与真正启动时一致（含未知 flag 也会进入 llama-server）。
     args.extend(config.extra_args.iter().filter(|a| !a.is_empty()).cloned());
     args
 }
@@ -1126,7 +1126,9 @@ mod tests {
                 "mmap".into(),
                 "mlock".into(),
             ],
+            disabled_advanced_params: vec![],
             extra_args: vec![],
+            disabled_extra_args: vec![],
         };
 
         let text = serialize_config_value(&config).expect("serialize");
@@ -1296,7 +1298,9 @@ enabled_advanced_params = ["ctx_size"]
             mmap: true,
             mlock: false,
             enabled_advanced_params: vec!["ctx_size".into()],
+            disabled_advanced_params: Vec::new(),
             extra_args: Vec::new(),
+            disabled_extra_args: Vec::new(),
         };
         let joined = build_server_args(&config).join(" ");
         assert!(joined.contains("-m C:/models/m.gguf"));
@@ -1328,12 +1332,14 @@ enabled_advanced_params = ["ctx_size"]
             mmap: true,
             mlock: false,
             enabled_advanced_params: vec!["ctx_size".into()],
+            disabled_advanced_params: Vec::new(),
             extra_args: vec![
                 "--main-gpu".into(),
                 "0".into(),
                 "--alias".into(),
                 "demo".into(),
             ],
+            disabled_extra_args: Vec::new(),
         };
         let joined = build_server_args(&config).join(" ");
         // 未知/自定义参数被原样追加到启动命令，确保与用户传入一致
@@ -1344,6 +1350,46 @@ enabled_advanced_params = ["ctx_size"]
         config.extra_args.push("".into());
         let joined2 = build_server_args(&config).join(" ");
         assert!(!joined2.ends_with(' '));
+    }
+
+    #[test]
+    fn build_server_args_skips_disabled() {
+        // 已启用但临时禁用的高级参数不应进入启动命令行；值仍保留在配置里。
+        let config = ServerConfig {
+            llama_server_path: "C:/llama/llama-server.exe".into(),
+            model: "C:/models/m.gguf".into(),
+            model_dir: "C:/models".into(),
+            host: "127.0.0.1".into(),
+            port: 8080,
+            ctx_size: 4096,
+            n_predict: 256,
+            n_gpu_layers: 32,
+            threads: 4,
+            batch_size: 512,
+            temp: 0.7,
+            flash_attn: "auto".into(),
+            mmap: true,
+            mlock: false,
+            enabled_advanced_params: vec![
+                "ctx_size".into(),
+                "n_gpu_layers".into(),
+                "temp".into(),
+                "mmap".into(),
+            ],
+            disabled_advanced_params: vec!["n_gpu_layers".into(), "mmap".into()],
+            extra_args: Vec::new(),
+            disabled_extra_args: vec!["--alias".into(), "demo".into()],
+        };
+        let joined = build_server_args(&config).join(" ");
+        // 未禁用的高级参数照常写入
+        assert!(joined.contains("-c 4096"));
+        assert!(joined.contains("--temp 0.7"));
+        // 临时禁用的高级参数不写入
+        assert!(!joined.contains("-ngl"));
+        assert!(!joined.contains("--mmap"));
+        assert!(!joined.contains("--no-mmap"));
+        // 禁用的自定义参数不写入
+        assert!(!joined.contains("--alias"));
     }
 
     #[test]
