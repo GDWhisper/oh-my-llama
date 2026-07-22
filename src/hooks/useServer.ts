@@ -230,13 +230,30 @@ export function useServer() {
   }, [config?.model]);
 
   // 模型目录变化时（含初次加载）向后端拉取该目录下的 .gguf 模型列表，驱动下拉框。
+  // 同时监听窗口聚焦 / 标签页可见：程序运行中往模型目录新增 .gguf 时无需重启即可秒刷新，
+  // 用户切回窗口即触发一次重扫，体验无感（仅前端事件，不引入新依赖、不破坏分层）。
   useEffect(() => {
     const dir = config?.model_dir?.trim();
-    if (dir) {
-      void loadModels(dir);
-    } else {
+    if (!dir) {
       setModels([]);
+      return;
     }
+    const rescan = () => {
+      void loadModels(dir);
+    };
+    // 初次进入（或目录变更）即扫一次，等价于原行为。
+    rescan();
+    const onVisibility = () => {
+      if (document.visibilityState === 'visible') {
+        rescan();
+      }
+    };
+    window.addEventListener('focus', rescan);
+    document.addEventListener('visibilitychange', onVisibility);
+    return () => {
+      window.removeEventListener('focus', rescan);
+      document.removeEventListener('visibilitychange', onVisibility);
+    };
   }, [config?.model_dir]);
 
   useInterval(() => {
