@@ -4,7 +4,7 @@
 
 > 本文件为**详细改动历史**（含涉及的文件与实现机制）；GitHub Release 页面为对应版本的**总结性**说明。
 
-## [0.0.10] - 2026-07-22（待发布，仅 dev 分支）
+## [0.1.0] - 2026-07-22（待发布，仅 dev 分支）
 
 > 本区块记录已提交至 `dev` 分支、但尚未合并 main / 打 tag / 发布正式版的改动。正式发布时归入对应版本号区块。
 
@@ -135,7 +135,7 @@
 ### 说明
 - 本版本仅提供 Windows 安装包（`.exe` NSIS / `.msi`），无需预先安装 Node / Rust。
 
-[0.0.10]: https://github.com/GDWhisper/oh-my-llama/releases/tag/v0.0.10
+[0.1.0]: https://github.com/GDWhisper/oh-my-llama/releases/tag/v0.1.0
 [0.0.9]: https://github.com/GDWhisper/oh-my-llama/releases/tag/v0.0.9
 [0.0.8]: https://github.com/GDWhisper/oh-my-llama/releases/tag/v0.0.8
 [0.0.7]: https://github.com/GDWhisper/oh-my-llama/releases/tag/v0.0.7
