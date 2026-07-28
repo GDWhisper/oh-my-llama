@@ -18,6 +18,7 @@ export const zh = {
   // App 顶层
   'app.loading': '加载配置中…',
   'app.share.copied': '已复制启动参数到剪切板',
+  'app.share.copiedNamed': '已复制 {name} 的参数到剪切板',
   'app.share.copyFailed': '复制失败，请手动复制',
 
   // 运行状态
@@ -61,7 +62,7 @@ export const zh = {
   'config.deleteTitle': '删除「{name}」',
   'config.deleteAria': '删除配置 {name}',
   'config.createNew': '新增配置',
-  'config.share': '分享参数',
+  'config.share': '分享配置',
   'config.saveAsNew': '保存为新配置',
   'config.save': '保存配置',
   'config.deleteDialogTitle': '删除配置',
@@ -247,6 +248,7 @@ export const en: Record<MessageKey, string> = {
 
   'app.loading': 'Loading configuration…',
   'app.share.copied': 'Launch parameters copied to clipboard',
+  'app.share.copiedNamed': 'Copied {name} parameters to clipboard',
   'app.share.copyFailed': 'Copy failed, please copy manually',
 
   'status.running': 'Running',
@@ -286,7 +288,7 @@ export const en: Record<MessageKey, string> = {
   'config.deleteTitle': 'Delete "{name}"',
   'config.deleteAria': 'Delete config {name}',
   'config.createNew': 'New Config',
-  'config.share': 'Share Params',
+  'config.share': 'Share Config',
   'config.saveAsNew': 'Save as New',
   'config.save': 'Save Config',
   'config.deleteDialogTitle': 'Delete Config',

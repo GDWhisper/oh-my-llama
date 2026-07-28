@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent } from 'react';
 import { useI18n } from '../i18n';
+import { TruncatedText } from './TruncatedText';
 
 interface Props {
   // 检测到的 .gguf 模型文件名列表（不含绝对路径，仅用于下拉框展示）
@@ -104,7 +105,9 @@ export function ModelSelect({ models, value, disabled, onSelect }: Props) {
           }
         }}
       >
-        <span className="select-value">{disabled ? t('basic.pickDirFirst') : triggerLabel}</span>
+        <span className="select-value">
+          <TruncatedText text={disabled ? t('basic.pickDirFirst') : triggerLabel} />
+        </span>
         <span className="select-caret" aria-hidden>
           ▾
         </span>
@@ -135,7 +138,7 @@ export function ModelSelect({ models, value, disabled, onSelect }: Props) {
                     className={`option-main${value === name ? ' selected' : ''}`}
                     onClick={() => choose(name)}
                   >
-                    {name}
+                    <TruncatedText text={name} />
                   </button>
                 </li>
               ))}
