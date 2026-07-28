@@ -4,6 +4,16 @@
 
 > 本文件为**详细改动历史**（含涉及的文件与实现机制）；GitHub Release 页面为对应版本的**总结性**说明。
 
+## [0.1.1] - 2026-07-28
+
+### 新增功能
+- **下拉选项悬浮提示（仅截断项）**：模型选择器与配置管理下拉框中，文本过长被省略号截断的选项，鼠标 hover 时显示完整文本的悬浮提示，且**仅当该项确实被截断**时才弹出（短文本不弹窗）。新建 `src/components/TruncatedText.tsx`（纯展示、零外部依赖）：用 `scrollWidth > clientWidth + 1` 判断真实溢出，提示经 `createPortal` 挂到 `document.body` 并以 `position: fixed`（按视口坐标）渲染，避免被下拉列表的 `overflow` 裁剪；下方空间不足时自动翻到选项上方；`pointer-events: none` 不挡点击。接入 `ModelSelect.tsx`（模型名选项 + 收起态触发器）与 `ConfigManager.tsx`（配置名选项含 default + 触发器）；`App.css` 新增 `.option-tooltip` 样式，`.select-value` 补 `min-width: 0` 以支持内部截断。高级参数面板的 2 个原生 `<select>`（n_gpu_layers / flash_attn）选项均很短不会截断、且原生弹窗由 OS 渲染无法逐项提示，按奥卡姆剃刀未改造。
+
+### 功能优化
+- **「分享参数」更名「分享配置」**：配置管理卡片分享按钮文案 `config.share` 中英文案由「分享参数」/「Share Params」改为「分享配置」/「Share Config」（`src/i18n/messages.ts`），同步 README 与 `App.tsx` / `parseArgs.ts` 注释；`IconButton` 的 `label` 同时驱动 `title` 与 `aria-label`，一并更新。
+- **分享 / 复制语义区分**：分享复制当前选中配置的**已落盘快照**（不含未保存改动），复制复制框内**当前态**（含未保存改动）。`App.tsx` 的 `shareConfig` 复制来源由 live `config` 改为 `activeName === 'default' ? defaultConfig : configs[activeName]`（`defaultConfig` 纳入解构），`saved ?? config` 兜底；`RawParams.tsx` 的【复制】保持 `configToCommand(config)`（框内当前态）不变。
+- **分享成功提示带配置名**：新增 i18n `app.share.copiedNamed`（`已复制 {name} 的参数到剪切板` / `Copied {name} parameters to clipboard`），`shareConfig` 传入 `activeName === 'default' ? t('config.default') : activeName`；原 `app.share.copied`（「已复制启动参数到剪切板」）保留给【复制】按钮。
+
 ## [0.1.0] - 2026-07-22
 
 ### 新增功能
