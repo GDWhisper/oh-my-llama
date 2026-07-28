@@ -73,6 +73,7 @@ export default function App() {
     enabledAdvancedKeys,
     disabledAdvancedKeys,
     configs,
+    defaultConfig,
     activeName,
     renameTarget,
     nameDialog,
@@ -124,14 +125,20 @@ export default function App() {
   // 设置浮窗开关：齿轮图标触发，承载语言等偏好设置。
   const [showSettings, setShowSettings] = useState(false);
 
-  // 「分享参数」：把当前配置序列化成启动命令行复制到剪切板。
+  // 「分享配置」：复制当前选中配置的【已落盘快照】（不含未保存改动）。
+  // 快照取 default 模板(defaultConfig) 或 命名配置(configs[activeName])，
+  // 与 live config 区分——编辑中未保存的改动不会进入分享内容。
+  // 与原始参数卡片【复制】(复制框内 live 当前态) 形成对照。
   const shareConfig = async () => {
-    if (!config) {
+    const saved = activeName === 'default' ? defaultConfig : configs[activeName];
+    const source = saved ?? config;
+    if (!source) {
       return;
     }
-    const text = configToCommand(config);
+    const text = configToCommand(source);
+    const name = activeName === 'default' ? t('config.default') : activeName;
     const ok = await copyToClipboard(text);
-    showToast(ok ? t('app.share.copied') : t('app.share.copyFailed'));
+    showToast(ok ? t('app.share.copiedNamed', { name }) : t('app.share.copyFailed'));
   };
 
   // 把解析出的套用计划真正写入配置：已知 flag 落到对应字段并启用高级键，

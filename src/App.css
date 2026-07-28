@@ -537,6 +537,8 @@ body {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  /* 作为 flex 子项时需允许收缩，内部 TruncatedText 才能正确省略号截断。 */
+  min-width: 0;
 }
 
 .select-caret {
@@ -595,6 +597,22 @@ body {
 .option-main.selected {
   color: #4f46e5;
   font-weight: 600;
+}
+
+/* 下拉选项悬浮提示：仅在选项文本被截断（未完全显示）时由 TruncatedText 渲染。
+   portal 到 body，故用 fixed 定位；pointer-events:none 避免遮挡点击。 */
+.option-tooltip {
+  z-index: 9999;
+  padding: 6px 10px;
+  font-size: 13px;
+  line-height: 1.4;
+  color: #f9fafb;
+  background: rgba(17, 23, 39, 0.95);
+  border-radius: 6px;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.25);
+  pointer-events: none;
+  white-space: pre-wrap;
+  word-break: break-all;
 }
 
 .option-delete {

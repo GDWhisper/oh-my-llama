@@ -398,7 +398,7 @@ export function splitExtraArg(text: string): [string, string] {
 
 // 把一份配置序列化为与后端 build_server_args 完全一致的 llama-server 启动命令行
 // （基础参数 + 各项已启用高级参数，未知/自定义参数原样追加），
-// 供「分享参数」复制到剪切板，他人粘贴即可复现同一启动。
+// 供「分享配置」复制到剪切板，他人粘贴即可复现同一启动。
 const FLASH_NORMALIZE: Record<string, string> = { on: 'on', off: 'off', auto: 'auto' };
 
 const quoteIfNeeded = (value: string): string => (/\s/.test(value) ? `"${value}"` : value);

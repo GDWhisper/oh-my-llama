@@ -5,6 +5,7 @@ import { Button } from './Button';
 import { IconButton } from './IconButton';
 import { NameDialog } from './NameDialog';
 import { ConfirmDialog } from './ConfirmDialog';
+import { TruncatedText } from './TruncatedText';
 
 type DialogMode = 'save-as-new' | 'create-empty' | 'rename';
 
@@ -149,7 +150,9 @@ export function ConfigManager({
                 className="select-trigger"
                 onClick={() => setOpen((value) => !value)}
               >
-                <span className="select-value">{currentLabel}</span>
+                <span className="select-value">
+                  <TruncatedText text={currentLabel} />
+                </span>
                 <span className="select-caret" aria-hidden>
                   ▾
                 </span>
@@ -162,7 +165,7 @@ export function ConfigManager({
                       className={`option-main${activeName === 'default' ? ' selected' : ''}`}
                       onClick={() => choose('default')}
                     >
-                      {t('config.default')}
+                      <TruncatedText text={t('config.default')} />
                     </button>
                   </li>
                   {names.map((name) => (
@@ -172,7 +175,7 @@ export function ConfigManager({
                         className={`option-main${activeName === name ? ' selected' : ''}`}
                         onClick={() => choose(name)}
                       >
-                        {name}
+                        <TruncatedText text={name} />
                       </button>
                       <button
                         type="button"
