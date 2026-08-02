@@ -1,4 +1,5 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import { invoke } from '@tauri-apps/api/core';
 import { useServer } from './hooks/useServer';
 import { ControlPanel } from './components/ControlPanel';
 import { LogPanel } from './components/LogPanel';
@@ -11,9 +12,11 @@ import { configToCommand, splitExtraArg, type ApplyPlan } from './lib/parseArgs'
 import { useI18n } from './i18n';
 import { SettingsDialog } from './components/SettingsDialog';
 import { UpdateDialog } from './components/UpdateDialog';
+import { UpdateToast } from './components/UpdateToast';
 import { ConfirmDialog } from './components/ConfirmDialog';
 import { MetricsPanel } from './components/MetricsPanel';
 import { useUpdater } from './hooks/useUpdater';
+import type { AppSettings } from './types';
 import './App.css';
 
 // 复制到剪切板：优先 navigator.clipboard（安全上下文），失败时回退 execCommand。
@@ -43,7 +46,12 @@ async function copyToClipboard(text: string): Promise<boolean> {
   }
 }
 
+// 轻量周期自动检查间隔（毫秒）：默认 6 小时。程序常驻时按此间隔再查一次，
+// 避免只靠启动时那一次导致常驻用户永远收不到更新提醒。
+const AUTO_CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000;
+
 export default function App() {
+  // 更新（方案 A）：手动检查、下载可见且可取消、安装需显式确认。
   const { t } = useI18n();
   const server = useServer();
   // 更新（方案 A）：手动检查、下载可见且可取消、安装需显式确认。
@@ -53,6 +61,7 @@ export default function App() {
     configEpoch,
     isDirty,
     status,
+    unresponsive,
     logs,
     error,
     toast,
@@ -129,6 +138,40 @@ export default function App() {
 
   // 设置浮窗开关：齿轮图标触发，承载语言等偏好设置。
   const [showSettings, setShowSettings] = useState(false);
+
+  // 轻量周期自动检查：程序长时间不关闭时也按固定间隔再查一次（默认 6 小时），
+  // 避免「只靠启动时那一次」导致常驻用户永远收不到更新提醒。
+  // 仅当设置开启、且当前无待处理更新时联网；已知有待处理更新（徽标已显示）则跳过，
+  // 避免重复弹提示。间隔为可调常量（见文件顶部 AUTO_CHECK_INTERVAL_MS）。
+  // updater.check 由 useCallback 保持稳定：抽取为本地常量，使 effect 依赖稳定、
+  // 不被每次渲染重建的 updater 对象干扰（避免定时器被反复重建）。
+  const autoCheck = updater.check;
+  // 启动检查只跑一次（ref 防重复触发）。
+  const didAutoCheck = useRef(false);
+  useEffect(() => {
+    if (didAutoCheck.current) return;
+    didAutoCheck.current = true;
+    let alive = true;
+    invoke<AppSettings>('read_settings')
+      .then((s) => {
+        if (alive && s.auto_check_updates) autoCheck(true);
+      })
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, [autoCheck]);
+
+  useEffect(() => {
+    const id = setInterval(() => {
+      invoke<AppSettings>('read_settings')
+        .then((s) => {
+          if (s.auto_check_updates) autoCheck(true);
+        })
+        .catch(() => {});
+    }, AUTO_CHECK_INTERVAL_MS);
+    return () => clearInterval(id);
+  }, [autoCheck]);
 
   // 「分享配置」：复制当前选中配置的【已落盘快照】（不含未保存改动）。
   // 快照取 default 模板(defaultConfig) 或 命名配置(configs[activeName])，
@@ -241,8 +284,24 @@ export default function App() {
     );
   }
 
-  const statusText = status?.running ? t('status.running') : t('status.stopped');
-  const statusClass = status?.running ? 'running' : 'stopped';
+  // 徽章四态：运行中 / 无响应（曾可服务但持续失联，疑似假死）/ 模型加载中
+  // （本应用已拉起、模型仍在加载）/ 已停止。仅看 running 会漏掉 managed&&!running
+  // 的加载中态；仅 managed 还会把"曾 Ready 后挂死"与"正常加载中"混为一谈，
+  // 故以 unresponsive 单独标识进程存活但已假死的异常态。
+  const statusText = status?.running
+    ? t('status.running')
+    : unresponsive
+      ? t('status.unresponsive')
+      : status?.managed
+        ? t('status.loading')
+        : t('status.stopped');
+  const statusClass = status?.running
+    ? 'running'
+    : unresponsive
+      ? 'unresponsive'
+      : status?.managed
+        ? 'loading'
+        : 'stopped';
 
   return (
     <main className="app">
@@ -349,6 +408,8 @@ export default function App() {
         onClose={() => setShowSettings(false)}
         onCheckUpdate={updater.check}
         checking={updater.status.kind === 'checking'}
+        pendingUpdate={updater.pendingUpdate}
+        onOpenUpdate={updater.openUpdate}
       />
       <UpdateDialog
         status={updater.status}
@@ -358,6 +419,13 @@ export default function App() {
         onDismiss={updater.dismiss}
         onRetry={updater.check}
       />
+      {updater.toast && (
+        <UpdateToast
+          toast={updater.toast}
+          onView={updater.openUpdate}
+          onDismiss={updater.dismissToast}
+        />
+      )}
       <ConfirmDialog
         open={pendingSelect !== null}
         title={t('config.dirtySwitch.title')}

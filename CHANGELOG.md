@@ -4,6 +4,18 @@
 
 > 本文件为**详细改动历史**（含涉及的文件与实现机制）；GitHub Release 页面为对应版本的**总结性**说明。
 
+## [0.1.3] - 2026-08-02
+
+### 新增功能
+- **服务状态新增「无响应」指示**：受管进程仍存活、但持续不响应（如系统睡眠后 CUDA/GPU 上下文失效挂死）时，顶栏状态徽章显示橙色「无响应」，与「运行中 / 加载中 / 已停止」三者区分。判定锚定「曾可服务」——仅当 `managed && 曾观测到 running===true && 连续 !running ≥ 60s（UNRESPONSIVE_MS）` 才置位；从没 Ready 过（大模型仍在慢加载）的进程**永不**进「无响应」，从而从结构上排除慢加载误判。`src/hooks/useServer.ts`（新增 `unresponsive` 状态 + `wasReadyRef`/`unreachableSinceRef` 两 ref + 模块常量 `UNRESPONSIVE_MS`，逻辑落在 `loadStatus` 内单一真源；`running===true` 或 `managed===false` 时清零）+ `src/App.tsx`（四态分支解构 `unresponsive`）+ `src/i18n/messages.ts`（新增 `status.unresponsive` 中「无响应」/英「Unresponsive」）+ `src/App.css`（新增 `.status.unresponsive` 橙 `#ffedd5`/`#9a3412`）。
+
+### 功能优化
+- **顶栏状态徽章升级为感知「加载中」**：原徽章只看 `running` 布尔（二态：运行中/已停止），导致「本应用已拉起进程、但模型尚未就绪（GET /health 未返回 200）」时误标红「已停止」。现感知 `managed` 字段，新增黄色「加载中」态，与控制区「模型加载中…」、启动按钮「启动中…」口径一致。`src/App.tsx`（状态推导三态→四态分支）+ `src/i18n/messages.ts`（新增 `status.loading` 中「加载中」/英「Loading」）+ `src/App.css`（新增 `.status.loading` 黄 `#fef3c7`/`#92400e`）。
+- **系统唤醒即刷新服务状态**：原前端每 1.5s 轮询 `get_status` 一个 JS 定时器，系统睡眠/休眠期间被挂起，唤醒后需等最多一个周期才反映「睡眠中进程被回收/挂死」。现新增监听 Tauri 应用级事件 `tauri://resume`，系统唤醒即刻触发 `refreshNow()`（从轮询体抽出的 `useCallback` 单一真源，轮询与唤醒事件共用），状态秒级回正。`src/hooks/useServer.ts`（抽出 `refreshNow` + `resume` effect，补 `useCallback` import）。
+
+### Bug 修复
+- **修复系统睡眠/休眠后状态不刷新**：外部终端/任务管理器杀掉受管进程本已由 1.5s 轮询 + 后端 `owned_alive = managed && is_process_running(pid)` 自检复位正确捕捉；唯一缺口在系统睡眠——唤醒后状态延迟反映。已通过上面的 `tauri://resume` 即时刷新闭环解决（纯前端、零新依赖、不破分层）。
+
 ## [0.1.2] - 2026-08-02
 
 ### 功能优化
@@ -157,6 +169,9 @@
 ### 说明
 - 本版本仅提供 Windows 安装包（`.exe` NSIS / `.msi`），无需预先安装 Node / Rust。
 
+[0.1.3]: https://github.com/GDWhisper/oh-my-llama/releases/tag/v0.1.3
+[0.1.2]: https://github.com/GDWhisper/oh-my-llama/releases/tag/v0.1.2
+[0.1.1]: https://github.com/GDWhisper/oh-my-llama/releases/tag/v0.1.1
 [0.1.0]: https://github.com/GDWhisper/oh-my-llama/releases/tag/v0.1.0
 [0.0.9]: https://github.com/GDWhisper/oh-my-llama/releases/tag/v0.0.9
 [0.0.8]: https://github.com/GDWhisper/oh-my-llama/releases/tag/v0.0.8

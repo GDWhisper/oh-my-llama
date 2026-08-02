@@ -1051,6 +1051,16 @@ button:disabled {
   color: #065f46;
 }
 
+.status.loading {
+  background: #fef3c7;
+  color: #92400e;
+}
+
+.status.unresponsive {
+  background: #ffedd5;
+  color: #9a3412;
+}
+
 .status.stopped {
   background: #fee2e2;
   color: #991b1b;
@@ -1225,6 +1235,142 @@ button:disabled {
   padding: 12px;
   color: #6b7280;
   font-size: 13px;
+}
+
+/* 版本号旁的「NEW」徽标：发现新版本时出现，点击进入更新弹窗。 */
+.update-badge {
+  display: inline-flex;
+  align-items: center;
+  margin-left: 2px;
+  padding: 1px 6px;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1.5;
+  letter-spacing: 0.5px;
+  color: #ffffff;
+  background: #ef4444;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  vertical-align: middle;
+}
+.update-badge:hover {
+  background: #dc2626;
+}
+
+/* 设置浮窗内「自动检查」开关行 */
+.settings-check-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  user-select: none;
+}
+.settings-checkbox {
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  accent-color: #2563eb;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.settings-check-label {
+  font-size: 13px;
+  font-weight: 500;
+  color: #111827;
+}
+
+/* 右上角自动检查提示（方案 A：自动检查发现新版本时的非打扰提示） */
+.update-toast {
+  position: fixed;
+  top: 18px;
+  right: 18px;
+  z-index: 60;
+  width: 300px;
+  max-width: calc(100vw - 36px);
+  padding: 14px 16px 14px 18px;
+  background: #ffffff;
+  border: 1px solid #e5e7eb;
+  border-left: 4px solid #2563eb;
+  border-radius: 10px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.18);
+  pointer-events: auto;
+  animation: toast-in-right 180ms ease-out;
+}
+.update-toast-close {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  color: #6b7280;
+  background: transparent;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+}
+.update-toast-close:hover {
+  background: #f3f4f6;
+  color: #111827;
+}
+.update-toast-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: #111827;
+  margin-bottom: 4px;
+  padding-right: 22px;
+}
+.update-toast-desc {
+  font-size: 12px;
+  line-height: 1.5;
+  color: #4b5563;
+  margin-bottom: 12px;
+}
+.update-toast-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+.update-toast-view {
+  padding: 6px 14px;
+  font-size: 13px;
+  font-weight: 500;
+  color: #ffffff;
+  background: #2563eb;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+}
+.update-toast-view:hover {
+  background: #1d4ed8;
+}
+.update-toast-later {
+  padding: 6px 14px;
+  font-size: 13px;
+  font-weight: 500;
+  color: #374151;
+  background: #f3f4f6;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+}
+.update-toast-later:hover {
+  background: #e5e7eb;
+}
+
+@keyframes toast-in-right {
+  from {
+    opacity: 0;
+    transform: translateX(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
 }
 
 /* 原始参数卡片：编辑态沿用 .panel 基底，这里只补必要的差异 */

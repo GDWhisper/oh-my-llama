@@ -1,6 +1,9 @@
 [package]
 name = "oh-my-llama"
-version = "0.1.2"
+# 应用版本号的唯一真源是 src-tauri/tauri.conf.json 的 "version"——它同时驱动
+# 运行时 getVersion()、安装包版本与 CI Release 名（__VERSION__）。此处刻意省略
+# version：Cargo 会默认取 0.0.0（Cargo.lock 中同为 0.0.0，属预期，勿手工回填），
+# 该值不参与分发，避免多处版本号各自漂移。发版只需改 tauri.conf.json 一处。
 description = "Oh My Llama"
 authors = ["GDWhisper"]
 edition = "2021"

@@ -23,6 +23,8 @@ export const zh = {
 
   // 运行状态
   'status.running': '运行中',
+  'status.loading': '加载中',
+  'status.unresponsive': '无响应',
   'status.stopped': '已停止',
 
   // 必要参数字段名（用于追加提醒里列出）
@@ -549,6 +551,14 @@ export const zh = {
   'about.version': '版本',
   'about.repo': '项目仓库',
 
+  // 更新（方案 A：手动检查、可见可取消；自动检查仅提示+徽标）
+  'settings.autoCheck': '自动检查更新',
+  'update.badgeNew': 'NEW',
+  'update.badgeTitle': '发现新版本，点击查看',
+  'update.toastTitle': '发现新版本',
+  'update.toastDesc': '新版本 {version} 已发布（当前 {current}）',
+  'update.toastView': '查看',
+
   // 系统性能面板
   'metrics.title': '系统性能',
   'metrics.cpu': 'CPU',
@@ -584,6 +594,8 @@ export const en: Record<MessageKey, string> = {
   'app.share.copyFailed': 'Copy failed, please copy manually',
 
   'status.running': 'Running',
+  'status.loading': 'Loading',
+  'status.unresponsive': 'Unresponsive',
   'status.stopped': 'Stopped',
 
   'field.model': 'Model path',
@@ -1105,6 +1117,14 @@ export const en: Record<MessageKey, string> = {
   'about.title': 'About',
   'about.version': 'Version',
   'about.repo': 'Repository',
+
+  // 更新（方案 A：手动检查、可见可取消；自动检查仅提示+徽标）
+  'settings.autoCheck': 'Automatically check for updates',
+  'update.badgeNew': 'NEW',
+  'update.badgeTitle': 'New version available, click to view',
+  'update.toastTitle': 'Update available',
+  'update.toastDesc': 'Version {version} is available (you have {current})',
+  'update.toastView': 'View',
 
   // 系统性能面板
   'metrics.title': 'System Performance',

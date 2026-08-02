@@ -21,10 +21,14 @@
 > 以下路径：`dev` = `F:\llama_run\llama-launcher-dev`；`main` = `F:\llama_run\tauri-launcher`。
 
 0. **开发 & 自测**（在 `dev` 工作树）：完成代码改动，确保前端门禁与（如有）Rust 检查全绿。
-1. **提升版本号**：同步修改两处——
-   - `src-tauri/Cargo.toml` 的 `version = "X.Y.Z"`
-   - `src-tauri/tauri.conf.json` 的 `"version": "X.Y.Z"`
-   > `tauri.conf.json` 的版本驱动 Release 名 `__VERSION__` 与安装包版本；`Cargo.toml` 也应保持一致。
+1. **提升版本号**：**只改一处**——`src-tauri/tauri.conf.json` 的 `"version": "X.Y.Z"`。
+   > **该文件是应用版本号的唯一真源**，同时驱动三件事：运行时 `getVersion()`（设置→关于显示的版本）、安装包版本、CI Release 名 `__VERSION__`。
+   >
+   > `src-tauri/Cargo.toml` 与根 `package.json` **已刻意省略 `version` 字段**，因此无需（也不应）同步：
+   > - Cargo 省略时默认 `0.0.0`，`Cargo.lock` 里的 `oh-my-llama` 也会是 `0.0.0`——**这是预期状态，勿手工回填**；该值不参与分发。
+   > - `package.json` 因 `"private": true` 可省略 `version`，重新生成的 `package-lock.json` 同样不含该字段。
+   >
+   > 这样做的原因：历史上版本号散落 4 个文件 5 处、靠人肉同步，实际漂移过（曾同时存在 0.1.0 / 0.1.1 / 0.1.2 三个值）。收敛为单一真源后，漂移在结构上不再可能发生。
 2. **提交**（在 `dev`）：`git add` 仅项目文件，**排除 `.claude/`、`.mcp.json`**。commit message 用中文、概述本版本改动。可用 `git commit -F - <<'EOF'` 喂多行。
 3. **推送 dev**：`git push origin dev`。
 4. **合并到 main 工作树**：`cd F:/llama_run/tauri-launcher && git fetch origin && git merge --no-ff dev -m "Merge dev into main for vX.Y.Z"`。用 `--no-ff` 保留合并记录；**不要**在 `dev` 工作树 checkout main。
@@ -48,10 +52,13 @@
 ## 三、CHANGELOG 与 Release Note 的分工（用户硬性要求）
 
 - **`CHANGELOG.md` = 详细改动历史**：每条写**涉及的文件与实现机制**（如 `ConfigManager` 加按钮、`lib.rs` 新增 `file_size` 命令、`App.css` 用 `.btn-secondary:disabled` 特异度压制通用 `button:disabled` 等）。按 `### 新增功能 / ### 功能优化 / ### Bug 修复` 三类组织。文件头注明「本文件为详细改动历史，Release 页面为总结性说明」。
-- **GitHub Release Note = 总结性**：必须明显分为三段——
-  - `### 新增功能`
-  - `### 功能优化`
-  - `### Bug 修复`
+- **GitHub Release Note = 总结性**：**统一使用模板文件 `.dev_docs/release-note-template.md`**（复制后填入实际内容，经 `--notes-file` 写入）。模板已内嵌以下强制要求：
+  - **顶部固定文案**（不可改动）：`本版本亮点由发布 agent 基于 CHANGELOG 手动总结。详细条目见 CHANGELOG.md。`
+  - **正文必须包含三大类**（顺序固定、缺一不可，空类也要保留标题并写「无」）：
+    - `### 新增功能`
+    - `### 功能优化`
+    - `### Bug 修复`
+  - 末尾统一加一行：`> 详细改动参考 CHANGELOG`。
   **不要混在一起**；也**不要放「下载」栏目**（下载信息已在 Release 资产区自动展示）。
 - **⛔ 内容红线（用户硬性要求）**：Release Note 只写「两个**已发布**版本之间**用户可见**的差异」。**严禁混入开发过程中误添加又删除的内部改动**（如某版本开发期误塞进 UI、随后又移除的元素；或加了又删、从未在 UI 展示过的字段等）。判断标准：该改动在**上一正式版里不存在、在当前正式版里也不存在** → 对版本对比毫无意义，必须剔除。写完逐条自问：「用户从旧版升到新版会注意到这条吗？」回答「不会 / 从未出现过」的，删。
 - Release Note 末尾统一加一行：`> 详细改动参考 CHANGELOG`。
@@ -67,7 +74,7 @@
 - **资产 URL 显示 `untagged-...`** → 属 tauri-action 上传时的内部路径，Release 仍正确挂在 tag 下，无需处理。
 - **`dev` 不能 checkout main** → 合并去 `main` 工作树执行 `git merge --no-ff dev`。
 - **提交排除 `.claude/`、`.mcp.json`**。
-- **版本号两处都要改**（`Cargo.toml` + `tauri.conf.json`）。
+- **版本号只改 `tauri.conf.json` 一处**（唯一真源）。`Cargo.toml` / `package.json` 已省略 `version`，`Cargo.lock` 里的 `0.0.0` 属预期，**勿手工回填**。
 - **`release.yml` 仅 Windows**；不要试图让它出 macOS / Linux（历史已验证会失败）。
 
 ---
@@ -76,12 +83,12 @@
 
 - [ ] 前端门禁 `npm run check:frontend` 通过
 - [ ] （如有 Rust 改动）`cargo check` / `clippy -D warnings` / `fmt --check` 通过
-- [ ] 版本号两处（`Cargo.toml` + `tauri.conf.json`）已同步
+- [ ] 版本号已在 `src-tauri/tauri.conf.json`（唯一真源）提升，且与将要打的 tag 一致
 - [ ] `git add` 已排除 `.claude/`、`.mcp.json`
 - [ ] `dev` 已推送、`main` 已合并并推送
 - [ ] tag `vX.Y.Z` 已推送并触发 CI
 - [ ] `CHANGELOG.md` 已更新（详细、三类分段）
-- [ ] Release Note 已用 `--notes-file` 写入（三段式、无下载栏目、底部「详细改动参考 CHANGELOG」、**无开发期内部增减类条目**），并 `--draft=false --latest`
+- [ ] Release Note 已**复制 `release-note-template.md` 模板**用 `--notes-file` 写入（含顶部固定文案、三大类齐全、无下载栏目、底部「详细改动参考 CHANGELOG」、**无开发期内部增减类条目**），并 `--draft=false --latest`
 - [ ] `gh release view vX.Y.Z` 确认输出含 `draft: false`（**未确认前不得回复用户「已发布」**）
 - [ ] 资产（`setup.exe` + `.msi`）已生成
 - [ ] 本地已生成签名私钥 `~/.tauri/oh-my-llama.key`（公钥已写入 `src-tauri/tauri.conf.json` 的 `plugins.updater.pubkey`）
@@ -108,7 +115,7 @@
 1. 照常打 `vX.Y.Z` 标签触发 `release.yml`（仅 Windows）构建。
 2. 构建产出 `setup.exe`/`.msi` + 对应 `.sig` + `latest.json`，作为草稿 Release 资产。
 3. `gh release edit --draft=false` 发布后，已装旧版用户在「设置 → 关于 → 检查更新」即可看到新版本并可视化下载安装。
-4. **版本号两处**（`Cargo.toml` + `tauri.conf.json`）必须与 tag 一致，`latest.json` 才指向正确版本。
+4. **`tauri.conf.json` 的 `version`（唯一真源）必须与 tag 一致**，`latest.json` 才指向正确版本。
 
 ### 常见坑
 - **缺 `bundle.createUpdaterArtifacts`（v0.0.3 踩过）**：Tauri v2 **必须**在 `tauri.conf.json` 的 `bundle` 里显式设 `"createUpdaterArtifacts": true`，否则即使配了签名私钥，构建也**不产出 `.sig`**，Release 只有 `setup.exe`/`.msi`，更新通道失效。

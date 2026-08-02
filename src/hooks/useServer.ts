@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import type { ConfigsState, ParamSpec, ServerConfig, ServerLogLine, ServerStatus } from '../types';
@@ -31,6 +31,12 @@ const EMPTY_ADVANCED_ENABLED = (): Record<AdvancedKey, boolean> =>
     {} as Record<AdvancedKey, boolean>,
   );
 
+// 受管进程「曾可服务但持续无响应」判定阈值（毫秒）。
+// 仅当进程曾被确认可服务（running=true）之后，又持续 N 秒探测不到（managed && !running），
+// 才判定为「无响应」。这样能区别于「大模型仍在加载」的正常 加载中 态，
+// 避免把慢加载误判为假死。60s = 约 40 次 1.5s 轮询，远超单次瞬断窗口。
+const UNRESPONSIVE_MS = 60000;
+
 export function useServer() {
   const { t } = useI18n();
   // 初始为 null：挂载后由后端默认值填充，加载完成前由 App 渲染加载占位。
@@ -39,6 +45,12 @@ export function useServer() {
   const configRef = useRef<ServerConfig | null>(null);
   configRef.current = config;
   const [status, setStatus] = useState<ServerStatus | null>(null);
+  // 受管但持续无响应：managed && 曾可服务(running=true) && 持续 !running ≥ UNRESPONSIVE_MS。
+  // wasReadyRef 记忆"是否曾被确认可服务"，unreachableSinceRef 记录首次失联时刻；
+  // 两者皆 ref，使判定逻辑在轮询/唤醒/启动/停止后复用而无需依赖过期 state。
+  const [unresponsive, setUnresponsive] = useState(false);
+  const wasReadyRef = useRef(false);
+  const unreachableSinceRef = useRef<number | null>(null);
   const [logs, setLogs] = useState<ServerLogLine[]>([]);
   // 启动命令行现由「原始参数」卡片从 config 实时派生展示，此处不再单独保存。
   const [error, setError] = useState<string | null>(null);
@@ -157,6 +169,27 @@ export function useServer() {
     try {
       const data = await invoke<ServerStatus>('get_status', { config: cfg });
       setStatus(data);
+      // 受管但持续无响应判定：只有"曾经可服务"之后又持续探测不到，才标无响应；
+      // 从没 Ready 过（大模型仍在加载）一律只算 加载中，避免把慢加载误判为假死。
+      // 此逻辑只读 ref/常量与稳定 setter，无过期 state 依赖，轮询/唤醒/启停后均可复用。
+      if (data.running) {
+        wasReadyRef.current = true;
+        unreachableSinceRef.current = null;
+        setUnresponsive(false);
+      } else if (data.managed) {
+        if (wasReadyRef.current) {
+          if (unreachableSinceRef.current === null) {
+            unreachableSinceRef.current = Date.now();
+          } else if (Date.now() - unreachableSinceRef.current >= UNRESPONSIVE_MS) {
+            setUnresponsive(true);
+          }
+        }
+        // wasReady 为 false：仍在加载中，不标无响应（保持 加载中）。
+      } else {
+        wasReadyRef.current = false;
+        unreachableSinceRef.current = null;
+        setUnresponsive(false);
+      }
     } catch (err) {
       console.error(err);
     }
@@ -288,18 +321,47 @@ export function useServer() {
     };
   }, [config?.model_dir]);
 
-  useInterval(() => {
-    loadStatus();
+  // 即时刷新（状态探测 + 模型存在性/大小复查）：供 1.5s 轮询与「系统唤醒」事件共用，
+  // 单一真源，避免轮询体重复。loadStatus/checkModelExists/loadModelSize 仅依赖稳定 ref
+  // 与状态 setter，闭包恒稳定，故 useCallback 依赖为空。
+  const refreshNow = useCallback(() => {
+    void loadStatus();
     // 日志已改为事件实时推送，这里不再轮询日志。
-    // 顺带轮询模型文件是否存在，覆盖"应用开着时被外部移走"的情况
-    if (config?.model?.trim()) {
-      void checkModelExists(config.model);
-      void loadModelSize(config.model);
+    // 顺带复查模型文件是否存在，覆盖"应用开着时被外部移走/改名"的情况。
+    const path = configRef.current?.model?.trim() ?? '';
+    if (path) {
+      void checkModelExists(path);
+      void loadModelSize(path);
     } else {
       setModelExists(null);
       setModelSize(null);
     }
-  }, 1500);
+  }, []);
+
+  useInterval(refreshNow, 1500);
+
+  // 系统从睡眠/休眠唤醒时立即刷新状态：睡眠期间 JS 定时器被系统挂起，
+  // 仅靠 1.5s 轮询会在唤醒后延迟最多一个周期才反映「睡眠中被回收/挂死的服务」。
+  // Tauri 在 app 级派发 tauri://resume，挂上即「唤醒即查」，状态秒级回正（与外部杀进程同理）。
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+    let disposed = false;
+    (async () => {
+      try {
+        unlisten = await listen('tauri://resume', () => {
+          if (!disposed) {
+            refreshNow();
+          }
+        });
+      } catch (err) {
+        console.error(err);
+      }
+    })();
+    return () => {
+      disposed = true;
+      unlisten?.();
+    };
+  }, [refreshNow]);
 
   const previewUrl = useMemo(() => (status?.running ? status.url : ''), [status]);
   const modelMissing = modelExists === false;
@@ -730,6 +792,7 @@ export function useServer() {
     isDirty,
     configEpoch,
     status,
+    unresponsive,
     logs,
     error,
     toast,
