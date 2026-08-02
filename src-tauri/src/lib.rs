@@ -149,13 +149,18 @@ pub struct ServerLogLine {
 }
 
 // ── 应用级设置（与服务器启动配置 ServerConfig 解耦）────────────────────
-// 当前仅含「更新代理」一项：留空 = 更新直连（不读任何代理环境变量）；
-// 填写 = 仅走用户显式指定的代理地址。仅持久化到 APPDATA/OhMyLlama/settings.json，
-// 不污染 configs.toml，也不干预用户代理客户端的全局/规则模式。
+// 当前含两项：
+//  - update_proxy：留空 = 更新直连（不读任何代理环境变量）；填写 = 仅走用户显式指定的代理地址。
+//  - auto_check_updates：启动时是否自动检查更新（不打扰：仅弹右上提示+版本旁 NEW 徽标，
+//    绝不静默下载/安装；安装仍需用户在弹窗里显式确认）。
+// 仅持久化到 APPDATA/OhMyLlama/settings.json，不污染 configs.toml，
+// 也不干预用户代理客户端的全局/规则模式。
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct AppSettings {
     #[serde(default)]
     pub update_proxy: String,
+    #[serde(default)]
+    pub auto_check_updates: bool,
 }
 
 fn settings_path(app_data: &std::path::Path) -> std::path::PathBuf {
@@ -199,7 +204,11 @@ async fn read_settings(_app: AppHandle) -> Result<AppSettings, String> {
 }
 
 #[tauri::command]
-async fn save_settings(_app: AppHandle, update_proxy: String) -> Result<AppSettings, String> {
+async fn save_settings(
+    _app: AppHandle,
+    update_proxy: String,
+    auto_check_updates: bool,
+) -> Result<AppSettings, String> {
     let raw = update_proxy.trim().to_string();
     // 裸地址（如 127.0.0.1:7897 / localhost / 127）默认按 http:// 处理；
     // 仅当显式写了其它协议（含 :// 且非 http/https）时才报错。
@@ -217,6 +226,7 @@ async fn save_settings(_app: AppHandle, update_proxy: String) -> Result<AppSetti
     }
     let settings = AppSettings {
         update_proxy: proxy.clone(),
+        auto_check_updates,
     };
     let text =
         serde_json::to_string_pretty(&settings).map_err(|err| format!("序列化设置失败: {err}"))?;

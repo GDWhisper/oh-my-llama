@@ -6,6 +6,7 @@ import { useI18n } from '../i18n';
 import { LangSwitch } from './LangSwitch';
 import { Button } from './Button';
 import type { AppSettings } from '../types';
+import type { PendingUpdate } from '../hooks/useUpdater';
 
 interface Props {
   open: boolean;
@@ -13,16 +14,28 @@ interface Props {
   // 触发更新检查（由 App 的 useUpdater 提供）；checking 表示正在查询中。
   onCheckUpdate: () => void;
   checking: boolean;
+  // 已知有可用更新（驱动版本号旁的 NEW 徽标）；为 null 时不显示徽标。
+  pendingUpdate: PendingUpdate | null;
+  // 点击 NEW 徽标：关闭设置并打开交互式更新弹窗。
+  onOpenUpdate: () => void;
 }
 
 const REPO_URL = 'https://github.com/GDWhisper/oh-my-llama';
 
-// 设置浮窗：居中弹层，承载语言设置与关于（含手动「检查更新」）。
-// 复用公共 modal 遮罩与样式。早期暂不提供「是否检查更新」开关（用户明确要求）。
-export function SettingsDialog({ open, onClose, onCheckUpdate, checking }: Props) {
+// 设置浮窗：居中弹层，承载语言设置与关于（含手动「检查更新」+「自动检查」开关）。
+// 复用公共 modal 遮罩与样式。
+export function SettingsDialog({
+  open,
+  onClose,
+  onCheckUpdate,
+  checking,
+  pendingUpdate,
+  onOpenUpdate,
+}: Props) {
   const { t } = useI18n();
   const [version, setVersion] = useState('');
   const [proxy, setProxy] = useState('');
+  const [autoCheck, setAutoCheck] = useState(false);
   const [proxySaved, setProxySaved] = useState(false);
   const [proxyError, setProxyError] = useState('');
 
@@ -49,24 +62,34 @@ export function SettingsDialog({ open, onClose, onCheckUpdate, checking }: Props
     };
   }, [open]);
 
-  // 打开时读取「更新代理」设置。
+  // 打开时读取「更新代理 + 自动检查」设置。
   useEffect(() => {
     if (!open) return;
     setProxySaved(false);
     setProxyError('');
     invoke<AppSettings>('read_settings')
-      .then((s) => setProxy(s.update_proxy ?? ''))
-      .catch(() => setProxy(''));
+      .then((s) => {
+        setProxy(s.update_proxy ?? '');
+        setAutoCheck(Boolean(s.auto_check_updates));
+      })
+      .catch(() => {
+        setProxy('');
+        setAutoCheck(false);
+      });
   }, [open]);
 
+  // 保存「更新代理 + 自动检查」两项（settings.json），二者一并写入，互不覆盖。
+  // 代理在「保存」按钮处落盘（见 onSaveProxy），自动检查开关则在勾选时即时落盘。
   const onSaveProxy = async () => {
     setProxySaved(false);
     setProxyError('');
     try {
       const s = await invoke<AppSettings>('save_settings', {
         updateProxy: proxy,
+        autoCheckUpdates: autoCheck,
       });
       setProxy(s.update_proxy);
+      setAutoCheck(Boolean(s.auto_check_updates));
       setProxySaved(true);
     } catch (e) {
       setProxyError(String(e));
@@ -145,7 +168,42 @@ export function SettingsDialog({ open, onClose, onCheckUpdate, checking }: Props
             <div className="about-row">
               <span className="settings-hint">{t('about.version')}</span>
               <span className="about-value">{version}</span>
+              {pendingUpdate && (
+                <button
+                  type="button"
+                  className="update-badge"
+                  title={t('update.badgeTitle')}
+                  aria-label={t('update.badgeTitle')}
+                  onClick={() => {
+                    onClose();
+                    onOpenUpdate();
+                  }}
+                >
+                  {t('update.badgeNew')}
+                </button>
+              )}
             </div>
+            <label className="settings-check-row">
+              <input
+                type="checkbox"
+                className="settings-checkbox"
+                checked={autoCheck}
+                onChange={(event) => {
+                  setAutoCheck(event.target.checked);
+                  // 立即落盘（含当前代理值），无需点「保存」也能记住开关。
+                  invoke<AppSettings>('save_settings', {
+                    updateProxy: proxy,
+                    autoCheckUpdates: event.target.checked,
+                  })
+                    .then((s) => {
+                      setProxy(s.update_proxy);
+                      setAutoCheck(Boolean(s.auto_check_updates));
+                    })
+                    .catch(() => {});
+                }}
+              />
+              <span className="settings-check-label">{t('settings.autoCheck')}</span>
+            </label>
             <div className="about-actions">
               <Button
                 variant="secondary"

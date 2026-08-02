@@ -44,8 +44,14 @@ export function UpdateDialog({
 }: Props) {
   const { t } = useI18n();
 
+  // 自动检查发现的更新：本弹窗隐藏，由右上角提示 + 版本徽标承载，不打扰用户。
+  const isAutoAvailable =
+    status.kind === 'available' && (status as { auto?: boolean }).auto === true;
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      // 自动检查发现的更新不走主弹窗（改走右上提示+徽标），故 ESC 不在这里响应。
+      if (isAutoAvailable) return;
       if (e.key === 'Escape') {
         if (status.kind === 'downloading') onCancel();
         else onDismiss();
@@ -53,9 +59,10 @@ export function UpdateDialog({
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [status.kind, onCancel, onDismiss]);
+  }, [status.kind, isAutoAvailable, onCancel, onDismiss]);
 
   if (status.kind === 'idle' || status.kind === 'checking') return null;
+  if (isAutoAvailable) return null;
 
   const close = status.kind === 'downloading' ? onCancel : onDismiss;
 

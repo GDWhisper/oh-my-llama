@@ -71,6 +71,8 @@ export interface ServerLogLine {
 
 // 应用级设置（与服务器启动配置 ServerConfig 解耦）。
 // update_proxy 留空 = 更新直连；填写 = 仅走该代理地址。
+// auto_check_updates = 启动时是否自动检查更新（不打扰：仅提示+徽标，绝不静默安装）。
 export interface AppSettings {
   update_proxy: string;
+  auto_check_updates: boolean;
 }
