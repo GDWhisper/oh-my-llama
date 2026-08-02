@@ -68,19 +68,23 @@ export function ControlPanel({
           </div>
         )}
         <div className="preview-url">
-          {previewUrl
+          {status?.running
             ? t('control.serverAddr', { url: previewUrl })
-            : t('control.serverAddrStopped')}
+            : status?.managed
+              ? t('control.loading')
+              : t('control.serverAddrStopped')}
         </div>
       </div>
       <div className="actions">
-        <Button variant="secondary" onClick={onStart} disabled={starting || status?.running}>
-          {starting ? t('control.starting') : t('control.start')}
+        <Button variant="secondary" onClick={onStart} disabled={starting || status?.managed}>
+          {starting || (status?.managed && !status?.running)
+            ? t('control.starting')
+            : t('control.start')}
         </Button>
         <Button
           variant={status?.running ? 'danger' : 'secondary'}
           onClick={onStop}
-          disabled={stopping || !status?.running}
+          disabled={stopping || !status?.managed}
         >
           {stopping ? t('control.stopping') : t('control.stop')}
         </Button>

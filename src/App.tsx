@@ -97,6 +97,11 @@ export default function App() {
     toggleDisableKey,
     clearAdvanced,
     setAdvancedEnabled,
+    registry,
+    addStructuredKey,
+    removeStructuredKey,
+    setStructuredValue,
+    toggleDisableStructuredKey,
   } = server;
 
   // 切配置守卫：当前有未保存改动时，先弹二次确认而非静默丢弃（脏数据提示）。
@@ -135,7 +140,7 @@ export default function App() {
     if (!source) {
       return;
     }
-    const text = configToCommand(source);
+    const text = configToCommand(source, registry);
     const name = activeName === 'default' ? t('config.default') : activeName;
     const ok = await copyToClipboard(text);
     showToast(ok ? t('app.share.copiedNamed', { name }) : t('app.share.copyFailed'));
@@ -158,10 +163,15 @@ export default function App() {
       plan.enable.forEach((key) => enabledSet.add(key));
       next.enabled_advanced_params = [...enabledSet];
       next.extra_args = plan.extraArgs;
-      // 套用粘帖命令是「重算整份自定义参数」，临时禁用态无意义：两个禁用列表一并清空，
+      // 命中注册表的官方参数升级为结构化高级参数：整份重算（与 extra_args 同语义），
+      // 未出现在本次命令里的结构化参数视为已移除，避免残留旧值静默生效。
+      next.enabled_structured_params = plan.enableStructured;
+      next.structured_params = plan.structured;
+      // 套用粘帖命令是「重算整份自定义参数」，临时禁用态无意义：禁用列表一并清空，
       // 避免残留的禁用标记与本次套用结果脱节。
       next.disabled_advanced_params = [];
       next.disabled_extra_args = [];
+      next.disabled_structured_params = [];
       return next;
     });
     setAdvancedEnabled((current) => {
@@ -287,6 +297,7 @@ export default function App() {
           />
           <RawParams
             config={config}
+            registry={registry}
             configName={activeName}
             configEpoch={configEpoch}
             onApply={(p) => applyPlan(p)}
@@ -317,6 +328,11 @@ export default function App() {
             onToggleDisableKey={toggleDisableKey}
             onClearAdvanced={clearAdvanced}
             onChange={setConfig}
+            registry={registry}
+            onAddStructuredKey={addStructuredKey}
+            onRemoveStructuredKey={removeStructuredKey}
+            onStructuredValueChange={setStructuredValue}
+            onToggleDisableStructuredKey={toggleDisableStructuredKey}
           />
         </section>
 

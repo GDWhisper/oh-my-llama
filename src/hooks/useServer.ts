@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
-import type { ConfigsState, ServerConfig, ServerLogLine, ServerStatus } from '../types';
+import type { ConfigsState, ParamSpec, ServerConfig, ServerLogLine, ServerStatus } from '../types';
 import {
   ADVANCED_ORDER,
   OPTIONAL_ADVANCED_OPTIONS,
@@ -35,6 +35,9 @@ export function useServer() {
   const { t } = useI18n();
   // 初始为 null：挂载后由后端默认值填充，加载完成前由 App 渲染加载占位。
   const [config, setConfig] = useState<ServerConfig | null>(null);
+  // 配置镜像 ref：供轮询/状态检测的闭包读取最新 config，避免闭包捕获到过期 state。
+  const configRef = useRef<ServerConfig | null>(null);
+  configRef.current = config;
   const [status, setStatus] = useState<ServerStatus | null>(null);
   const [logs, setLogs] = useState<ServerLogLine[]>([]);
   // 启动命令行现由「原始参数」卡片从 config 实时派生展示，此处不再单独保存。
@@ -68,6 +71,9 @@ export function useServer() {
   const [modelSize, setModelSize] = useState<number | null>(null);
   // 模型目录下检测到的 .gguf 模型文件名列表（仅文件名，用于下拉框展示）
   const [models, setModels] = useState<string[]>([]);
+  // 结构化高级参数注册表：单一真源在后端 params::PARAM_REGISTRY，挂载时拉取一次。
+  // 前端据此通用渲染控件与序列化命令行，无需为每个官方参数硬编码 UI。
+  const [registry, setRegistry] = useState<ParamSpec[]>([]);
   // 后端默认配置（ServerConfig::default()）：既作为「默认配置」只读模板，
   // 也用于「清空高级参数」时把各高级值复位到默认。
   const defaultRef = useRef<ServerConfig | null>(null);
@@ -143,8 +149,13 @@ export function useServer() {
   };
 
   const loadStatus = async () => {
+    // get_status 以配置地址做端口探测，需要当前配置；配置未加载时不探测以免误判。
+    const cfg = configRef.current;
+    if (!cfg) {
+      return;
+    }
     try {
-      const data = await invoke<ServerStatus>('get_status');
+      const data = await invoke<ServerStatus>('get_status', { config: cfg });
       setStatus(data);
     } catch (err) {
       console.error(err);
@@ -196,7 +207,10 @@ export function useServer() {
   useEffect(() => {
     loadConfig();
     loadStatus();
-    // 挂载时只拉取一次配置与状态（故意只在 [] 时执行）。
+    invoke<ParamSpec[]>('get_param_registry')
+      .then(setRegistry)
+      .catch((err) => console.error(err));
+    // 挂载时只拉取一次配置、状态与参数注册表（故意只在 [] 时执行）。
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -587,6 +601,66 @@ export function useServer() {
     });
   };
 
+  // ── 结构化高级参数的增删改（数据驱动：一套操作覆盖注册表里的全部官方参数）──
+  // 与硬编码高级参数同构：enabled = 卡片显示，disabled = 显示但本次不传，值存字符串。
+  const addStructuredKey = (key: string) => {
+    setConfig((current) => {
+      if (!current || current.enabled_structured_params.includes(key)) {
+        return current;
+      }
+      const spec = registry.find((item) => item.key === key);
+      return {
+        ...current,
+        enabled_structured_params: [...current.enabled_structured_params, key],
+        disabled_structured_params: current.disabled_structured_params.filter((k) => k !== key),
+        // 首次加入时用注册表默认值占位，避免出现「已启用但无值」的空卡片。
+        structured_params: {
+          ...current.structured_params,
+          [key]: current.structured_params[key] ?? spec?.default ?? '',
+        },
+      };
+    });
+  };
+
+  const removeStructuredKey = (key: string) => {
+    setConfig((current) => {
+      if (!current) {
+        return current;
+      }
+      const nextValues = { ...current.structured_params };
+      delete nextValues[key];
+      return {
+        ...current,
+        enabled_structured_params: current.enabled_structured_params.filter((k) => k !== key),
+        disabled_structured_params: current.disabled_structured_params.filter((k) => k !== key),
+        structured_params: nextValues,
+      };
+    });
+  };
+
+  const setStructuredValue = (key: string, value: string) => {
+    setConfig((current) =>
+      current
+        ? { ...current, structured_params: { ...current.structured_params, [key]: value } }
+        : current,
+    );
+  };
+
+  const toggleDisableStructuredKey = (key: string) => {
+    setConfig((current) => {
+      if (!current) {
+        return current;
+      }
+      const disabledSet = new Set(current.disabled_structured_params);
+      if (disabledSet.has(key)) {
+        disabledSet.delete(key);
+      } else {
+        disabledSet.add(key);
+      }
+      return { ...current, disabled_structured_params: [...disabledSet] };
+    });
+  };
+
   // 清空所有高级参数：移除全部已启用项（enabled_advanced_params 置空），
   // 并把各高级值复位到后端默认值；UI 开关状态同步清空。需用户先二次确认再调用。
   // 与「移除参数」一致，仅修改内存配置，仍需点「保存配置」才会持久化。
@@ -613,6 +687,9 @@ export function useServer() {
           disabled_advanced_params: [],
           extra_args: [],
           disabled_extra_args: [],
+          enabled_structured_params: [],
+          disabled_structured_params: [],
+          structured_params: {},
         };
       }
       return {
@@ -630,6 +707,9 @@ export function useServer() {
         disabled_advanced_params: [],
         extra_args: [],
         disabled_extra_args: [],
+        enabled_structured_params: [],
+        disabled_structured_params: [],
+        structured_params: {},
       };
     });
   };
@@ -670,6 +750,7 @@ export function useServer() {
     advancedPredict,
     availableAdvancedOptions,
     enabledAdvancedKeys,
+    registry,
     configs,
     activeName,
     isDefault,
@@ -696,5 +777,9 @@ export function useServer() {
     removeAdvancedKey,
     toggleDisableKey,
     clearAdvanced,
+    addStructuredKey,
+    removeStructuredKey,
+    setStructuredValue,
+    toggleDisableStructuredKey,
   };
 }

@@ -2,11 +2,14 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { buildPlan, configToCommand, parseLlamaArgs, type ApplyPlan } from '../lib/parseArgs';
 import { useI18n } from '../i18n';
 import { Button } from './Button';
-import type { ServerConfig } from '../types';
+import type { ParamSpec, ServerConfig } from '../types';
 
 interface Props {
   // 当前配置（来自后端默认值，无前端硬编码）：只读态据此实时派生启动命令。
   config: ServerConfig;
+  // 结构化参数注册表（后端单一真源）：解析时用于判定哪些已识别 flag 可升级为结构化参数，
+  // 派生命令行时用于按声明还原 flag 与取值形态。
+  registry: ParamSpec[];
   // 当前配置名（'default' 或命名配置名）：用于侦测「切配置」，
   // 切走时强制退出编辑态并丢弃草稿，避免把旧配置文本误写进新配置（串台）。
   configName: string;
@@ -26,6 +29,7 @@ interface Props {
 // 必要/高级卡片随之即时更新；【复原】回到编辑前快照，【完成】退出并做最终归一化。
 export function RawParams({
   config,
+  registry,
   configName,
   configEpoch,
   onApply,
@@ -39,12 +43,12 @@ export function RawParams({
   const debounceRef = useRef<number | null>(null);
 
   // 只读态：由当前 config 实时派生（config 一变即重算，与必要/高级参数同步）。
-  const cmd = useMemo(() => configToCommand(config), [config]);
+  const cmd = useMemo(() => configToCommand(config, registry), [config, registry]);
 
   // 编辑态：实时解析预览（确认前即可核对会变成什么）。
   const plan = useMemo(
-    () => (editing && text.trim() ? buildPlan(parseLlamaArgs(text), t) : null),
-    [editing, text, t],
+    () => (editing && text.trim() ? buildPlan(parseLlamaArgs(text), t, registry) : null),
+    [editing, text, t, registry],
   );
 
   // 切配置（configName 变化，如用户在配置管理里选了别的配置）时，
@@ -78,7 +82,7 @@ export function RawParams({
       return;
     }
     debounceRef.current = window.setTimeout(() => {
-      onApply(buildPlan(parseLlamaArgs(value), t));
+      onApply(buildPlan(parseLlamaArgs(value), t, registry));
     }, 300);
   };
 
@@ -94,7 +98,7 @@ export function RawParams({
       debounceRef.current = null;
     }
     if (text.trim() !== '') {
-      onApply(buildPlan(parseLlamaArgs(text), t));
+      onApply(buildPlan(parseLlamaArgs(text), t, registry));
     }
     setEditing(false);
     setText('');

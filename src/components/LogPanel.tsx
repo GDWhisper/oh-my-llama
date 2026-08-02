@@ -124,12 +124,11 @@ export function LogPanel({ logs, onClear }: Props) {
     setShowJump(false);
   };
 
-  // 简要：只显示结构化级别（info/warn/error），排除原生透传行(raw)与命令行(cmd)。
-  // 原生：下方滚动区透传 llama-server 的原样输出(raw)；启动命令行改由「原始参数」卡片展示。
+  // 原生模式 = 完整日志：命令行(cmd)、子进程原样输出(raw)、应用结构化消息(info/warn/error)
+  // 全部展示（用户要求原生日志可见所有命令与输出）。
+  // 简要模式 = 仅应用结构化消息，排除原生透传(raw)与命令行(cmd)，保持简洁。
   const visible =
-    mode === 'raw'
-      ? logs.filter((line) => line.level === 'raw')
-      : logs.filter((line) => line.level !== 'raw' && line.level !== 'cmd');
+    mode === 'raw' ? logs : logs.filter((line) => line.level !== 'raw' && line.level !== 'cmd');
 
   return (
     <div className="panel">
@@ -165,14 +164,8 @@ export function LogPanel({ logs, onClear }: Props) {
           {visible.map((line, index) => (
             <div className={`term-line ${line.level}`} key={`${line.ts}-${index}`}>
               <span className="term-ts">{line.ts}</span>
-              {mode === 'raw' ? (
-                <span className="term-text">{line.text}</span>
-              ) : (
-                <>
-                  <span className="term-level">[{line.level}]</span>
-                  <span className="term-text">{line.text}</span>
-                </>
-              )}
+              <span className="term-level">[{line.level}]</span>
+              <span className="term-text">{line.text}</span>
             </div>
           ))}
         </div>
