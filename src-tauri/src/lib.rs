@@ -1,12 +1,13 @@
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::env;
-use std::io::Read;
-use std::net::{IpAddr, SocketAddr, TcpListener, UdpSocket};
+use std::io::{Read, Write};
+use std::net::{IpAddr, SocketAddr, TcpListener, TcpStream, UdpSocket};
 use std::os::windows::io::AsRawHandle;
 use std::os::windows::process::CommandExt;
 use std::process::Stdio;
 use std::str::FromStr;
+use std::time::Duration;
 use sysinfo::System;
 use tauri::{AppHandle, Emitter, Listener, Manager};
 use tauri_plugin_opener::OpenerExt;
@@ -20,6 +21,9 @@ use windows_sys::Win32::System::JobObjects::{
 
 mod metrics;
 use metrics::get_system_metrics;
+
+mod params;
+use params::{find_spec, get_param_registry};
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
 pub struct ServerConfig {
@@ -50,6 +54,18 @@ pub struct ServerConfig {
     // 临时禁用的自定义参数（双列表方案）：文本保留但不写入启动命令行。
     #[serde(default)]
     pub disabled_extra_args: Vec<String>,
+    // ── 结构化高级参数（数据驱动，声明见 params::PARAM_REGISTRY）──────────
+    // 已启用（卡片显示）的结构化参数键，保持用户添加顺序 → 命令行顺序稳定、可单测。
+    #[serde(default)]
+    pub enabled_structured_params: Vec<String>,
+    // 临时禁用：卡片仍显示、值保留，但本次启动不写入命令行（与高级参数同构）。
+    #[serde(default)]
+    pub disabled_structured_params: Vec<String>,
+    // 值统一以字符串存储：注册表已声明类型/默认值/候选项，序列化时按声明还原，
+    // 避免为每个官方参数在 ServerConfig 上硬编码一个字段（约 160 个）。
+    // 必须放在结构体最后一个字段：TOML 要求「表」序列化于所有标量/数组之后。
+    #[serde(default)]
+    pub structured_params: HashMap<String, String>,
 }
 
 impl Default for ServerConfig {
@@ -73,6 +89,9 @@ impl Default for ServerConfig {
             disabled_advanced_params: Vec::new(),
             extra_args: Vec::new(),
             disabled_extra_args: Vec::new(),
+            enabled_structured_params: Vec::new(),
+            disabled_structured_params: Vec::new(),
+            structured_params: HashMap::new(),
         }
     }
 }
@@ -80,6 +99,8 @@ impl Default for ServerConfig {
 #[derive(Debug, Clone, Serialize)]
 pub struct ServerStatus {
     pub running: bool,
+    // 是否由本应用拉起：仅受管的服务允许本应用停止（外部服务不归本应用管）。
+    pub managed: bool,
     pub pid: Option<u32>,
     pub port: u16,
     pub host: String,
@@ -90,6 +111,7 @@ impl Default for ServerStatus {
     fn default() -> Self {
         Self {
             running: false,
+            managed: false,
             pid: None,
             port: 8080,
             host: String::new(),
@@ -234,7 +256,8 @@ pub fn run() {
             list_models,
             read_settings,
             save_settings,
-            get_system_metrics
+            get_system_metrics,
+            get_param_registry
         ])
         .setup(|app| {
             let app_handle = app.handle().clone();
@@ -458,12 +481,42 @@ fn rename_named_config_in_store(
 }
 
 #[tauri::command]
-async fn get_status(app: AppHandle) -> Result<ServerStatus, String> {
+async fn get_status(app: AppHandle, config: ServerConfig) -> Result<ServerStatus, String> {
     let state = app.state::<tauri::async_runtime::Mutex<ServerStatus>>();
     let mut status = state.lock().await;
-    if status.running {
-        let still_running = is_process_running(status.pid);
-        if !still_running {
+
+    // 两个独立事实，解耦判断：
+    //  - listening：配置地址上是否真有服务在监听（用户关心的「服务在跑吗」）。
+    //  - owned_alive：本应用拉起的进程是否仍存活（决定 managed / Stop 是否可用）。
+    let listening = matches!(probe_health(&config.host, config.port), HealthProbe::Ready);
+    let owned_alive = status.managed && is_process_running(status.pid);
+
+    if listening {
+        // 端口确有服务在监听 → 运行中。
+        // managed 取决于是否仍由本应用掌控（pid 存活）；外部（或脱离掌控）的服务 managed=false。
+        if !status.running {
+            let note = if owned_alive {
+                "llama-server 已就绪"
+            } else {
+                "检测到外部服务在该地址监听"
+            };
+            append_log_inner(
+                &app,
+                ServerLogLine {
+                    ts: now(),
+                    level: "info".into(),
+                    text: format!("{} ({}:{})", note, config.host, config.port),
+                },
+            );
+        }
+        status.running = true;
+        status.managed = owned_alive;
+        if !owned_alive {
+            status.pid = None;
+        }
+    } else {
+        // 端口无服务。
+        if status.running {
             append_log_inner(
                 &app,
                 ServerLogLine {
@@ -472,9 +525,22 @@ async fn get_status(app: AppHandle) -> Result<ServerStatus, String> {
                     text: "llama-server 已停止。".into(),
                 },
             );
-            *status = ServerStatus::default();
+        }
+        status.running = false;
+        // 受管态与「端口是否就绪」解耦：只要本应用拉起的进程还活着（如正在加载大模型），
+        // 就保持 managed=true、保留 pid，使 Stop 始终可用，且端口就绪后下一轮询即翻转为运行中。
+        if owned_alive {
+            status.managed = true;
+        } else {
+            status.managed = false;
+            status.pid = None;
         }
     }
+    // host/port/url 始终与当前配置对齐（即便未运行，预览地址也显示正确目标）。
+    status.host = config.host.clone();
+    status.port = config.port;
+    status.url = format!("http://{}:{}", config.host, config.port);
+
     Ok(status.clone())
 }
 
@@ -540,6 +606,25 @@ fn build_server_args(config: &ServerConfig) -> Vec<String> {
     if active("mlock") && config.mlock {
         args.push("--mlock".into());
     }
+    // 结构化高级参数：按注册表声明通用序列化，顺序 = 用户启用顺序（可预测、可单测）。
+    // 未在注册表中的键（旧配置残留 / 已废弃参数）静默跳过，不影响启动。
+    let structured_disabled: HashSet<&str> = config
+        .disabled_structured_params
+        .iter()
+        .map(|s| s.as_str())
+        .collect();
+    for key in &config.enabled_structured_params {
+        if structured_disabled.contains(key.as_str()) {
+            continue;
+        }
+        let Some(spec) = find_spec(key) else { continue };
+        let value = config
+            .structured_params
+            .get(key)
+            .map(|s| s.as_str())
+            .unwrap_or(spec.default);
+        args.extend(spec.to_args(value));
+    }
     // 一键传参写入的自定义参数：仅追加「启用」列表（disabled_extra_args 不传），
     // 确保用户传入的参数与真正启动时一致（含未知 flag 也会进入 llama-server）。
     args.extend(config.extra_args.iter().filter(|a| !a.is_empty()).cloned());
@@ -548,9 +633,16 @@ fn build_server_args(config: &ServerConfig) -> Vec<String> {
 
 #[tauri::command]
 async fn start_server(app: AppHandle, config: ServerConfig) -> Result<ServerStatus, String> {
-    let state = app.state::<tauri::async_runtime::Mutex<ServerStatus>>();
-    let mut status = state.lock().await;
-    if status.running {
+    // 先取锁做前置校验，校验后即释放——避免后续耗时的就绪轮询长期占用状态锁，
+    // 否则会阻塞 get_status 的 1.5s 轮询、导致 UI 卡顿。
+    let already_managed_running = {
+        let state = app.state::<tauri::async_runtime::Mutex<ServerStatus>>();
+        let status = state.lock().await;
+        status.running && status.managed
+    };
+    if already_managed_running {
+        let state = app.state::<tauri::async_runtime::Mutex<ServerStatus>>();
+        let status = state.lock().await;
         return Ok(status.clone());
     }
 
@@ -629,20 +721,54 @@ async fn start_server(app: AppHandle, config: ServerConfig) -> Result<ServerStat
         },
     );
 
-    *status = ServerStatus {
-        running: true,
-        pid: Some(pid),
-        host: config.host.clone(),
-        port: config.port,
-        url: format!("http://{}:{}", config.host, config.port),
-    };
-
+    // 立即把子进程交给 wait_process 监管：实时消费 stdout/stderr（原生日志透传）、
+    // 进程退出时复位状态、回收 GPU。必须在阻塞等待端口就绪之前启动——否则模型加载
+    // 期间的输出会堵在 OS 管道、前端“原生”模式看不到实时日志；管道写满时还会反压
+    // llama-server 致其加载卡死。wait_process 仅消费输出，直到子进程真正退出才改状态，
+    // 故与本段随后的健康探测可安全并发。
     let app_handle = app.clone();
     tauri::async_runtime::spawn(async move {
         let _ = wait_process(app_handle, child, job).await;
     });
 
-    Ok(status.clone())
+    // 等待服务端口真正就绪（模型加载可能耗时），不持状态锁。
+    // 就绪前不应断言 running，否则 UI 会过早显示"运行中"、预览却连不上。
+    let ready = wait_until_ready(&config.host, config.port, pid, START_READINESS_TIMEOUT);
+
+    let alive = is_process_running(Some(pid));
+    let final_status = {
+        let state = app.state::<tauri::async_runtime::Mutex<ServerStatus>>();
+        let mut status = state.lock().await;
+        if ready {
+            status.running = true;
+            status.managed = true;
+            status.pid = Some(pid);
+        } else if alive {
+            // 超时但进程仍存活（仍在加载大模型）：先记受管态，running 由 get_status 据端口后续修正。
+            status.running = false;
+            status.managed = true;
+            status.pid = Some(pid);
+        } else {
+            // 进程已退出：交由 wait_process 复位，这里仅确保运行态为 false。
+            status.running = false;
+        }
+        status.host = config.host.clone();
+        status.port = config.port;
+        status.url = format!("http://{}:{}", config.host, config.port);
+        status.clone()
+    };
+
+    if ready {
+        Ok(final_status)
+    } else if alive {
+        // 仍在后台加载：返回提示，但状态已记受管，端口就绪后 get_status 会自动翻转为运行中。
+        Err(
+            "启动较慢：服务在限定时间内尚未就绪，仍在后台加载模型，请稍候（状态将自动更新）。"
+                .into(),
+        )
+    } else {
+        Err("启动失败：llama-server 进程已退出，请检查模型路径与启动参数（详见日志）。".into())
+    }
 }
 
 #[tauri::command]
@@ -736,8 +862,10 @@ fn list_models(dir: String) -> Result<Vec<String>, String> {
 async fn stop_server_inner(app: &AppHandle) -> Result<(), String> {
     let state = app.state::<tauri::async_runtime::Mutex<ServerStatus>>();
     let mut status = state.lock().await;
-    if !status.running {
-        return Ok(());
+    if !status.managed {
+        return Err(
+            "当前运行的服务不是由本应用启动的（外部服务），无法在此停止，请手动停止。".into(),
+        );
     }
     let pid = status.pid;
     *status = ServerStatus::default();
@@ -774,11 +902,7 @@ async fn stop_server_inner(app: &AppHandle) -> Result<(), String> {
 //   2. lines() 还会丢弃行尾 \r。
 // 因此这里逐字节读，遇到 \r 或 \n 都立即切一行 flush（进度每刷新一次就成一行、实时透传）；
 // \r\n 视为一次换行（不产生多余空行）；行内容不做任何 trim，空行也保留，实现真正"透传"。
-fn pump_reader(
-    reader: impl std::io::Read,
-    tx: std::sync::mpsc::Sender<(String, String)>,
-    level: String,
-) {
+fn pump_reader(reader: impl std::io::Read, tx: std::sync::mpsc::Sender<String>) {
     let mut reader = std::io::BufReader::new(reader);
     let mut buf: Vec<u8> = Vec::new();
     let mut one = [0u8; 1];
@@ -788,7 +912,7 @@ fn pump_reader(
             Ok(0) | Err(_) => {
                 // EOF：flush 末尾未以换行结尾的残余内容。
                 if !buf.is_empty() {
-                    let _ = tx.send((level.clone(), String::from_utf8_lossy(&buf).into_owned()));
+                    let _ = tx.send(String::from_utf8_lossy(&buf).into_owned());
                 }
                 break;
             }
@@ -797,7 +921,7 @@ fn pump_reader(
                     let line = String::from_utf8_lossy(&buf).into_owned();
                     buf.clear();
                     last_cr = true;
-                    if tx.send((level.clone(), line)).is_err() {
+                    if tx.send(line).is_err() {
                         break;
                     }
                 }
@@ -808,7 +932,7 @@ fn pump_reader(
                     } else {
                         let line = String::from_utf8_lossy(&buf).into_owned();
                         buf.clear();
-                        if tx.send((level.clone(), line)).is_err() {
+                        if tx.send(line).is_err() {
                             break;
                         }
                     }
@@ -827,7 +951,7 @@ async fn wait_process(app: AppHandle, mut child: std::process::Child, _job: Opti
     // 同时把 llama-server 的真实输出（含 \r 进度、空行、首尾空格）原样送进日志面板。
     let stdout = child.stdout.take();
     let stderr = child.stderr.take();
-    let (tx, rx) = std::sync::mpsc::channel::<(String, String)>();
+    let (tx, rx) = std::sync::mpsc::channel::<String>();
 
     // 消费线程：一收到一行就立即写盘 + emit（实时透传）。
     // 关键点：用独立的 std 线程（而非 async 任务）承载消费；child.wait()
@@ -836,22 +960,15 @@ async fn wait_process(app: AppHandle, mut child: std::process::Child, _job: Opti
     // 停止后涌入一批"的现象。
     let app_rx = app.clone();
     let consumer = std::thread::spawn(move || {
-        while let Ok((level, text)) = rx.recv() {
-            // 原生日志：子进程输出逐行原样再记一条（level=raw），不做级别加工，
-            // 供前端"原生"模式原样展示 llama-server 的全部输出。
+        while let Ok(text) = rx.recv() {
+            // 原生日志：子进程输出逐行原样记一条（level=raw），不做任何级别加工，
+            // 前端“原生”模式即完整日志，会原样展示这一行（含可能的着色转义/进度刷新）。
+            // 只记一次，避免与结构化级别重复刷屏。
             append_log_inner(
                 &app_rx,
                 ServerLogLine {
                     ts: now(),
                     level: "raw".into(),
-                    text: text.clone(),
-                },
-            );
-            append_log_inner(
-                &app_rx,
-                ServerLogLine {
-                    ts: now(),
-                    level,
                     text,
                 },
             );
@@ -862,13 +979,13 @@ async fn wait_process(app: AppHandle, mut child: std::process::Child, _job: Opti
     if let Some(out) = stdout {
         let tx = tx.clone();
         readers.push(std::thread::spawn(move || {
-            pump_reader(out, tx, "info".to_string());
+            pump_reader(out, tx);
         }));
     }
     if let Some(err) = stderr {
         let tx = tx.clone();
         readers.push(std::thread::spawn(move || {
-            pump_reader(err, tx, "warn".to_string());
+            pump_reader(err, tx);
         }));
     }
     // 丢弃主发送端：仅剩 pump 线程各自持有的 tx；它们 EOF 后会自动 drop，
@@ -977,6 +1094,119 @@ fn now() -> String {
 
 fn is_port_in_use_socket(socket: SocketAddr) -> bool {
     TcpListener::bind(socket).is_err()
+}
+
+// 服务就绪探测结果：
+// - Unreachable：连不上，或连上后未回传任何 HTTP 响应（端口已 bind 但服务尚未真正提供 HTTP）。
+// - Loading：返回 503（llama.cpp 模型仍在加载中）。
+// - Ready：返回 200（模型已加载、可对外服务）；或返回其它 HTTP 状态（含旧版无 /health 路由的 404，
+//   说明 HTTP 服务已起来、只是该路径不存在，同样视为可服务）。
+enum HealthProbe {
+    Unreachable,
+    Loading,
+    Ready,
+}
+
+// 真正探测「服务是否已就绪、能对外提供 HTTP 推理服务」。
+// 仅判断 TCP 端口已 bind 不足以说明服务可用：某些 llama.cpp 构建会先 bind 端口、后加载模型，
+// 此时 TCP connect 成功但 HTTP 请求会挂起或返回 503「模型加载中」，UI 却已误显示「运行中」。
+// llama.cpp 提供始终开启的 GET /health：模型加载中返回 503、加载完成返回 200 {"status":"ok"}。
+// 据此判定就绪最可靠，也与生态标准做法（curl /health 做 readiness probe）一致。
+// 纯标准库实现（TcpStream + 手写最小 HTTP 请求/响应解析），无需新增 crate；
+// 回环/0.0.0.0 统一归一到 127.0.0.1 连接（llama-server 以 0.0.0.0 监听时回环地址同样可达）。
+fn probe_health(host: &str, port: u16) -> HealthProbe {
+    let host_lc = host.trim().to_lowercase();
+    let connect_host = match host_lc.as_str() {
+        "" | "127.0.0.1" | "localhost" | "0.0.0.0" => "127.0.0.1",
+        other => other,
+    };
+    let Ok(addr) = format!("{connect_host}:{port}").parse::<SocketAddr>() else {
+        return HealthProbe::Unreachable;
+    };
+    // 连接超时偏短：端口未开时系统通常立即返回 refused（不会真等满）；仅被静默丢弃时才用到上限。
+    let mut stream = match TcpStream::connect_timeout(&addr, Duration::from_millis(800)) {
+        Ok(s) => s,
+        Err(_) => return HealthProbe::Unreachable,
+    };
+    // 主动发一个最小化 HTTP/1.1 GET /health，逼服务回传状态行（而非仅完成 TCP 握手就误判为就绪）。
+    let request = format!(
+        "GET /health HTTP/1.1\r\nHost: {connect_host}:{port}\r\nConnection: close\r\nAccept: */*\r\n\r\n"
+    );
+    if stream.write_all(request.as_bytes()).is_err() {
+        return HealthProbe::Unreachable;
+    }
+    // 读超时：等待服务回传状态行；模型加载中/未就绪时连接会被接受但迟迟不响应 → 超时即视为未就绪。
+    if stream
+        .set_read_timeout(Some(Duration::from_millis(1500)))
+        .is_err()
+    {
+        return HealthProbe::Unreachable;
+    }
+    let mut response = Vec::with_capacity(128);
+    let mut buf = [0u8; 256];
+    loop {
+        match stream.read(&mut buf) {
+            Ok(0) => break, // 对端关闭且未回传任何内容：bind 了但还没服务
+            Ok(n) => {
+                response.extend_from_slice(&buf[..n]);
+                // 状态行以 CRLF 结束，读到即足够判定，无需读完 body。
+                if response.windows(2).any(|w| w == b"\r\n") {
+                    break;
+                }
+                if response.len() >= 1024 {
+                    break;
+                }
+            }
+            Err(_) => break, // 读超时 / 异常：连上了但不回 HTTP → 未就绪
+        }
+    }
+    parse_health_status(&response)
+}
+
+// 从 HTTP 响应首部解析状态码并映射为就绪语义：
+// 200（模型已加载，可服务）或 503 之外的任何 HTTP 状态（含旧版无 /health 路由的 404）= 就绪；
+// 503 = 模型仍在加载中；无法解析出 HTTP 状态行（连上但不回 HTTP）= 未就绪。
+fn parse_health_status(resp: &[u8]) -> HealthProbe {
+    match parse_http_status_code(resp) {
+        Some(200) => HealthProbe::Ready,
+        Some(503) => HealthProbe::Loading,
+        Some(_) => HealthProbe::Ready,
+        None => HealthProbe::Unreachable,
+    }
+}
+
+// 从形如 "HTTP/1.1 200 OK\r\n..." 的响应首部提取三位状态码。
+fn parse_http_status_code(resp: &[u8]) -> Option<u16> {
+    let s = std::str::from_utf8(resp).ok()?;
+    let mut it = s.split_whitespace();
+    let _version = it.next()?; // "HTTP/1.1"
+    it.next()?.parse::<u16>().ok()
+}
+
+// 启动后等待服务真正就绪（GET /health 返回 200）的最长时间：模型加载可能耗时数秒到数分钟，
+// 超时仍未就绪则判定启动过慢/失败，交由用户检查日志。非持锁等待。
+const START_READINESS_TIMEOUT: Duration = Duration::from_secs(90);
+
+// 轮询就绪直到 GET /health 返回 200；期间若进程已退出则立即判定失败，超时则返回 false。
+// 阻塞式（std::thread::sleep）：仅在 start_server 这一个一次性命令任务内调用，
+// 不持状态锁，不会阻塞 get_status 的 1.5s 轮询；多工作线程运行时也不影响其它命令。
+fn wait_until_ready(host: &str, port: u16, pid: u32, timeout: Duration) -> bool {
+    let start = std::time::Instant::now();
+    loop {
+        match probe_health(host, port) {
+            HealthProbe::Ready => return true,
+            // 503（加载中）或连不上（尚未 bind）：都继续等，直到进程退出或超时。
+            HealthProbe::Loading | HealthProbe::Unreachable => {}
+        }
+        if !is_process_running(Some(pid)) {
+            // 进程已退出：启动失败（参数/模型错误等），等待 wait_process 复位状态。
+            return false;
+        }
+        if start.elapsed() >= timeout {
+            return false;
+        }
+        std::thread::sleep(Duration::from_millis(500));
+    }
 }
 
 fn is_process_running(pid: Option<u32>) -> bool {
@@ -1129,6 +1359,13 @@ mod tests {
             disabled_advanced_params: vec![],
             extra_args: vec![],
             disabled_extra_args: vec![],
+            enabled_structured_params: vec!["top_p".into()],
+            disabled_structured_params: vec![],
+            structured_params: {
+                let mut m = HashMap::new();
+                m.insert("top_p".to_string(), "0.9".to_string());
+                m
+            },
         };
 
         let text = serialize_config_value(&config).expect("serialize");
@@ -1142,6 +1379,12 @@ mod tests {
             parsed.enabled_advanced_params,
             config.enabled_advanced_params
         );
+        // 结构化高级参数需完整往返（含值映射），否则重启后用户设置丢失
+        assert_eq!(
+            parsed.enabled_structured_params,
+            config.enabled_structured_params
+        );
+        assert_eq!(parsed.structured_params, config.structured_params);
     }
 
     #[test]
@@ -1264,9 +1507,9 @@ enabled_advanced_params = ["ctx_size"]
         // \n 正常分行；\r 也立即分行（进度条实时透传）；\r\n 视为一次换行；
         // 首尾空格保留（不 trim）；空行保留；末尾无换行的残余也 flush。
         let data = b"line1\nprog 10%\rprog 20%\r\n  spaced  \n\nlast";
-        let (tx, rx) = std::sync::mpsc::channel::<(String, String)>();
-        pump_reader(std::io::Cursor::new(&data[..]), tx, "info".to_string());
-        let got: Vec<String> = rx.iter().map(|(_, text)| text).collect();
+        let (tx, rx) = std::sync::mpsc::channel::<String>();
+        pump_reader(std::io::Cursor::new(&data[..]), tx);
+        let got: Vec<String> = rx.iter().collect();
         assert_eq!(
             got,
             vec![
@@ -1301,6 +1544,7 @@ enabled_advanced_params = ["ctx_size"]
             disabled_advanced_params: Vec::new(),
             extra_args: Vec::new(),
             disabled_extra_args: Vec::new(),
+            ..ServerConfig::default()
         };
         let joined = build_server_args(&config).join(" ");
         assert!(joined.contains("-m C:/models/m.gguf"));
@@ -1340,6 +1584,7 @@ enabled_advanced_params = ["ctx_size"]
                 "demo".into(),
             ],
             disabled_extra_args: Vec::new(),
+            ..ServerConfig::default()
         };
         let joined = build_server_args(&config).join(" ");
         // 未知/自定义参数被原样追加到启动命令，确保与用户传入一致
@@ -1379,6 +1624,7 @@ enabled_advanced_params = ["ctx_size"]
             disabled_advanced_params: vec!["n_gpu_layers".into(), "mmap".into()],
             extra_args: Vec::new(),
             disabled_extra_args: vec!["--alias".into(), "demo".into()],
+            ..ServerConfig::default()
         };
         let joined = build_server_args(&config).join(" ");
         // 未禁用的高级参数照常写入
@@ -1390,6 +1636,69 @@ enabled_advanced_params = ["ctx_size"]
         assert!(!joined.contains("--no-mmap"));
         // 禁用的自定义参数不写入
         assert!(!joined.contains("--alias"));
+    }
+
+    #[test]
+    fn build_server_args_serializes_structured_params() {
+        // 结构化高级参数：按注册表声明序列化——数值型输出 `--flag value`，
+        // 布尔型只在真值时输出裸 flag，禁用/未知键一律跳过。
+        let mut structured = HashMap::new();
+        structured.insert("top_p".to_string(), "0.9".to_string());
+        structured.insert("parallel".to_string(), "4".to_string());
+        structured.insert("offline".to_string(), "true".to_string());
+        structured.insert("no_repack".to_string(), "false".to_string());
+        structured.insert("keep".to_string(), "128".to_string());
+
+        let config = ServerConfig {
+            enabled_structured_params: vec![
+                "top_p".into(),
+                "parallel".into(),
+                "offline".into(),
+                "no_repack".into(),
+                "keep".into(),
+                "definitely_not_a_real_param".into(),
+            ],
+            disabled_structured_params: vec!["keep".into()],
+            structured_params: structured,
+            ..ServerConfig::default()
+        };
+        let joined = build_server_args(&config).join(" ");
+        assert!(joined.contains("--top-p 0.9"));
+        assert!(joined.contains("--parallel 4"));
+        // 布尔真值 → 裸 flag，不带 value
+        assert!(joined.contains("--offline"));
+        assert!(!joined.contains("--offline true"));
+        // 布尔假值 → 完全不出现
+        assert!(!joined.contains("--no-repack"));
+        // 临时禁用的结构化参数不写入
+        assert!(!joined.contains("--keep"));
+        // 注册表里不存在的键被静默忽略，不影响其它参数
+        assert!(!joined.contains("definitely_not_a_real_param"));
+    }
+
+    #[test]
+    fn param_registry_keys_and_flags_are_unique() {
+        // 注册表是数据驱动的单一真源：键重复会导致查找歧义、flag 重复会重复传参。
+        let mut keys = HashSet::new();
+        let mut flags = HashSet::new();
+        for spec in params::PARAM_REGISTRY {
+            assert!(keys.insert(spec.key), "duplicate param key: {}", spec.key);
+            assert!(
+                flags.insert(spec.flag),
+                "duplicate param flag: {}",
+                spec.flag
+            );
+            assert!(
+                spec.flag.starts_with('-'),
+                "flag must start with -: {}",
+                spec.flag
+            );
+        }
+        assert!(
+            keys.len() > 100,
+            "registry unexpectedly small: {}",
+            keys.len()
+        );
     }
 
     #[test]

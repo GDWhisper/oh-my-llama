@@ -1,10 +1,23 @@
-import { useEffect, useState } from 'react';
-import type { ServerConfig } from '../types';
+import { useEffect, useMemo, useState } from 'react';
+import type { ParamSpec, ServerConfig } from '../types';
 import { ADVANCED_LABEL_KEYS, type AdvancedKey, type AdvancedOption } from '../lib/advanced';
 import { groupExtraArgs } from '../lib/parseArgs';
 import { useI18n } from '../i18n';
+import type { MessageKey, Translator } from '../i18n/messages';
 import { Button } from './Button';
 import { ConfirmDialog } from './ConfirmDialog';
+
+// 结构化参数的显示名：优先取 i18n 的 advanced.structured.<key>，
+// 缺文案时（如注册表新加了参数还没配翻译）回退到 flag，绝不显示裸 key。
+function structuredLabel(t: Translator, spec: ParamSpec): string {
+  const key = `advanced.structured.${spec.key}` as MessageKey;
+  const label = t(key);
+  return label === key ? spec.flag : label;
+}
+
+// 「可添加参数」搜索结果一次最多渲染的条目数：注册表有 160+ 项，
+// 全量铺开会淹没面板，超出部分提示用户继续输入缩小范围。
+const MAX_SUGGESTIONS = 24;
 
 // 自定义参数行的归属列表：'enabled' = 启用（写入启动命令行），'disabled' = 临时禁用（保留文本不写入）。
 export type ExtraArgList = 'enabled' | 'disabled';
@@ -61,6 +74,101 @@ function ExtraArgRow({
   );
 }
 
+// 单条「结构化高级参数」卡片：完全由注册表声明（type/choices/min/max）驱动渲染，
+// 因此一套组件即可覆盖注册表里的全部官方参数——新增参数无需再写一段 UI。
+// 文本 / 数值走「草稿 + 失焦提交」，避免逐字回写导致光标跳动与整树重渲染；
+// 布尔 / 枚举语义离散，即时提交。
+function StructuredParamRow({
+  spec,
+  value,
+  disabled,
+  removable,
+  onCommit,
+  onRemove,
+  onToggle,
+}: {
+  spec: ParamSpec;
+  value: string;
+  disabled: boolean;
+  removable: boolean;
+  onCommit: (value: string) => void;
+  onRemove: () => void;
+  onToggle: () => void;
+}) {
+  const { t } = useI18n();
+  const [draft, setDraft] = useState(value);
+  useEffect(() => {
+    setDraft(value);
+  }, [value]);
+
+  const label = structuredLabel(t, spec);
+  const isBool = spec.type === 'bool';
+  const commitDraft = () => {
+    if (draft !== value) {
+      onCommit(draft);
+    }
+  };
+
+  return (
+    <div className={`field${disabled ? ' disabled' : ''}`}>
+      <div className="field-header">
+        {isBool ? (
+          <label className="bool-field">
+            {label}
+            <input
+              type="checkbox"
+              checked={value === 'true'}
+              onChange={(event) => onCommit(event.currentTarget.checked ? 'true' : 'false')}
+            />
+          </label>
+        ) : (
+          <label>{label}</label>
+        )}
+        <div className="field-actions">
+          {disabled && <span className="disabled-badge">{t('advanced.disabled')}</span>}
+          <Button variant="secondary" type="button" onClick={onToggle}>
+            {disabled ? t('advanced.enable') : t('advanced.disable')}
+          </Button>
+          {removable && (
+            <Button variant="danger" type="button" onClick={onRemove}>
+              {t('common.delete')}
+            </Button>
+          )}
+        </div>
+      </div>
+      {spec.type === 'enum' && (
+        <select value={value} onChange={(event) => onCommit(event.currentTarget.value)}>
+          {(spec.choices ?? []).map((choice) => (
+            <option key={choice} value={choice}>
+              {choice}
+            </option>
+          ))}
+        </select>
+      )}
+      {(spec.type === 'int' || spec.type === 'float') && (
+        <input
+          type="number"
+          step={spec.type === 'float' ? '0.01' : '1'}
+          min={spec.min}
+          max={spec.max}
+          value={draft}
+          onChange={(event) => setDraft(event.currentTarget.value)}
+          onBlur={commitDraft}
+        />
+      )}
+      {spec.type === 'str' && (
+        <input
+          value={draft}
+          spellCheck={false}
+          onChange={(event) => setDraft(event.currentTarget.value)}
+          onBlur={commitDraft}
+        />
+      )}
+      <div className="field-hint">{spec.flag}</div>
+    </div>
+  );
+}
+
 interface Props {
   config: ServerConfig;
   adjustingAdvanced: boolean;
@@ -80,6 +188,12 @@ interface Props {
   onToggleExtraArg: (list: ExtraArgList, start: number) => void;
   onClearAdvanced: () => void;
   onChange: (config: ServerConfig) => void;
+  // 结构化高级参数（数据驱动）：注册表 + 四个通用操作，覆盖全部官方参数。
+  registry: ParamSpec[];
+  onAddStructuredKey: (key: string) => void;
+  onRemoveStructuredKey: (key: string) => void;
+  onStructuredValueChange: (key: string, value: string) => void;
+  onToggleDisableStructuredKey: (key: string) => void;
 }
 
 export function AdvancedParamsPanel(props: Props) {
@@ -102,10 +216,42 @@ export function AdvancedParamsPanel(props: Props) {
     onToggleExtraArg,
     onClearAdvanced,
     onChange,
+    registry,
+    onAddStructuredKey,
+    onRemoveStructuredKey,
+    onStructuredValueChange,
+    onToggleDisableStructuredKey,
   } = props;
   const { t } = useI18n();
   // 清空高级参数需二次确认：点击「清空参数」弹出确认弹窗，确认后才执行。
   const [showClearDialog, setShowClearDialog] = useState(false);
+  // 「可添加的官方参数」搜索词：注册表 160+ 项无法平铺，靠搜索定位。
+  const [paramQuery, setParamQuery] = useState('');
+
+  const specByKey = useMemo(() => new Map(registry.map((spec) => [spec.key, spec])), [registry]);
+  const enabledStructured = useMemo(
+    () => new Set(config.enabled_structured_params),
+    [config.enabled_structured_params],
+  );
+  const disabledStructured = useMemo(
+    () => new Set(config.disabled_structured_params),
+    [config.disabled_structured_params],
+  );
+
+  // 候选项 = 注册表里尚未启用的参数，按「显示名 / key / flag」模糊匹配。
+  const suggestions = useMemo(() => {
+    const query = paramQuery.trim().toLowerCase();
+    const pool = registry.filter((spec) => !enabledStructured.has(spec.key));
+    if (!query) {
+      return pool.slice(0, MAX_SUGGESTIONS);
+    }
+    return pool.filter(
+      (spec) =>
+        spec.key.includes(query) ||
+        spec.flag.toLowerCase().includes(query) ||
+        structuredLabel(t, spec).toLowerCase().includes(query),
+    );
+  }, [registry, enabledStructured, paramQuery, t]);
 
   return (
     <div className="panel">
@@ -133,6 +279,42 @@ export function AdvancedParamsPanel(props: Props) {
               {t(ADVANCED_LABEL_KEYS[option.key])}
             </button>
           ))}
+        </div>
+      )}
+      {adjustingAdvanced && registry.length > 0 && (
+        <div className="structured-chooser">
+          <input
+            className="structured-search"
+            value={paramQuery}
+            spellCheck={false}
+            placeholder={t('advanced.searchPlaceholder')}
+            onChange={(event) => setParamQuery(event.currentTarget.value)}
+          />
+          {suggestions.length === 0 ? (
+            <div className="empty">{t('advanced.searchNoMatch')}</div>
+          ) : (
+            <div className="advanced-chooser">
+              {suggestions.slice(0, MAX_SUGGESTIONS).map((spec) => (
+                <button
+                  key={spec.key}
+                  className="chip"
+                  type="button"
+                  title={spec.flag}
+                  onClick={() => {
+                    onAddStructuredKey(spec.key);
+                    setParamQuery('');
+                  }}
+                >
+                  {structuredLabel(t, spec)}
+                </button>
+              ))}
+            </div>
+          )}
+          {suggestions.length > MAX_SUGGESTIONS && (
+            <div className="field-hint">
+              {t('advanced.searchMore', { count: suggestions.length - MAX_SUGGESTIONS })}
+            </div>
+          )}
         </div>
       )}
       {enabledAdvancedKeys.map((key) => {
@@ -276,6 +458,22 @@ export function AdvancedParamsPanel(props: Props) {
               </select>
             )}
           </div>
+        );
+      })}
+      {config.enabled_structured_params.map((key) => {
+        const spec = specByKey.get(key);
+        if (!spec) return null;
+        return (
+          <StructuredParamRow
+            key={`structured-${key}`}
+            spec={spec}
+            value={config.structured_params[key] ?? spec.default}
+            disabled={disabledStructured.has(key)}
+            removable={adjustingAdvanced}
+            onCommit={(value) => onStructuredValueChange(key, value)}
+            onRemove={() => onRemoveStructuredKey(key)}
+            onToggle={() => onToggleDisableStructuredKey(key)}
+          />
         );
       })}
       {groupExtraArgs(config.extra_args).map((group) => (

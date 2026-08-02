@@ -434,6 +434,24 @@ body {
   background: #f3f4f6;
 }
 
+/* 官方参数选择器：注册表 160+ 项无法平铺，用搜索框 + 结果片定位。
+   结果区限高可滚，避免一次展开把整个面板撑开。 */
+.structured-chooser {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.structured-search {
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.structured-chooser .advanced-chooser {
+  max-height: 168px;
+  overflow-y: auto;
+}
+
 .remove {
   align-self: flex-start;
   margin-top: 4px;
