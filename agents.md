@@ -173,4 +173,5 @@ oh-my-llama/                    # 前端 React/TS + 构建配置
 本项目的详细参考文档位于 `.dev_docs/`。当任务触及下列任一触发条件时，**必须**先阅读对应文档再动手，不得凭默认习惯推进。
 
 - **`.dev_docs/release-guide.md`** — 当需要进行版本发布（提交 / 打标签 / 触发 CI / 编写 Release Note 或更新 CHANGELOG）时，**必须**阅读该文档。内含发布全流程、Git worktree 合并约定、`gh` 代理坑、「CHANGELOG=详细改动历史 / Release Note=总结性三段式（新增功能·功能优化·Bug 修复，不放下载栏目）」的硬性分工，以及**更新通道（方案 A 签名与 updater 产物）**的密钥/CI/发版章节。
+- **`.dev_docs/release-note-template.md`** — 发布时编写 GitHub Release Note 的**唯一真源模板**。顶部固定文案（「本版本亮点由发布 agent 基于 CHANGELOG 手动总结。详细条目见 CHANGELOG.md。」）+ 三大强制分类（新增功能 / 功能优化 / Bug 修复）+ 末尾「详细改动参考 CHANGELOG」。编写 Release Note 时**必须**复制此模板、不得另起炉灶。
 - **`.dev_docs/engineering-readiness.md`** — 当评估工程化就绪状态、审计 P3 门禁（lint/format/测试/安全配置），或判断是否可进入需求开发阶段时，**必须**阅读该文档。
