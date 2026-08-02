@@ -61,6 +61,7 @@ export default function App() {
     configEpoch,
     isDirty,
     status,
+    unresponsive,
     logs,
     error,
     toast,
@@ -283,8 +284,24 @@ export default function App() {
     );
   }
 
-  const statusText = status?.running ? t('status.running') : t('status.stopped');
-  const statusClass = status?.running ? 'running' : 'stopped';
+  // 徽章四态：运行中 / 无响应（曾可服务但持续失联，疑似假死）/ 模型加载中
+  // （本应用已拉起、模型仍在加载）/ 已停止。仅看 running 会漏掉 managed&&!running
+  // 的加载中态；仅 managed 还会把"曾 Ready 后挂死"与"正常加载中"混为一谈，
+  // 故以 unresponsive 单独标识进程存活但已假死的异常态。
+  const statusText = status?.running
+    ? t('status.running')
+    : unresponsive
+      ? t('status.unresponsive')
+      : status?.managed
+        ? t('status.loading')
+        : t('status.stopped');
+  const statusClass = status?.running
+    ? 'running'
+    : unresponsive
+      ? 'unresponsive'
+      : status?.managed
+        ? 'loading'
+        : 'stopped';
 
   return (
     <main className="app">

@@ -23,6 +23,8 @@ export const zh = {
 
   // 运行状态
   'status.running': '运行中',
+  'status.loading': '加载中',
+  'status.unresponsive': '无响应',
   'status.stopped': '已停止',
 
   // 必要参数字段名（用于追加提醒里列出）
@@ -592,6 +594,8 @@ export const en: Record<MessageKey, string> = {
   'app.share.copyFailed': 'Copy failed, please copy manually',
 
   'status.running': 'Running',
+  'status.loading': 'Loading',
+  'status.unresponsive': 'Unresponsive',
   'status.stopped': 'Stopped',
 
   'field.model': 'Model path',

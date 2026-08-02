@@ -1051,6 +1051,16 @@ button:disabled {
   color: #065f46;
 }
 
+.status.loading {
+  background: #fef3c7;
+  color: #92400e;
+}
+
+.status.unresponsive {
+  background: #ffedd5;
+  color: #9a3412;
+}
+
 .status.stopped {
   background: #fee2e2;
   color: #991b1b;
