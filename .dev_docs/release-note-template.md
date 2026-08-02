@@ -5,8 +5,6 @@
 > 详细历史与实现机制见 `CHANGELOG.md`；Release Note 只写两个已发布版本之间**用户可见**的差异（详见 `release-guide.md` 第三节红线）。
 
 ```markdown
-# Oh My Llama vX.Y.Z
-
 本版本亮点由发布 agent 基于 CHANGELOG 手动总结。详细条目见 CHANGELOG.md。
 
 ### 新增功能
@@ -20,6 +18,8 @@
 
 > 详细改动参考 CHANGELOG
 ```
+
+> **注意：正文不要写「# Oh My Llama vX.Y.Z」这类 H1 标题。** 用 `gh release ... --notes-file` 且未指定 `--title` 时，GitHub 会自动用 tag 名（如 `v0.1.3`）生成页面大标题；若正文再写一遍 H1，页面会出现两个标题，重复且难看。版本号交给 GitHub 自动标题即可。
 
 ## 填写要点
 - 顶部那句固定文案**不要改动**，它向用户说明本页内容是人工（agent）基于 CHANGELOG 提炼的总结，而非自动生成。
