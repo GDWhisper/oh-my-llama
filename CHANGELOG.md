@@ -4,6 +4,18 @@
 
 > 本文件为**详细改动历史**（含涉及的文件与实现机制）；GitHub Release 页面为对应版本的**总结性**说明。
 
+## [0.1.2] - 2026-08-02
+
+### 功能优化
+- **高级参数面板升级为数据驱动注册表（覆盖约 162 个官方 llama-server 参数）**：原高级参数仅含少量固定字段 + 约 150 个「已知 flag 原样透传」（粘贴进 extra_args，无结构化 UI）。现新增后端 `src-tauri/src/params.rs` 的 `PARAM_REGISTRY`（`&'static [ParamSpec]`，由 `scripts/gen_structured_params.py` 从识别表一次性生成，含类型 / 默认值 / 取值范围 / 枚举选项），`ServerConfig` 仅增 `enabled_structured_params` / `disabled_structured_params` / `structured_params` 三字段（枚举表（HashMap）置于结构体末尾以满足 TOML 序列化「表须在标量后」约束）；`build_server_args` 通用序列化启用项（bool 真值输出裸 flag、其余空值视为未设置）；前端 `get_param_registry` 拉取注册表后通用渲染 `AdvancedParamsPanel` 的 `StructuredParamRow`（按 ptype 分派 checkbox / number / select / input、可搜索过滤、支持临时禁用），未知 flag 仍原样透传。对应 `src-tauri/src/lib.rs` + `src-tauri/src/params.rs`（新增）+ `src/types.ts` + `src/lib/parseArgs.ts`（`structuredKeyOf` 复用 `preview.<key>` 后缀路由 known 解析到结构化、零新增识别字段）+ `src/hooks/useServer.ts`（拉注册表 + 四个结构化操作）+ `src/components/AdvancedParamsPanel.tsx` + `src/i18n/messages.ts`（中/英 `advanced.structured.*` 162 条 + 搜索文案）+ `src/App.tsx` / `src/components/RawParams.tsx`（接线传 registry）+ `scripts/gen_structured_params.py`（新增）。
+- **i18n 模块拆分**：`src/i18n/index.tsx` 拆为 `I18nProvider.tsx`（组件）与 `useI18n.ts`（context + hook），桶文件仅 re-export，消除 `react-refresh/only-export-components` 告警，符合 Fast Refresh 单一导出约定。对应 `src/i18n/index.tsx` + `src/i18n/I18nProvider.tsx`（新增）+ `src/i18n/useI18n.ts`（新增）+ `src/main.tsx`（改从 `./i18n/I18nProvider` 导入组件）。
+- **AGENTS.md 补充奥卡姆剃刀与可维护性平衡准则**：新增必须主动抽象的 3 条触发信号（逻辑重复 / 修改影响面大 / 业务易变），优先「未来改起来省力」而非「当下代码最少」。
+
+### Bug 修复
+- **运行中检测误报（端口已通但模型未就绪）**：原 `running` 用裸 TCP connect 探活，llama.cpp 某些构建先 bind 端口、后加载模型，导致端口刚 bind、模型未加载完成就误报「运行中」、点开预览连不上。现改用 llama.cpp 始终开启的 `GET /health` 就绪探针（`probe_health` + `HealthProbe` 枚举：Unreachable / Loading / Ready，TCP connect + 手写最小 HTTP，`200` / 非 503 = Ready、`503` = Loading、连不上 = Unreachable；纯标准库 `TcpStream` 无新依赖），`running = matches!(probe_health, Ready)`；`start_server` 改为 `wait_until_ready` 轮询 `/health` 直到 200（≤90s，不持锁）。前端 `ControlPanel` 启动按钮按 `managed` 禁用（防加载中重复拉起）、`managed && !running` 显示「模型加载中…」。对应 `src-tauri/src/lib.rs` + `src/components/ControlPanel.tsx` + `i18n/messages.ts`（新增 `control.loading`）。
+- **启动阶段原生日志不实时 / 丢失**：原重写 `start_server` 时把原生日志读取（`wait_process` 的 `spawn`）挪到阻塞等端口就绪（`wait_until_ready`，≤90s）之后，导致模型加载期输出堵在 OS 管道无人读——前端「原生」模式启动阶段看不到实时日志、且管道写满反压 llama-server 拖垮启动。现把 `wait_process` 的 `spawn` 挪回 `cmd.spawn()` 之后、`wait_until_ready` 之前，与就绪探测安全并发。对应 `src-tauri/src/lib.rs`。
+- **原生日志契约：raw = 完整日志（命令行 + 全部输出）**：确立 raw（原生）模式展示全部行——`cmd`（我们发出的命令行）+ `raw`（子进程原样输出）+ 应用结构化消息（`info` / `warn` / `error`）；brief（简要）模式仅应用结构化消息（`level` 既非 `raw` 也非 `cmd`）。后端 `pump_reader` / `channel` 只传纯文本、`consumer` 仅 append 一条 `level="raw"`（修复此前每行记两条导致的重复行）；渲染统一加 `[level]` 前缀（含 `[cmd]` / `[raw]`）。对应 `src-tauri/src/lib.rs` + `src/components/LogPanel.tsx`。
+
 ## [0.1.1] - 2026-07-28
 
 ### 新增功能
