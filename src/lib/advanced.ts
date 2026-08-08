@@ -43,6 +43,20 @@ export const ADVANCED_LABEL_KEYS: Record<AdvancedKey, MessageKey> = {
   mlock: 'advanced.label.mlock',
 };
 
+// 高级参数键 → llama.cpp 原始 flag。UI 用于展示「名称（原始参数）」对照，
+// 让用户把应用内的中文名与真正写入命令行的 flag 对应起来。取规范长形式（--xxx）。
+export const ADVANCED_FLAG: Record<AdvancedKey, string> = {
+  ctx_size: '--ctx-size',
+  n_predict: '--n-predict',
+  n_gpu_layers: '--n-gpu-layers',
+  threads: '--threads',
+  batch_size: '--batch-size',
+  temp: '--temp',
+  flash_attn: '--flash-attn',
+  mmap: '--mmap',
+  mlock: '--mlock',
+};
+
 export function isUnlimitedPredict(value: number) {
   return value === -1;
 }
