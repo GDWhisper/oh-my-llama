@@ -31,8 +31,15 @@ sysinfo = "0.30"
 # 借鉴 nano-stat 的硬件模块（MIT）。
 nvml-wrapper = "0.10"
 toml = { version = "1.1.2", features = ["serde"] }
+# 仅用于非 Windows 平台的进程组信号（SIGINT 优雅退出 / SIGKILL 兜底强杀）。
+# libc 0.2 已是 tauri 依赖树的既有 crate（Cargo.lock 已锁定 0.2.186），
+# 此处显式声明不引入任何新下载/新安全面，仅暴露 kill 与信号常量。
+libc = "0.2"
+
+[target.'cfg(windows)'.dependencies]
 # 仅用于 Job Object 内核级守护（KILL_ON_JOB_CLOSE）与控制台 CTRL_C_EVENT 优雅退出信号。
 # 微软官方 crate，仅链接期绑定、体积极小，结构体布局经过审计。
+# 声明为 Windows 目标专用依赖：非 Windows 平台完全不编译/链接它。
 # feature 门控（已按 0.59 源码核对）：
 #   - CreateJobObjectW          → Win32_Security
 #   - JOBOBJECT_EXTENDED_LIMIT_INFORMATION → Win32_System_Threading

@@ -15,7 +15,16 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          # 现状：Windows（主平台，NSIS 安装包 + updater）。
           - platform: 'windows-latest'
+            args: ''
+          # Linux：deb/rpm/AppImage；无签名门槛，直接发布。
+          - platform: 'ubuntu-22.04'
+            args: ''
+          # macOS：GitHub macos-latest runner 原生为 arm64（本项目忽略 x86_64 mac）。
+          # 当前发未签名版（用户右键打开绕过 Gatekeeper），macOS updater 待 Apple 证书就绪后启用；
+          # 不传 args target，由 tauri-action 按 runner 架构产出 aarch64 包。
+          - platform: 'macos-latest'
             args: ''
     runs-on: ${{ matrix.platform }}
     steps:
@@ -30,6 +39,13 @@ jobs:
       - name: Install Rust stable
         uses: dtolnay/rust-toolchain@stable
 
+      # Tauri v2 在 Linux 构建的系统依赖（官方文档 Ubuntu 清单；仅 Linux runner 需要）
+      - name: Install Linux system dependencies
+        if: matrix.platform == 'ubuntu-22.04'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential curl wget file libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev
+
       - name: Install frontend dependencies
         run: npm ci
 
@@ -39,7 +55,8 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           # 更新签名私钥（内容）。公钥已写进 src-tauri/tauri.conf.json 的
           # plugins.updater.pubkey。私钥仅存于此仓库 Secrets，绝不入库。
-          # 缺失该变量时构建仍成功，但产物无 .sig、不会生成 latest.json，更新不可用。
+          # 注意（实测 tauri v2）：createUpdaterArtifacts=true 时缺失私钥会直接报错
+          # （A public key has been found, but no private key），不会静默降级成无签名产物。
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
         with:
           tagName: ${{ github.ref_name }}
