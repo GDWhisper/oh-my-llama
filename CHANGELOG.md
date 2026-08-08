@@ -4,6 +4,19 @@
 
 > 本文件为**详细改动历史**（含涉及的文件与实现机制）；GitHub Release 页面为对应版本的**总结性**说明。
 
+## [0.1.5] - 2026-08-09
+
+### 新增功能
+- **支持 Linux 平台**：新增 Linux 安装包（`.deb` / `.rpm` / `.AppImage`），由 CI 在 `ubuntu-22.04` 构建。后端进程守护在非 Windows 上采用 **POSIX 进程组**方案：`start_server` 在 spawn 前经 `std::os::unix::process::CommandExt::process_group(0)` 把 llama-server 放入新进程组（组长即其自身），停止时 `request_graceful_stop` 对进程组发 `SIGINT`（终端 Ctrl-C 的等价信号），兜底强杀 `terminate_process` 向进程组发 `SIGKILL`（ESRCH 忽略）。Windows 侧 Job Object（`KILL_ON_JOB_CLOSE`，launcher 崩溃时内核回收子进程）语义原样保留——统一抽象为 `ProcessGuard`（Windows 持 `Option<JobHandle>` / 非 Windows 空结构体，`is_active()` 判定守护是否建立，字段有真实读取点避免 dead_code 误报）。`src-tauri/src/lib.rs`（全部 Windows 专属 import——`AsRawHandle` / `CommandExt` / `windows_sys`——加 `#[cfg(windows)]` 门控；`signal_console_ctrl_c` 更名 `request_graceful_stop` 并分平台实现）+ `src-tauri/Cargo.toml`（`windows-sys` 移入 `[target.'cfg(windows)'.dependencies]` 非 Windows 不编译；新增 `libc = "0.2"`，为 tauri 依赖树既有 crate、Cargo.lock 已锁定，零新增下载）。
+- **支持 macOS（Apple Silicon / arm64）**：新增 macOS 安装包（`.dmg` / `.app.tar.gz`），由 CI 在 `macos-latest`（GitHub 原生 arm64 runner）构建。当前为**未签名版**（Gatekeeper 需右键打开；macOS 自动更新通道待 Apple Developer 证书就绪后启用）。推理侧无需适配——llama.cpp 官方提供 arm64 Metal 预编译二进制。
+- **CI 三平台构建矩阵**：`.github/workflows/release.yml` 矩阵由单平台扩展为 `windows-latest` / `ubuntu-22.04`（新增 Tauri v2 官方 Linux 系统依赖安装步骤：`libwebkit2gtk-4.1-dev` 等）/ `macos-latest`；`latest.json` 由 tauri-action 自动聚合三平台更新资产。新增 `.github/workflows/build-check.yml`：dev 分支推送 / 手动触发时在三平台跑 `npm run check` 门禁 + `npm run tauri build` 完整打包冒烟（不发版、不上传产物），使非 Windows 编译问题在合并进 main 前即暴露。
+
+### 功能优化
+- 无
+
+### Bug 修复
+- 无
+
 ## [0.1.4] - 2026-08-08
 
 ### 新增功能
