@@ -4,6 +4,19 @@
 
 > 本文件为**详细改动历史**（含涉及的文件与实现机制）；GitHub Release 页面为对应版本的**总结性**说明。
 
+## [0.1.4] - 2026-08-08
+
+### 新增功能
+- **高级参数内联原始参数对照**：每个高级参数标签直接显示「名称（原始参数）」，如 `上下文长度（--ctx-size）`、`Top-P（--top-p）`。原始 flag 用等宽字体渲染（`App.css` 新增 `.param-flag`，字体栈 `ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace`），解决中文无衬线字体里 `--` 偏高、不居中的问题；flag 与括号包进 `.param-flag-wrapper`（`white-space: nowrap`），避免布尔型参数标签被拆行错位。`src/lib/advanced.ts`（新增 `ADVANCED_FLAG` 映射表，为 9 个传统高级键各配规范长 flag：`--ctx-size` / `--n-predict` / `--n-gpu-layers` / `--threads` / `--batch-size` / `--temp` / `--flash-attn` / `--mmap` / `--mlock`）+ `src/components/AdvancedParamsPanel.tsx`（`withFlag` 改为返回 ReactNode，flag 包进等宽 `<span className="param-flag">`，友好名缺译回退到 flag 时不再重复包裹）+ `src/App.css`（`.param-flag` / `.param-flag-wrapper` + `.bool-field` 增加 `white-space: nowrap`）。
+
+### 功能优化
+- **「调整参数」选择器整合**：原「传统可选参数」与「官方参数注册表」分两区块渲染，搜索框被传统参数 chips 挤到第二行。现合并为单一选择器——搜索框置顶，下方 chips 同时含两类参数，按中文名 / key / flag 统一过滤；点击传统参数 chip 走 `onAddKey`，结构化参数 chip 走 `onAddStructuredKey`。`src/components/AdvancedParamsPanel.tsx`（新增 `AddableItem` 类型统一描述两类可添加参数，合并 `advanced-chooser` 与 `structured-chooser` 为统一 `structured-chooser`，复用既有样式）。
+- **高级参数标题与「调整参数」按钮吸顶**：滚动到卡片底部时，标题与按钮钉在侧栏配置管理卡片正下方，始终可操作，且不影响配置管理卡片原有吸顶。实现上用 `ResizeObserver` 测量配置管理卡片实时高度写入 CSS 变量 `--config-manager-h`（`App.tsx` 新增 effect，依赖 `configReady = config != null` 以正确跨越加载门控时序——首次挂载时 `ConfigManager` 未渲染，`[]` 依赖会提前跑空永不重试，故在 `config` 就绪后才测量）；`.advanced-panel .section-header` 的 `top` 由 `0` 改为 `var(--config-manager-h)`，z-index(4) 低于配置管理卡片(5) 互不遮挡。
+
+### Bug 修复
+- **布尔型参数标签错位**：等宽 flag 与中文全角括号被浏览器拆行，导致 `mmap（--mmap）` 等名称、括号、flag 错位到不同行。已通过 `.param-flag-wrapper { white-space: nowrap }` 与 `.bool-field { white-space: nowrap }` 修复。`src/App.css`。
+- **自定义参数删除按钮行为不一致**：自定义参数（`ExtraArgRow`）无条件显示删除按钮，而标准 / 结构化参数仅在「调整参数」开启时显示。现自定义参数删除按钮统一受 `adjustingAdvanced` 控制，与另两类参数一致。`src/components/AdvancedParamsPanel.tsx`（`ExtraArgRow` 新增 `removable` 属性，两个调用点传 `removable={adjustingAdvanced}`）。
+
 ## [0.1.3] - 2026-08-02
 
 ### 新增功能
