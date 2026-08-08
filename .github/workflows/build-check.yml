@@ -1,0 +1,52 @@
+name: Cross-platform Build Check
+
+# 跨平台编译/打包冒烟（不发版）：dev 分支每次 push 与手动触发时，
+# 在 Windows / Linux / macOS(arm64) 上验证 npm run check 门禁与 tauri 完整打包。
+# 目的：Windows 本地无法交叉验证的非 Windows 编译问题（cfg 门控、Linux 系统依赖、macOS 打包）
+# 在这里暴露；release.yml 只负责发版时真正产出 Release 资产。
+on:
+  push:
+    branches: [dev]
+  workflow_dispatch:
+
+jobs:
+  build-check:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: 'windows-latest'
+            args: ''
+          - platform: 'ubuntu-22.04'
+            args: ''
+          - platform: 'macos-latest'
+            args: ''
+    runs-on: ${{ matrix.platform }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install Linux system dependencies
+        if: matrix.platform == 'ubuntu-22.04'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential curl wget file libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Run gates (tsc + eslint + prettier + fmt + clippy)
+        run: npm run check
+
+      # 完整打包验证（不发布、不上传产物）。未注入 TAURI_SIGNING_PRIVATE_KEY，
+      # 产物无 .sig / latest.json，与 release.yml 行为一致。
+      - name: Build bundles (no release)
+        run: npm run tauri build
