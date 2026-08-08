@@ -2,7 +2,7 @@
 
 > **何时阅读本文档**：当需要进行版本发布（提交 / 打标签 / 触发 CI / 编写 Release Note 或更新 CHANGELOG）时，**必须**先阅读本文档，并严格遵守其中的流程与分工，不得凭默认习惯发布。
 
-> **适用范围**：`oh-my-llama`（Tauri 2 + React/TS 桌面应用）。发布仅出 **Windows** 安装包（`.exe` NSIS / `.msi`），由 `.github/workflows/release.yml` 在推送 `v*` 标签时自动构建。
+> **适用范围**：`oh-my-llama`（Tauri 2 + React/TS 桌面应用）。发布出 **Windows**（`.exe` NSIS / `.msi`）、**Linux**（`.deb` / `.rpm` / `.AppImage`）、**macOS arm64**（`.dmg`，未签名版），由 `.github/workflows/release.yml` 在推送 `v*` 标签时三平台并行构建。
 
 ---
 
@@ -33,8 +33,8 @@
 3. **推送 dev**：`git push origin dev`。
 4. **合并到 main 工作树**：`cd F:/llama_run/tauri-launcher && git fetch origin && git merge --no-ff dev -m "Merge dev into main for vX.Y.Z"`。用 `--no-ff` 保留合并记录；**不要**在 `dev` 工作树 checkout main。
 5. **推送 main**：`git push origin main`。
-6. **打标签触发 CI**：`git tag -a vX.Y.Z -m "Oh My Llama vX.Y.Z"` + `git push origin vX.Y.Z`。推送标签即触发 `release.yml`（仅 Windows）构建。
-7. **等待构建（前台，不可拆成两轮）**：`unset` 代理后在**前台**执行 `gh run watch <run_id> --repo GDWhisper/oh-my-llama --exit-status`（单次最长约 7-8 分钟，Bash 命令超时给足 600000ms）。**禁止用 `run_in_background` 把等待拆到后台**——后台返回后控制权已交还用户，发布步骤极易被漏掉；必须等到构建结束**在同一轮对话里**继续后续步骤。构建成功时 Release 以**草稿**形式生成（`releaseDraft: true`），这只是中间态，**不是终点**。
+6. **打标签触发 CI**：`git tag -a vX.Y.Z -m "Oh My Llama vX.Y.Z"` + `git push origin vX.Y.Z`。推送标签即触发 `release.yml`（三平台并行：Windows / Ubuntu 22.04 / macOS arm64）构建。
+7. **等待构建（前台，不可拆成两轮）**：`unset` 代理后在**前台**执行 `gh run watch <run_id> --repo GDWhisper/oh-my-llama --exit-status`（三平台并行，实测最长约 8-9 分钟，Bash 命令超时给足 600000ms）。**禁止用 `run_in_background` 把等待拆到后台**——后台返回后控制权已交还用户，发布步骤极易被漏掉；必须等到构建结束**在同一轮对话里**继续后续步骤。构建成功时 Release 以**草稿**形式生成（`releaseDraft: true`），这只是中间态，**不是终点**。
 8. **更新 CHANGELOG.md**（见第三节分工）。
 9. **发布 Release（强制收尾，不可省略 / 不可推迟）**：构建一结束（同一轮）**立即**执行 `gh release edit vX.Y.Z --notes-file <path> --draft=false --latest`。**必须**补 notes（草稿默认 body 是占位符 `See the assets to download and install.`）。**这是发布流程的最后一个动作；在它完成前，任务视为未完成，不得向用户报告「已发布 / 完成 / 可直接下载」。**
 10. **验证已正式发布**：`gh release view vX.Y.Z --repo GDWhisper/oh-my-llama`，确认输出含 `draft: false` 且 `Latest` 标记存在。只有亲眼看到 `draft: false`，才算发布成功、才能回复用户。
@@ -75,7 +75,7 @@
 - **`dev` 不能 checkout main** → 合并去 `main` 工作树执行 `git merge --no-ff dev`。
 - **提交排除 `.claude/`、`.mcp.json`**。
 - **版本号只改 `tauri.conf.json` 一处**（唯一真源）。`Cargo.toml` / `package.json` 已省略 `version`，`Cargo.lock` 里的 `0.0.0` 属预期，**勿手工回填**。
-- **`release.yml` 仅 Windows**；不要试图让它出 macOS / Linux（历史已验证会失败）。
+- **`release.yml` 三平台并行**：Windows / Linux（ubuntu-22.04）/ macOS（macos-latest = 原生 arm64）；Linux 需在 runner 上安装 Tauri v2 官方系统依赖（webkit2gtk-4.1 等，见 workflow）。macOS 当前发未签名版（Gatekeeper 右键打开），其更新通道待 Apple 证书后启用。
 
 ---
 
@@ -90,9 +90,9 @@
 - [ ] `CHANGELOG.md` 已更新（详细、三类分段）
 - [ ] Release Note 已**复制 `release-note-template.md` 模板**用 `--notes-file` 写入（含顶部固定文案、三大类齐全、无下载栏目、底部「详细改动参考 CHANGELOG」、**无开发期内部增减类条目**），并 `--draft=false --latest`
 - [ ] `gh release view vX.Y.Z` 确认输出含 `draft: false`（**未确认前不得回复用户「已发布」**）
-- [ ] 资产（`setup.exe` + `.msi`）已生成
+- [ ] 资产已生成（Windows `setup.exe` + `.msi`；Linux `.deb` / `.rpm` / `.AppImage`；macOS arm64 `.dmg`；各平台 `.sig` + `latest.json`）
 - [ ] 本地已生成签名私钥 `~/.tauri/oh-my-llama.key`（公钥已写入 `src-tauri/tauri.conf.json` 的 `plugins.updater.pubkey`）
-- [ ] GitHub 仓库 **Secrets** 已配置 `TAURI_SIGNING_PRIVATE_KEY`（内容为私钥文件全文）；缺失时构建仍成功，但产物无 `.sig`、不生成 `latest.json`，更新通道不可用
+- [ ] GitHub 仓库 **Secrets** 已配置 `TAURI_SIGNING_PRIVATE_KEY`（内容为私钥文件全文）；**注意（实测 tauri v2）**：`createUpdaterArtifacts=true` 时缺失私钥会直接报错（`A public key has been found, but no private key`），不会静默降级
 
 ---
 
@@ -108,11 +108,11 @@
 
 ### CI 产物（release.yml 已配）
 - `includeUpdaterArtifacts: true`：构建后自动用上述私钥对安装包签名生成 `.sig`，并生成 `latest.json`（含版本、平台、签名、下载地址）。
-- `updaterJsonPreferNsis: true`：偏好 NSIS 安装包作为更新载体（与本项目 Windows-only 一致）。
+- `updaterJsonPreferNsis: true`：偏好 NSIS 安装包作为 Windows 更新载体（三平台各自按平台产物生成对应更新条目）。
 - `latest.json` 与 `.sig` 作为 Release 资产上传；`tauri.conf.json` 的 `plugins.updater.endpoints` 指向 `https://github.com/GDWhisper/oh-my-llama/releases/latest/download/latest.json`，与上传位置对应。
 
 ### 发版时更新通道如何生效
-1. 照常打 `vX.Y.Z` 标签触发 `release.yml`（仅 Windows）构建。
+1. 照常打 `vX.Y.Z` 标签触发 `release.yml`（三平台）构建。
 2. 构建产出 `setup.exe`/`.msi` + 对应 `.sig` + `latest.json`，作为草稿 Release 资产。
 3. `gh release edit --draft=false` 发布后，已装旧版用户在「设置 → 关于 → 检查更新」即可看到新版本并可视化下载安装。
 4. **`tauri.conf.json` 的 `version`（唯一真源）必须与 tag 一致**，`latest.json` 才指向正确版本。
