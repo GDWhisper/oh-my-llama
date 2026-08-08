@@ -46,7 +46,10 @@ jobs:
       - name: Run gates (tsc + eslint + prettier + fmt + clippy)
         run: npm run check
 
-      # 完整打包验证（不发布、不上传产物）。未注入 TAURI_SIGNING_PRIVATE_KEY，
-      # 产物无 .sig / latest.json，与 release.yml 行为一致。
+      # 完整打包验证（不发布、不上传产物）。tauri.conf.json 的 createUpdaterArtifacts=true，
+      # 缺私钥时 tauri 会直接报错（实测 v2 行为：非"降级成功"），故注入与 release.yml 相同的
+      # 签名私钥 secret；产物带 .sig / latest.json 但仅留存在 runner，随 job 结束丢弃。
       - name: Build bundles (no release)
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
         run: npm run tauri build

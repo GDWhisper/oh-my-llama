@@ -1,0 +1,13 @@
+# 全仓统一 LF 行尾：文本文件入库与检出均为 LF（Windows 上亦然）。
+# 必要性：prettier 默认 endOfLine=lf，CI 检出若被 autocrlf 转成 CRLF 会导致
+# `prettier --check` 全仓报格式错误（已在三平台冒烟 CI 实测踩坑）。
+# 该规则只改变检出换行符，不改变既有 blob 内容，不会产生大规模 diff。
+* text=auto eol=lf
+
+# 二进制与构建产物显式按二进制处理
+*.png binary
+*.ico binary
+*.icns binary
+*.woff binary
+*.woff2 binary
+*.ttf binary
