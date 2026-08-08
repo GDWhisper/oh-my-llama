@@ -56,6 +56,7 @@ export default function App() {
   const server = useServer();
   // 更新（方案 A）：手动检查、下载可见且可取消、安装需显式确认。
   const updater = useUpdater();
+
   const {
     config,
     configEpoch,
@@ -112,6 +113,28 @@ export default function App() {
     setStructuredValue,
     toggleDisableStructuredKey,
   } = server;
+
+  // 配置管理卡片（.config-manager）吸顶在侧栏最顶端（top:0）。高级参数卡片的标题
+  // 也要吸顶，但不能与之重叠——因此把它吸顶在配置管理卡片「正下方」。这里量出配置管理
+  // 卡片的实时高度写入 CSS 变量 --config-manager-h，供 .advanced-panel .section-header
+  // 的 top 使用。用 ResizeObserver 跟随其内容高度变化（如布局回流），不影响卡片本身。
+  // 注意：App 有加载门控（config 为 null 时只渲染「加载中」），首次挂载时 ConfigManager
+  // 尚未进入 DOM，故以 configReady 为依赖——仅在 config 就绪、ConfigManager 已挂载后才
+  // 测量并写变量；若用 [] 依赖会提前跑一次拿到 null 后永不重试，--config-manager-h 始终
+  // 为空、top 回退 0、标题被配置管理卡片压住（看似"没吸顶"）。
+  const configReady = config != null;
+  useEffect(() => {
+    if (!configReady) return;
+    const el = document.querySelector<HTMLElement>('.config-manager');
+    if (!el) return;
+    const apply = () => {
+      document.documentElement.style.setProperty('--config-manager-h', `${el.offsetHeight}px`);
+    };
+    apply();
+    const observer = new ResizeObserver(apply);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [configReady]);
 
   // 切配置守卫：当前有未保存改动时，先弹二次确认而非静默丢弃（脏数据提示）。
   const [pendingSelect, setPendingSelect] = useState<string | null>(null);

@@ -218,6 +218,21 @@ body {
   gap: 12px;
 }
 
+/* 高级参数卡片：标题与「调整参数」按钮吸顶，滚动到卡片下方时仍可操作。
+   仅作用于高级参数面板（.advanced-panel），不影响其他共用 .section-header 的卡片。
+   top 用 --config-manager-h（运行时由 App.tsx 量出配置管理卡片高度写入），使其吸顶在
+   配置管理卡片「正下方」，而非 top:0——否则两者都钉在 top:0 会重叠，本标题会被 z-index
+   更高的配置管理卡片(5)压住而看不见。配置管理卡片的吸顶逻辑完全不变。 */
+.advanced-panel .section-header {
+  position: sticky;
+  top: var(--config-manager-h, 0);
+  z-index: 4;
+  background: #ffffff;
+  padding-bottom: 10px;
+  margin-bottom: -10px;
+  border-bottom: 1px solid #e5e7eb;
+}
+
 /* 日志卡片工具条：左侧 简要/原生 分段开关，右侧 清空日志 按钮 */
 .log-toolbar {
   display: flex;
@@ -298,12 +313,23 @@ body {
   display: inline-flex;
   align-items: center;
   gap: 6px;
+  white-space: nowrap;
 }
 
 .field label {
   font-size: 12px;
   font-weight: 500;
   color: #374151;
+}
+
+/* 参数原始 flag（如 --repeat-penalty）单独用等宽字体，避免混排在中文字体里 -- 不居中。
+   整个括号部分包裹在 wrapper 里并禁止折行，防止中文括号与等宽 flag 被浏览器拆成多行。 */
+.param-flag {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace;
+}
+
+.param-flag-wrapper {
+  white-space: nowrap;
 }
 
 .field input,

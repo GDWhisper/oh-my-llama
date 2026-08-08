@@ -1,6 +1,12 @@
 import { useEffect, useMemo, useState } from 'react';
+import type { ReactNode } from 'react';
 import type { ParamSpec, ServerConfig } from '../types';
-import { ADVANCED_LABEL_KEYS, type AdvancedKey, type AdvancedOption } from '../lib/advanced';
+import {
+  ADVANCED_LABEL_KEYS,
+  ADVANCED_FLAG,
+  type AdvancedKey,
+  type AdvancedOption,
+} from '../lib/advanced';
 import { groupExtraArgs } from '../lib/parseArgs';
 import { useI18n } from '../i18n';
 import type { MessageKey, Translator } from '../i18n/messages';
@@ -13,6 +19,21 @@ function structuredLabel(t: Translator, spec: ParamSpec): string {
   const key = `advanced.structured.${spec.key}` as MessageKey;
   const label = t(key);
   return label === key ? spec.flag : label;
+}
+
+// 把友好显示名与原始 flag 组合为「名称（原始参数）」对照形式；
+// flag 部分用等宽字体渲染，避免中文无衬线字体里的 `--` 看起来偏高/不居中。
+// 当友好名缺译回退到 flag（与 flag 相同）时不再重复包裹，直接显示 flag。
+function withFlag(label: string, flag: string): ReactNode {
+  if (label === flag) return label;
+  return (
+    <>
+      {label}
+      <span className="param-flag-wrapper">
+        （<span className="param-flag">{flag}</span>）
+      </span>
+    </>
+  );
 }
 
 // 「可添加参数」搜索结果一次最多渲染的条目数：注册表有 160+ 项，
@@ -29,12 +50,14 @@ export type ExtraArgList = 'enabled' | 'disabled';
 function ExtraArgRow({
   text,
   disabled,
+  removable,
   onCommit,
   onRemove,
   onToggle,
 }: {
   text: string;
   disabled: boolean;
+  removable: boolean;
   onCommit: (value: string) => void;
   onRemove: () => void;
   onToggle: () => void;
@@ -53,9 +76,11 @@ function ExtraArgRow({
           <Button variant="secondary" type="button" onClick={onToggle}>
             {disabled ? t('advanced.enable') : t('advanced.disable')}
           </Button>
-          <Button variant="danger" type="button" onClick={onRemove}>
-            {t('common.delete')}
-          </Button>
+          {removable && (
+            <Button variant="danger" type="button" onClick={onRemove}>
+              {t('common.delete')}
+            </Button>
+          )}
         </div>
       </div>
       <input
@@ -101,7 +126,7 @@ function StructuredParamRow({
     setDraft(value);
   }, [value]);
 
-  const label = structuredLabel(t, spec);
+  const label = withFlag(structuredLabel(t, spec), spec.flag);
   const isBool = spec.type === 'bool';
   const commitDraft = () => {
     if (draft !== value) {
@@ -164,7 +189,6 @@ function StructuredParamRow({
           onBlur={commitDraft}
         />
       )}
-      <div className="field-hint">{spec.flag}</div>
     </div>
   );
 }
@@ -238,23 +262,45 @@ export function AdvancedParamsPanel(props: Props) {
     [config.disabled_structured_params],
   );
 
-  // 候选项 = 注册表里尚未启用的参数，按「显示名 / key / flag」模糊匹配。
+  // 「可添加参数」统一池：传统可选参数 + 注册表里尚未启用的结构化参数。
+  // 搜索框置顶，下方按关键词过滤后同时展示两类参数，避免搜索框被传统参数挤到第二行。
+  type AddableItem =
+    | { kind: 'legacy'; key: AdvancedKey; label: string; flag: string }
+    | { kind: 'structured'; key: string; label: string; flag: string };
+
+  const addableItems = useMemo<AddableItem[]>(() => {
+    const legacyItems: AddableItem[] = availableAdvancedOptions.map((option) => ({
+      kind: 'legacy',
+      key: option.key,
+      label: t(ADVANCED_LABEL_KEYS[option.key]),
+      flag: ADVANCED_FLAG[option.key],
+    }));
+    const structuredItems: AddableItem[] = registry
+      .filter((spec) => !enabledStructured.has(spec.key))
+      .map((spec) => ({
+        kind: 'structured',
+        key: spec.key,
+        label: structuredLabel(t, spec),
+        flag: spec.flag,
+      }));
+    return [...legacyItems, ...structuredItems];
+  }, [availableAdvancedOptions, registry, enabledStructured, t]);
+
   const suggestions = useMemo(() => {
     const query = paramQuery.trim().toLowerCase();
-    const pool = registry.filter((spec) => !enabledStructured.has(spec.key));
     if (!query) {
-      return pool.slice(0, MAX_SUGGESTIONS);
+      return addableItems.slice(0, MAX_SUGGESTIONS);
     }
-    return pool.filter(
-      (spec) =>
-        spec.key.includes(query) ||
-        spec.flag.toLowerCase().includes(query) ||
-        structuredLabel(t, spec).toLowerCase().includes(query),
+    return addableItems.filter(
+      (item) =>
+        item.key.toLowerCase().includes(query) ||
+        item.flag.toLowerCase().includes(query) ||
+        item.label.toLowerCase().includes(query),
     );
-  }, [registry, enabledStructured, paramQuery, t]);
+  }, [addableItems, paramQuery]);
 
   return (
-    <div className="panel">
+    <div className="panel advanced-panel">
       <div className="section-header">
         <h2>{t('advanced.title')}</h2>
         <div className="actions">
@@ -267,21 +313,7 @@ export function AdvancedParamsPanel(props: Props) {
           </Button>
         </div>
       </div>
-      {adjustingAdvanced && availableAdvancedOptions.length > 0 && (
-        <div className="advanced-chooser">
-          {availableAdvancedOptions.map((option) => (
-            <button
-              key={option.key}
-              className="chip"
-              type="button"
-              onClick={() => onAddKey(option.key)}
-            >
-              {t(ADVANCED_LABEL_KEYS[option.key])}
-            </button>
-          ))}
-        </div>
-      )}
-      {adjustingAdvanced && registry.length > 0 && (
+      {adjustingAdvanced && addableItems.length > 0 && (
         <div className="structured-chooser">
           <input
             className="structured-search"
@@ -294,18 +326,22 @@ export function AdvancedParamsPanel(props: Props) {
             <div className="empty">{t('advanced.searchNoMatch')}</div>
           ) : (
             <div className="advanced-chooser">
-              {suggestions.slice(0, MAX_SUGGESTIONS).map((spec) => (
+              {suggestions.slice(0, MAX_SUGGESTIONS).map((item) => (
                 <button
-                  key={spec.key}
+                  key={`${item.kind}-${item.key}`}
                   className="chip"
                   type="button"
-                  title={spec.flag}
+                  title={item.flag}
                   onClick={() => {
-                    onAddStructuredKey(spec.key);
+                    if (item.kind === 'legacy') {
+                      onAddKey(item.key);
+                    } else {
+                      onAddStructuredKey(item.key);
+                    }
                     setParamQuery('');
                   }}
                 >
-                  {structuredLabel(t, spec)}
+                  {item.label}
                 </button>
               ))}
             </div>
@@ -321,12 +357,13 @@ export function AdvancedParamsPanel(props: Props) {
         const removable = adjustingAdvanced && key !== 'ctx_size';
         const isBool = key === 'mmap' || key === 'mlock';
         const isDisabled = disabledAdvancedKeys[key];
+        const labeled = withFlag(t(ADVANCED_LABEL_KEYS[key]), ADVANCED_FLAG[key]);
         return (
           <div className={`field${isDisabled ? ' disabled' : ''}`} key={key}>
             <div className="field-header">
               {isBool ? (
                 <label className="bool-field">
-                  {t(ADVANCED_LABEL_KEYS[key])}
+                  {labeled}
                   <input
                     type="checkbox"
                     checked={key === 'mmap' ? config.mmap : config.mlock}
@@ -338,7 +375,7 @@ export function AdvancedParamsPanel(props: Props) {
                   />
                 </label>
               ) : (
-                <label>{t(ADVANCED_LABEL_KEYS[key])}</label>
+                <label>{labeled}</label>
               )}
               <div className="field-actions">
                 {isDisabled && <span className="disabled-badge">{t('advanced.disabled')}</span>}
@@ -481,6 +518,7 @@ export function AdvancedParamsPanel(props: Props) {
           key={`enabled-${group.start}`}
           text={group.text}
           disabled={false}
+          removable={adjustingAdvanced}
           onCommit={(value) => onUpdateExtraArg('enabled', group.start, value)}
           onRemove={() => onRemoveExtraArg('enabled', group.start)}
           onToggle={() => onToggleExtraArg('enabled', group.start)}
@@ -491,6 +529,7 @@ export function AdvancedParamsPanel(props: Props) {
           key={`disabled-${group.start}`}
           text={group.text}
           disabled
+          removable={adjustingAdvanced}
           onCommit={(value) => onUpdateExtraArg('disabled', group.start, value)}
           onRemove={() => onRemoveExtraArg('disabled', group.start)}
           onToggle={() => onToggleExtraArg('disabled', group.start)}
