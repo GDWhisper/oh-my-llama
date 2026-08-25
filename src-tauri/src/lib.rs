@@ -1075,6 +1075,7 @@ fn append_log_inner(app: &AppHandle, line: ServerLogLine) {
             logs.remove(0);
         }
     }
+
     // 实时推送：每产生一行立即 emit 给前端，前端 listen 增量追加（取代轮询，做到实时）。
     let _ = app.emit("log://line", line);
 }
