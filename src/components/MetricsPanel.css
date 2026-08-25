@@ -42,11 +42,19 @@
 }
 
 .metrics-sub {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
   font-size: 12px;
   color: #6b7280;
   padding-left: 52px;
   font-variant-numeric: tabular-nums;
   line-height: 1.6;
+}
+
+/* 子项整块不拆词：换行只发生在项边界，避免 GPU 型号（如「RTX 5070 Ti」）在空格处被拆行 */
+.metrics-sub > span {
+  white-space: nowrap;
 }
 
 .metrics-sub-line {

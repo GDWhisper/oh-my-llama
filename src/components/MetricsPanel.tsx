@@ -106,16 +106,20 @@ export function MetricsPanel() {
                   </div>
                   <div className="metrics-sub">
                     <span>{g.name}</span>
-                    {g.vram_total_mb > 0 && (
+                    {(g.vram_total_mb > 0 || g.temperature !== null) && (
                       <span className="metrics-sub-line">
-                        {' · '}
-                        {t('metrics.vram')} {fmtMB(g.vram_used_mb)} / {fmtMB(g.vram_total_mb)}
-                      </span>
-                    )}
-                    {g.temperature !== null && (
-                      <span className="metrics-sub-line">
-                        {' · '}
-                        {t('metrics.temp')} {g.temperature.toFixed(0)}°C
+                        {g.vram_total_mb > 0 && (
+                          <>
+                            {' · '}
+                            {t('metrics.vram')} {fmtMB(g.vram_used_mb)} / {fmtMB(g.vram_total_mb)}
+                          </>
+                        )}
+                        {g.temperature !== null && (
+                          <>
+                            {' · '}
+                            {t('metrics.temp')} {g.temperature.toFixed(0)}°C
+                          </>
+                        )}
                       </span>
                     )}
                   </div>
