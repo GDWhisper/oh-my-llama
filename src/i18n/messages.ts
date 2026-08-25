@@ -338,6 +338,15 @@ export const zh = {
   'preview.custom': '自定义参数 → {value}',
   'preview.positional': '位置参数 → {value}',
 
+  // 一键传参：HuggingFace / 推测解码（speculative decoding）预览文案
+  'preview.hf': 'HuggingFace 模型仓库 → {value}',
+  'preview.hfd': 'HuggingFace 草稿模型仓库 → {value}',
+  'preview.spec_draft': '草稿模型路径 → {value}',
+  'preview.spec_draft_n_max': '草稿最大草稿 token 数 → {value}',
+  'preview.spec_draft_n_min': '草稿最小草稿 token 数 → {value}',
+  'preview.spec_draft_p_min': '草稿最小接受概率 → {value}',
+  'preview.spec_type': '推测解码类型 → {value}',
+
   // 一键传参：已识别的 llama-server 参数预览文案（kind:'known'）
   'preview.threads_batch': '批处理线程数 → {value}',
   'preview.cpu_strict': '严格 CPU 绑定 → {value}',
@@ -903,6 +912,15 @@ export const en: Record<MessageKey, string> = {
   'preview.off': 'Off',
   'preview.custom': 'Custom parameter → {value}',
   'preview.positional': 'Positional argument → {value}',
+
+  // One-click params: HuggingFace / speculative decoding preview labels
+  'preview.hf': 'HuggingFace model repo → {value}',
+  'preview.hfd': 'HuggingFace draft model repo → {value}',
+  'preview.spec_draft': 'Draft model path → {value}',
+  'preview.spec_draft_n_max': 'Max draft tokens → {value}',
+  'preview.spec_draft_n_min': 'Min draft tokens → {value}',
+  'preview.spec_draft_p_min': 'Min accept probability → {value}',
+  'preview.spec_type': 'Speculative decoding type → {value}',
 
   // One-click params: recognized llama-server parameter preview labels (kind:'known')
   'preview.threads_batch': 'Batch threads → {value}',
