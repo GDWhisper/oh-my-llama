@@ -35,6 +35,10 @@ toml = { version = "1.1.2", features = ["serde"] }
 # libc 0.2 已是 tauri 依赖树的既有 crate（Cargo.lock 已锁定 0.2.186），
 # 此处显式声明不引入任何新下载/新安全面，仅暴露 kill 与信号常量。
 libc = "0.2"
+# 伪终端（PTY）：让 llama-server 以为自己在写终端，从而 CRT 行缓冲、实时 flush 日志，
+# 根治“管道下 stdout 被块缓冲、模型加载完才一次性涌出”的问题。跨平台（Windows=ConPTY /
+# Unix=openpty），单 crate 统一两套实现；仅暴露启动子进程与读 master 流，攻击面有限。
+portable-pty = "0.8"
 
 [target.'cfg(windows)'.dependencies]
 # 仅用于 Job Object 内核级守护（KILL_ON_JOB_CLOSE）与控制台 CTRL_C_EVENT 优雅退出信号。
