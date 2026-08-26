@@ -31,6 +31,24 @@ const EMPTY_ADVANCED_ENABLED = (): Record<AdvancedKey, boolean> =>
     {} as Record<AdvancedKey, boolean>,
   );
 
+// listen 封装：注册成功后若组件已卸载（disposed）则立即取消监听。
+// 背景：React StrictMode 开发模式会 mount→unmount→再 mount。effect 的 async IIFE 里
+// `await listen(...)` 可能在 cleanup 执行之后才 resolve——cleanup 时 unlisten 尚未赋值、
+// 监听注册成功后若无人复查 disposed，残留 listener 会一直存活，导致同一条事件被处理
+// 两次（症状：日志面板每行双份、时间戳相同）。此封装把「注册后复查 disposed」收敛到一处。
+async function listenGuarded<T>(
+  event: string,
+  handler: (payload: T) => void,
+  isDisposed: () => boolean,
+): Promise<(() => void) | undefined> {
+  const unlisten = await listen(event, (ev) => handler(ev.payload as T));
+  if (isDisposed()) {
+    unlisten();
+    return undefined;
+  }
+  return unlisten;
+}
+
 // 受管进程「曾可服务但持续无响应」判定阈值（毫秒）。
 // 仅当进程曾被确认可服务（running=true）之后，又持续 N 秒探测不到（managed && !running），
 // 才判定为「无响应」。这样能区别于「大模型仍在加载」的正常 加载中 态，
@@ -249,10 +267,11 @@ export function useServer() {
 
   // 日志实时透传：挂载时先拉一次历史，随后订阅后端 log://line 增量事件逐行追加，
   // 不再靠轮询——这样进度/输出一产生就实时出现在面板。log://clear 用于清空同步。
+  // 用 listenGuarded 注册：StrictMode 双挂载下若本 effect 已被卸载，注册成功后立即
+  // 取消，避免残留 listener 把每条日志追加两遍（每行双份）。
   useEffect(() => {
-    let unlistenLine: (() => void) | undefined;
-    let unlistenClear: (() => void) | undefined;
     let disposed = false;
+    const unlisteners: (() => void)[] = [];
     (async () => {
       try {
         const data = await invoke<ServerLogLine[]>('read_logs');
@@ -262,24 +281,34 @@ export function useServer() {
       } catch (err) {
         console.error(err);
       }
-      unlistenLine = await listen<ServerLogLine>('log://line', (event) => {
-        const line = event.payload;
-        setLogs((prev) => {
-          const next = [...prev, line];
-          if (next.length > 5000) {
-            next.shift();
-          }
-          return next;
-        });
-      });
-      unlistenClear = await listen('log://clear', () => {
-        setLogs([]);
-      });
+      const unLine = await listenGuarded<ServerLogLine>(
+        'log://line',
+        (line) => {
+          setLogs((prev) => {
+            const next = [...prev, line];
+            if (next.length > 5000) {
+              next.shift();
+            }
+            return next;
+          });
+        },
+        () => disposed,
+      );
+      if (unLine) {
+        unlisteners.push(unLine);
+      }
+      const unClear = await listenGuarded(
+        'log://clear',
+        () => setLogs([]),
+        () => disposed,
+      );
+      if (unClear) {
+        unlisteners.push(unClear);
+      }
     })();
     return () => {
       disposed = true;
-      unlistenLine?.();
-      unlistenClear?.();
+      unlisteners.forEach((un) => un());
     };
   }, []);
 
@@ -343,16 +372,21 @@ export function useServer() {
   // 系统从睡眠/休眠唤醒时立即刷新状态：睡眠期间 JS 定时器被系统挂起，
   // 仅靠 1.5s 轮询会在唤醒后延迟最多一个周期才反映「睡眠中被回收/挂死的服务」。
   // Tauri 在 app 级派发 tauri://resume，挂上即「唤醒即查」，状态秒级回正（与外部杀进程同理）。
+  // 用 listenGuarded 注册，与日志 listener 同一竞态防护（StrictMode 双挂载不残留）。
   useEffect(() => {
-    let unlisten: (() => void) | undefined;
     let disposed = false;
+    let unlisten: (() => void) | undefined;
     (async () => {
       try {
-        unlisten = await listen('tauri://resume', () => {
-          if (!disposed) {
-            refreshNow();
-          }
-        });
+        unlisten = await listenGuarded(
+          'tauri://resume',
+          () => {
+            if (!disposed) {
+              refreshNow();
+            }
+          },
+          () => disposed,
+        );
       } catch (err) {
         console.error(err);
       }
