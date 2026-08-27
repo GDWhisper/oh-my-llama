@@ -4,6 +4,17 @@
 
 > 本文件为**详细改动历史**（含涉及的文件与实现机制）；GitHub Release 页面为对应版本的**总结性**说明。
 
+## [0.1.6] - 2026-08-27
+
+### 新增功能
+- **HuggingFace / 推测解码参数识别（一键传参）**：`src/lib/parseArgs.ts` 在 `FLAG_INFO` 新增 `--hf` / `--hfd` / `--spec-draft` / `--spec-draft-n-max` / `--spec-draft-n-min` / `--spec-draft-p-min` 等条目（`kind:'known'`，原样转发并在「原始参数」卡片以友好文案展示），并在解析时剥离 shell 行续接符 `\`（多行命令行行尾的续接符不是参数内容）。`src/i18n/messages.ts` 新增对应 `preview.hf` / `preview.hfd` / `preview.spec_draft*` 中英文案。粘贴含 HuggingFace 仓库或推测解码（draft model）的命令行不再因换行续接符而解析错位。
+
+### 功能优化
+- **性能卡片 GPU 单行显示**：`src/components/MetricsPanel.tsx` + `MetricsPanel.css` 将 GPU 型号、显存、温度合并到同一行（展开态由「型号单独一行 + 显存/温度另起一行」改为「型号一行 + 显存·温度同行」），提升窄栏可读性；收起态保持单行紧凑。复用既有 `metrics.vram` / `metrics.temp` 文案。
+
+### Bug 修复
+- **日志实时性 + ConPTY 秒退**：后端 `src-tauri/src/lib.rs` 改用 `portable-pty` 伪终端（PTY）启动 llama-server（`Cargo.toml` 新增 `portable-pty` 依赖），替代原管道重定向——管道下子进程 stdout 被 CRT 全缓冲，表现为「原生日志直到进程退出才一次性涌出」；PTY 让子进程按行缓冲，遇换行即 flush。同时修复 ConPTY 生命周期管理（master PTY 宿主句柄随 `wait_process` 持有到子进程退出，避免刚启动即崩溃）；非 Windows 由 portable-pty 的 `setsid` 建立进程组、Windows 保留 Job Object（`CREATE_NO_WINDOW` 不再需要）。`src/hooks/useServer.ts` 新增 `listenGuarded`，消除 React StrictMode 双挂载下残留事件监听导致的日志双份；日志实时推送处补充空行分隔，流式可读性更佳。
+
 ## [0.1.5] - 2026-08-09
 
 ### 新增功能
@@ -173,6 +184,7 @@
 ### 说明
 - 本版本仅提供 Windows 安装包（`.exe` NSIS / `.msi`），无需预先安装 Node / Rust。
 
+[0.1.6]: https://github.com/GDWhisper/oh-my-llama/releases/tag/v0.1.6
 [0.1.3]: https://github.com/GDWhisper/oh-my-llama/releases/tag/v0.1.3
 [0.1.0]: https://github.com/GDWhisper/oh-my-llama/releases/tag/v0.1.0
 [0.0.9]: https://github.com/GDWhisper/oh-my-llama/releases/tag/v0.0.9
