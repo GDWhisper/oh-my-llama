@@ -69,7 +69,8 @@
 
 ## 四、常见坑（Gotchas）
 
-- **gh 报 EOF** → 先 `unset HTTPS_PROXY HTTP_PROXY https_proxy http_proxy`。
+- **gh 报 EOF** → 先 `unset HTTPS_PROXY HTTP_PROXY https_proxy http_proxy`（或 `env -u` 四个变量后再执行 `gh`）。
+- **git 代理覆盖语法**：本机全局 `http(s).proxy` 指向 `127.0.0.1:7897`，且该代理可能未运行（动态）。覆盖时**必须用带点的键** `-c "http.proxy=" -c "https.proxy="`（空值=直连）；写 `-c https_proxy=`（下划线）会被 git 报 `key does not contain a section`、`-c http.proxy=<url>` 则路由经过代理。若直连报 `Connection was reset`/`Could not connect`，改 `-c "http.proxy=http://127.0.0.1:7897" -c "https.proxy=http://127.0.0.1:7897"`；若报 `Could not connect to 127.0.0.1`，说明代理没开，退回直连。两者交替试，勿把命令里的 `-` 误写成参数分隔。
 - **草稿 ≠ 已发布** → CI 永远先生成 draft（`releaseDraft: true`）。必须 `gh release edit --notes-file ... --draft=false --latest` 并 `gh release view` 确认 `draft: false` 才算发布成功。构建成功、资产齐全都**不算**发布完成。
 - **资产 URL 显示 `untagged-...`** → 属 tauri-action 上传时的内部路径，Release 仍正确挂在 tag 下，无需处理。
 - **`dev` 不能 checkout main** → 合并去 `main` 工作树执行 `git merge --no-ff dev`。
