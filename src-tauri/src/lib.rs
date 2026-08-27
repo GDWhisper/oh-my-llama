@@ -1,13 +1,11 @@
+use portable_pty::{native_pty_system, CommandBuilder, PtySize};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::env;
 use std::io::{Read, Write};
 use std::net::{IpAddr, SocketAddr, TcpListener, TcpStream, UdpSocket};
 #[cfg(windows)]
-use std::os::windows::io::AsRawHandle;
-#[cfg(windows)]
 use std::os::windows::process::CommandExt;
-use std::process::Stdio;
 use std::str::FromStr;
 use std::time::Duration;
 use sysinfo::System;
@@ -684,33 +682,59 @@ async fn start_server(app: AppHandle, config: ServerConfig) -> Result<ServerStat
     if is_port_in_use_socket(bind_socket) {
         return Err(format!("端口 {} 已被占用，无法启动服务。", config.port));
     }
+    // 仅探测 wildcard 绑定会漏掉「更具体」的占用者：Windows 上允许 0.0.0.0:port 与
+    // 127.0.0.1:port 同时 bind 成功（如 Steam 等客户端只占回环地址），此时 llama-server
+    // 即便绑定成功，发往 127.0.0.1 的流量也会被具体监听者抢走，服务实际不可达。
+    // 故对回环地址补一次探测：被占即拒绝启动，让用户换端口而非静默错绑。
+    let loopback_probe = SocketAddr::new(
+        IpAddr::V4(std::net::Ipv4Addr::new(127, 0, 0, 1)),
+        config.port,
+    );
+    if loopback_probe != bind_socket && is_port_in_use_socket(loopback_probe) {
+        return Err(format!(
+            "端口 {} 已被本机其他程序占用（127.0.0.1），无法启动服务。",
+            config.port
+        ));
+    }
 
     let exe = path.to_owned();
     let args = build_server_args(&config);
-    let mut cmd = std::process::Command::new(&exe);
+
+    // 用伪终端（PTY）而非管道启动 llama-server：管道下子进程 stdout 会被 CRT 全缓冲
+    // （非 TTY 时 glibc/MSVC 默认块缓冲），导致加载阶段的日志/进度攒到进程退出才一次性涌出，
+    // 表现为“原生日志不实时”。PTY 让子进程以为自己在写终端 → CRT 改为行缓冲，每遇 \n/\r 立即 flush。
+    // 代价：stdout/stderr 在伪终端里合并为单一 master 流（本应用两路都记 level=raw，无语义损失）。
+    let pty_system = native_pty_system();
+    let pair = pty_system
+        .openpty(PtySize::default())
+        .map_err(|err| format!("创建伪终端失败: {err}"))?;
+    let mut cmd = CommandBuilder::new(&exe);
     cmd.args(&args);
+    // 注：CommandBuilder 无 creation_flags / process_group 方法。
+    // - Windows：ConPTY 本身无头，子进程不会弹出控制台窗口，故无需 CREATE_NO_WINDOW。
+    // - 非 Windows：portable-pty 在 spawn 时已对子进程 setsid，使其成为进程组 leader，
+    //   优雅停止信号 kill(-pid, SIGINT) 仍能覆盖整个组（见 request_graceful_stop）。
 
-    cmd.stdout(Stdio::piped()).stderr(Stdio::piped());
-    #[cfg(windows)]
-    cmd.creation_flags(0x08000000);
-    #[cfg(not(windows))]
-    {
-        use std::os::unix::process::CommandExt;
-        // 放入新进程组（组长即 llama-server）：停止时对整个进程组发信号（优雅 SIGINT / 兜底 SIGKILL），
-        // 等价 Windows 的 CTRL_C_EVENT + Job Object 组合；spawn 成功即代表进程组已建立。
-        cmd.process_group(0);
-    }
-
-    let child = cmd
-        .spawn()
+    let child = pair
+        .slave
+        .spawn_command(cmd)
         .map_err(|err| format!("启动 llama-server 失败: {err}"))?;
-    let pid = child.id();
+    // portable-pty 的 Child trait 不暴露 id()，用 process_id() 取子进程 pid。
+    let pid = child
+        .process_id()
+        .ok_or_else(|| "无法获取子进程 pid。".to_string())?;
+    // 克隆 master 读端：子进程 stdout+stderr 已合并于此，逐字节实时切行后推给前端。
+    let master_reader = pair
+        .master
+        .try_clone_reader()
+        .map_err(|err| format!("克隆伪终端读端失败: {err}"))?;
     // 建立平台级子进程守护：
     // - Windows：Job Object + KILL_ON_JOB_CLOSE，launcher 以任何方式死亡（含崩溃/被强杀/被 OOM）时
-    //   内核会据此终结 llama-server 子进程并回收 GPU 显存；句柄随 child 交给 wait_process 持有，
-    //   进程一退出即被内核回收 → KILL_ON_JOB_CLOSE 触发（见 create_process_guard）。
-    // - 非 Windows：进程组（见上方 process_group(0)），无崩溃回收语义，仅供停止时组内发信号。
-    let guard = create_process_guard(&child);
+    //   内核会据此终结 llama-server 子进程并回收 GPU 显存；这里直接用子进程句柄挂入作业
+    //   （见 create_process_guard），进程退出即被内核回收 → KILL_ON_JOB_CLOSE 触发。
+    // - 非 Windows：进程组在 spawn 时由 portable-pty 建立（setsid），无崩溃回收语义，
+    //   仅供停止时组内发信号。
+    let guard = create_process_guard(child.as_ref());
     if !guard.is_active() {
         append_log_inner(
             &app,
@@ -752,8 +776,16 @@ async fn start_server(app: AppHandle, config: ServerConfig) -> Result<ServerStat
     // llama-server 致其加载卡死。wait_process 仅消费输出，直到子进程真正退出才改状态，
     // 故与本段随后的健康探测可安全并发。
     let app_handle = app.clone();
+    // 关键：master PTY 的宿主句柄必须随 wait_process 持有到子进程退出为止。
+    // start_server 本身会在就绪判定后返回（就绪/加载超时/失败多条路径都可能提前返回），
+    // 若把 pair.master 留在本函数栈上，返回即触发 Drop → ClosePseudoConsole → 伪控制台
+    // 被销毁，附着其上的 llama-server 会被 Windows 以 STATUS_CONTROL_C_EXIT(0xC000013A)
+    // 连带终止——表现为「启动后秒退」。把 master 移入 wait_process 后，其生命周期与
+    // 子进程监管严格同域，任何提前返回都不再影响子进程。
+    let master_pty = pair.master;
+    drop(pair.slave);
     tauri::async_runtime::spawn(async move {
-        let _ = wait_process(app_handle, child, guard).await;
+        let _ = wait_process(app_handle, master_pty, master_reader, child, guard).await;
     });
 
     // 等待服务端口真正就绪（模型加载可能耗时），不持状态锁。
@@ -937,13 +969,13 @@ fn pump_reader(reader: impl std::io::Read, tx: std::sync::mpsc::Sender<String>) 
             Ok(0) | Err(_) => {
                 // EOF：flush 末尾未以换行结尾的残余内容。
                 if !buf.is_empty() {
-                    let _ = tx.send(String::from_utf8_lossy(&buf).into_owned());
+                    let _ = tx.send(strip_ansi(&String::from_utf8_lossy(&buf)));
                 }
                 break;
             }
             Ok(_) => match one[0] {
                 b'\r' => {
-                    let line = String::from_utf8_lossy(&buf).into_owned();
+                    let line = strip_ansi(&String::from_utf8_lossy(&buf));
                     buf.clear();
                     last_cr = true;
                     if tx.send(line).is_err() {
@@ -955,7 +987,7 @@ fn pump_reader(reader: impl std::io::Read, tx: std::sync::mpsc::Sender<String>) 
                     if last_cr {
                         last_cr = false;
                     } else {
-                        let line = String::from_utf8_lossy(&buf).into_owned();
+                        let line = strip_ansi(&String::from_utf8_lossy(&buf));
                         buf.clear();
                         if tx.send(line).is_err() {
                             break;
@@ -971,18 +1003,81 @@ fn pump_reader(reader: impl std::io::Read, tx: std::sync::mpsc::Sender<String>) 
     }
 }
 
-async fn wait_process(app: AppHandle, mut child: std::process::Child, _guard: ProcessGuard) {
-    // 读取子进程 stdout/stderr：避免管道缓冲写满导致服务端阻塞/死锁，
-    // 同时把 llama-server 的真实输出（含 \r 进度、空行、首尾空格）原样送进日志面板。
-    let stdout = child.stdout.take();
-    let stderr = child.stderr.take();
+/// 去除 ANSI 转义序列（CSI \e[..m 着色、\e[..H 光标定位、OSC \e].. 等），仅保留可见文本。
+/// 伪终端下子进程（llama.cpp）可能输出着色/光标控制码，日志面板无法渲染，去掉更干净；
+/// 不改动任何可见字符内容。ANSI 引导符(0x1b)与参数均为 ASCII(<0x80)，不会出现在 UTF-8
+/// 多字节序列内部，故按字节扫描安全。
+fn strip_ansi(s: &str) -> String {
+    let bytes = s.as_bytes();
+    let mut out: Vec<u8> = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == 0x1b {
+            if i + 1 < bytes.len() {
+                match bytes[i + 1] {
+                    b'[' => {
+                        // CSI：跳到终字节（0x40–0x7E），连同终字节一起跳过。
+                        i += 2;
+                        while i < bytes.len() && !(bytes[i] >= 0x40 && bytes[i] <= 0x7e) {
+                            i += 1;
+                        }
+                        if i < bytes.len() {
+                            i += 1;
+                        }
+                        continue;
+                    }
+                    b']' => {
+                        // OSC：跳到 BEL(0x07) 或 ST(\e\\)，连同终止符一起跳过。
+                        i += 2;
+                        while i < bytes.len() && bytes[i] != 0x07 {
+                            if bytes[i] == 0x1b && i + 1 < bytes.len() && bytes[i + 1] == b'\\' {
+                                i += 2;
+                                break;
+                            }
+                            i += 1;
+                        }
+                        if i < bytes.len() {
+                            i += 1;
+                        }
+                        continue;
+                    }
+                    _ => {
+                        // 其它两字符序列（如 \eC）：跳过引导符与下一字符。
+                        i += 2;
+                        continue;
+                    }
+                }
+            } else {
+                i += 1;
+                continue;
+            }
+        }
+        out.push(bytes[i]);
+        i += 1;
+    }
+    String::from_utf8_lossy(&out).into_owned()
+}
+
+async fn wait_process(
+    app: AppHandle,
+    // master PTY 宿主句柄：仅用于保活。Drop 它会 ClosePseudoConsole 并连带终止子进程
+    // （见 start_server 内注释），故必须与 child 同生死：持有至本函数结束（此时子进程
+    // 已 wait() 返回，安全关闭）。
+    _master_pty: Box<dyn portable_pty::MasterPty + Send>,
+    master: Box<dyn std::io::Read + Send>,
+    mut child: Box<dyn portable_pty::Child + Send + Sync>,
+    _guard: ProcessGuard,
+) {
+    // 读取子进程输出：PTY 下 stdout/stderr 已合并为单一 master 流，
+    // 避免管道缓冲写满导致服务端阻塞/死锁，同时把 llama-server 的真实输出
+    // （含 \r 进度、空行、首尾空格）原样送进日志面板。
     let (tx, rx) = std::sync::mpsc::channel::<String>();
 
     // 消费线程：一收到一行就立即写盘 + emit（实时透传）。
     // 关键点：用独立的 std 线程（而非 async 任务）承载消费；child.wait()
     // 也放到另一个 std 线程上。这样无论 async 运行时是单线程还是多线程，
-    // 消费都不会被 child.wait() 阻塞，真正实时；彻底杜绝"运行中无日志、
-    // 停止后涌入一批"的现象。
+    // 消费都不会被 child.wait() 阻塞，真正实时；彻底杜绝“运行中无日志、
+    // 停止后涌入一批”的现象。
     let app_rx = app.clone();
     let consumer = std::thread::spawn(move || {
         while let Ok(text) = rx.recv() {
@@ -1001,19 +1096,14 @@ async fn wait_process(app: AppHandle, mut child: std::process::Child, _guard: Pr
     });
 
     let mut readers = Vec::new();
-    if let Some(out) = stdout {
+    // 伪终端下 stdout/stderr 合并为单一 master 流，单 reader 即可。
+    {
         let tx = tx.clone();
         readers.push(std::thread::spawn(move || {
-            pump_reader(out, tx);
+            pump_reader(master, tx);
         }));
     }
-    if let Some(err) = stderr {
-        let tx = tx.clone();
-        readers.push(std::thread::spawn(move || {
-            pump_reader(err, tx);
-        }));
-    }
-    // 丢弃主发送端：仅剩 pump 线程各自持有的 tx；它们 EOF 后会自动 drop，
+    // 丢弃主发送端：仅剩 pump 线程持有的 tx；EOF 后自动 drop，
     // 届时 channel 关闭、consumer 的 rx.recv() 返回 Err 自然退出。
     drop(tx);
 
@@ -1075,6 +1165,7 @@ fn append_log_inner(app: &AppHandle, line: ServerLogLine) {
             logs.remove(0);
         }
     }
+
     // 实时推送：每产生一行立即 emit 给前端，前端 listen 增量追加（取代轮询，做到实时）。
     let _ = app.emit("log://line", line);
 }
@@ -1126,6 +1217,7 @@ fn is_port_in_use_socket(socket: SocketAddr) -> bool {
 // - Loading：返回 503（llama.cpp 模型仍在加载中）。
 // - Ready：返回 200（模型已加载、可对外服务）；或返回其它 HTTP 状态（含旧版无 /health 路由的 404，
 //   说明 HTTP 服务已起来、只是该路径不存在，同样视为可服务）。
+#[derive(Debug)]
 enum HealthProbe {
     Unreachable,
     Loading,
@@ -1316,7 +1408,7 @@ impl ProcessGuard {
 /// 为刚拉起的 llama-server 建立平台级守护：
 /// - Windows：Job Object + KILL_ON_JOB_CLOSE，失败时不阻断启动，仅降级为优雅退出信号；
 /// - 非 Windows：进程组在 spawn 时已建立，恒为 active。
-fn create_process_guard(child: &std::process::Child) -> ProcessGuard {
+fn create_process_guard(child: &(dyn portable_pty::Child + Send + Sync)) -> ProcessGuard {
     #[cfg(windows)]
     {
         ProcessGuard {
@@ -1352,7 +1444,7 @@ impl Drop for JobHandle {
 /// 返回 Some 表示已挂上；返回 None 表示当前环境不允许（例如 launcher 自身已被包在另一个
 /// 禁止嵌套作业的作业里），此时降级为仅走优雅退出信号，不阻断启动。
 #[cfg(windows)]
-fn create_kill_on_close_job(child: &std::process::Child) -> Option<JobHandle> {
+fn create_kill_on_close_job(child: &(dyn portable_pty::Child + Send + Sync)) -> Option<JobHandle> {
     unsafe {
         let job = CreateJobObjectW(std::ptr::null(), std::ptr::null());
         if job.is_null() {
@@ -1370,7 +1462,16 @@ fn create_kill_on_close_job(child: &std::process::Child) -> Option<JobHandle> {
             let _ = CloseHandle(job);
             return None;
         }
-        let assign_ok = AssignProcessToJobObject(job, child.as_raw_handle() as HANDLE) != 0;
+        // 直接取子进程句柄挂入 Job Object（portable-pty 的 Child::as_raw_handle，Windows 专属）。
+        // 句柄生命周期由仍存活的子进程保证，挂入后 Job Object 已按 pid 持有引用。
+        let handle = match child.as_raw_handle() {
+            Some(h) => h as HANDLE,
+            None => {
+                let _ = CloseHandle(job);
+                return None;
+            }
+        };
+        let assign_ok = AssignProcessToJobObject(job, handle) != 0;
         if !assign_ok {
             let _ = CloseHandle(job);
             return None;

@@ -56,6 +56,17 @@ const FLAG_INFO: Record<string, FlagInfo> = {
   '--mlock': { kind: 'bool', key: 'mlock', field: 'mlock', boolValue: true },
   '-m': { kind: 'model', field: 'model' },
   '--model': { kind: 'model', field: 'model' },
+  // HuggingFace / 草稿模型（speculative decoding）相关 flag：识别为「已知但原样转发」，
+  // 在解析预览显示友好文案，仍照发到 llama-server（不新增配置字段，遵循「识别+原样透传」约定）。
+  '-hf': { kind: 'known', labelKey: 'preview.hf' },
+  '--hf': { kind: 'known', labelKey: 'preview.hf' },
+  '-hfd': { kind: 'known', labelKey: 'preview.hfd' },
+  '--hfd': { kind: 'known', labelKey: 'preview.hfd' },
+  '--spec-draft': { kind: 'known', labelKey: 'preview.spec_draft' },
+  '--spec-draft-n-max': { kind: 'known', labelKey: 'preview.spec_draft_n_max' },
+  '--spec-draft-n-min': { kind: 'known', labelKey: 'preview.spec_draft_n_min' },
+  '--spec-draft-p-min': { kind: 'known', labelKey: 'preview.spec_draft_p_min' },
+  '--spec-type': { kind: 'known', labelKey: 'preview.spec_type' },
   // 启动器内部常量（由 build_server_args 自动追加）：识别但忽略，不进 patch / extra_args，
   // 且会吞掉其后的取值 token，避免回写时污染自定义参数。
   '--timeout': { kind: 'ignore' },
@@ -343,7 +354,11 @@ function tokenize(input: string): string[] {
     }
   }
   if (cur) tokens.push(cur);
-  return tokens;
+  // 剥离 shell 行续接符：粘贴多行命令时行尾的 `\` 仅用于换行续接，不是参数内容。
+  // 若直接丢弃 token 末尾的反斜杠（如 `cmd\` 紧贴换行、或独立成 token 的 `\`），
+  // 可避免它被当成「自定义参数」污染启动命令行。
+  // 注意：Windows 路径中的 `\` 位于 token 中间（如 F:\foo\bar.exe），不会位于末尾，不受影响。
+  return tokens.map((t) => t.replace(/\\+$/, '')).filter((t) => t !== '');
 }
 
 // 判断某个非 flag token 是否为「llama-server 启动器」本体：
