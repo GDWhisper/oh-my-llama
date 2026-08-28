@@ -741,6 +741,13 @@ body {
   box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.15);
 }
 
+/* 「填入模型名称」行：.modal 是 flex 列且 stretch，包一层 flex 行让按钮按内容宽度左对齐；
+   负 margin 收紧与输入框的间距（modal gap 12px 对这一组「输入框 + 回填按钮」偏松）。 */
+.name-fill-row {
+  display: flex;
+  margin-top: -6px;
+}
+
 /* 通用二次确认弹窗 */
 .modal-overlay {
   position: fixed;

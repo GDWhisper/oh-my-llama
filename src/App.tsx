@@ -87,6 +87,7 @@ export default function App() {
     activeName,
     renameTarget,
     nameDialog,
+    nameDialogModelName,
     selectConfig,
     requestCreateEmpty,
     requestSaveAsNew,
@@ -374,6 +375,7 @@ export default function App() {
             onRename={requestRename}
             onDelete={deleteConfig}
             nameDialog={nameDialog}
+            nameDialogModelName={nameDialogModelName}
             onNameConfirm={confirmName}
             onNameCancel={cancelName}
           />

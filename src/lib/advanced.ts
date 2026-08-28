@@ -68,3 +68,8 @@ export function modelBasename(path: string) {
   const index = normalized.lastIndexOf('/');
   return index >= 0 ? normalized.slice(index + 1) : cleaned;
 }
+
+// 模型路径 → 可直接作为配置名的模型名称：去掉目录与 .gguf 扩展名（大小写不敏感）。
+export function modelDisplayName(path: string) {
+  return modelBasename(path).replace(/\.gguf$/i, '');
+}

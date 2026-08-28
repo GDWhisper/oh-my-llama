@@ -6,6 +6,7 @@ import {
   ADVANCED_ORDER,
   OPTIONAL_ADVANCED_OPTIONS,
   isUnlimitedPredict,
+  modelDisplayName,
   type AdvancedKey,
 } from '../lib/advanced';
 import { useI18n } from '../i18n';
@@ -494,6 +495,19 @@ export function useServer() {
     setNameDialog({ open: true, mode: 'rename' });
   };
 
+  // 命名弹窗「填入模型名称」候选（不含目录与 .gguf 后缀）：
+  // save-as-new 取当前表单所选模型；rename 取被重命名配置的模型
+  // （下拉框里可重命名非激活配置，不能用当前表单值）；create-empty 无模型可填。
+  const nameDialogModelName = useMemo(() => {
+    const path =
+      nameDialog.mode === 'rename'
+        ? configs[renameTarget]?.model
+        : nameDialog.mode === 'save-as-new'
+          ? config?.model
+          : undefined;
+    return modelDisplayName(path ?? '');
+  }, [nameDialog.mode, configs, renameTarget, config]);
+
   // 名称留空时按日期时间自动生成。
   const autoConfigName = () => {
     const d = new Date();
@@ -854,6 +868,7 @@ export function useServer() {
     defaultConfig,
     renameTarget,
     nameDialog,
+    nameDialogModelName,
     selectConfig,
     requestCreateEmpty,
     requestSaveAsNew,

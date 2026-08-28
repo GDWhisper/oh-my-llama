@@ -90,6 +90,7 @@ export const zh = {
   'name.createHint': '将创建一个空白（默认参数）的新配置。',
   'name.renamePlaceholder': '请输入新的配置名称',
   'name.autoPlaceholder': '若不填写将按日期时间自动生成',
+  'name.fillModelName': '填入模型名称',
 
   // 必要参数卡片
   'basic.title': '必要参数',
@@ -668,6 +669,7 @@ export const en: Record<MessageKey, string> = {
   'name.createHint': 'A new blank config (default parameters) will be created.',
   'name.renamePlaceholder': 'Enter a new config name',
   'name.autoPlaceholder': 'Leave empty to auto-generate by date/time',
+  'name.fillModelName': 'Fill model name',
 
   'basic.title': 'Required Parameters',
   'basic.filterExe': 'Executable',
