@@ -951,18 +951,69 @@ body {
   color: #9ca3af;
 }
 .update-notes {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.update-notes-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: #6b7280;
+}
+.release-notes {
   max-height: 220px;
   overflow: auto;
-  white-space: pre-wrap;
   word-break: break-word;
   background: #f8fafc;
   border: 1px solid #e5e7eb;
   border-radius: 8px;
-  padding: 10px 12px;
-  margin: 0 0 16px;
+  padding: 10px 14px;
   font-size: 12.5px;
   line-height: 1.6;
   color: #374151;
+}
+.release-notes > :first-child {
+  margin-top: 0;
+}
+.release-notes > :last-child {
+  margin-bottom: 0;
+}
+.release-notes .rn-heading {
+  font-weight: 600;
+  color: #111827;
+  margin: 12px 0 4px;
+}
+.release-notes ul {
+  margin: 4px 0;
+  padding-left: 18px;
+}
+.release-notes li {
+  margin: 2px 0;
+}
+.release-notes p {
+  margin: 4px 0;
+}
+.release-notes blockquote {
+  margin: 6px 0;
+  padding-left: 10px;
+  border-left: 2px solid #d1d5db;
+  color: #6b7280;
+}
+.release-notes strong {
+  font-weight: 600;
+  color: #111827;
+}
+.update-notes-link {
+  align-self: flex-start;
+  background: none;
+  border: none;
+  padding: 0;
+  font-size: 12px;
+  font-weight: 400;
+  color: #2563eb;
+}
+.update-notes-link:hover {
+  text-decoration: underline;
 }
 .update-ready-text {
   margin: 4px 0 16px;

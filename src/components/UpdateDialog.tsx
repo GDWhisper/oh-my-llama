@@ -1,6 +1,9 @@
 import { useEffect } from 'react';
+import { openUrl } from '@tauri-apps/plugin-opener';
 import { useI18n, type Translator } from '../i18n';
+import { releaseUrl } from '../lib/repo';
 import { Button } from './Button';
+import { ReleaseNotes } from './ReleaseNotes';
 import type { UpdaterStatus } from '../hooks/useUpdater';
 
 interface Props {
@@ -30,6 +33,29 @@ function classifyUpdateError(raw: string, t: Translator): string {
     return t('update.errNotFound');
   if (/signature|verify|public key|pubkey|invalid.*key/.test(m)) return t('update.errSignature');
   return t('update.errGeneric');
+}
+
+// 更新说明区块：正文（Markdown 子集排版）+「在 GitHub 查看完整说明」链接。
+// 发现新版本与下载完成待重启两态共用，notes 缺失时只保留链接。
+function NotesSection({ version, body }: { version: string; body?: string }) {
+  const { t } = useI18n();
+  return (
+    <div className="update-notes">
+      {body ? (
+        <>
+          <div className="update-notes-label">{t('update.notes')}</div>
+          <ReleaseNotes body={body} />
+        </>
+      ) : null}
+      <button
+        type="button"
+        className="update-notes-link"
+        onClick={() => openUrl(releaseUrl(version)).catch(() => {})}
+      >
+        {t('update.viewRelease')}
+      </button>
+    </div>
+  );
 }
 
 // 更新浮窗（方案 A）：仅在有结果时渲染（available / downloading / ready / no-update / error）。
@@ -92,7 +118,7 @@ export function UpdateDialog({
               <span className="update-arrow">→</span>
               <span className="update-ver new">{status.version}</span>
             </div>
-            {status.body ? <pre className="update-notes">{status.body.trim()}</pre> : null}
+            <NotesSection version={status.version} body={status.body} />
             <div className="modal-actions">
               <Button variant="secondary" type="button" onClick={onDismiss}>
                 {t('update.later')}
@@ -133,8 +159,9 @@ export function UpdateDialog({
 
         {status.kind === 'ready' && (
           <div className="modal-body">
-            <div className="modal-title">{t('update.title')}</div>
+            <div className="modal-title">{t('update.readyTitle')}</div>
             <p className="update-ready-text">{t('update.ready')}</p>
+            <NotesSection version={status.version} body={status.body} />
             <div className="modal-actions">
               <Button variant="secondary" type="button" onClick={onDismiss}>
                 {t('update.later')}
@@ -148,7 +175,7 @@ export function UpdateDialog({
 
         {status.kind === 'no-update' && (
           <div className="modal-body">
-            <div className="modal-title">{t('update.title')}</div>
+            <div className="modal-title">{t('update.noUpdateTitle')}</div>
             <p className="update-ready-text">{t('update.noUpdate')}</p>
             <div className="modal-actions">
               <Button type="button" onClick={onDismiss}>

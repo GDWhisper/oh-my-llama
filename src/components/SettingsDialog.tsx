@@ -3,6 +3,7 @@ import { getVersion } from '@tauri-apps/api/app';
 import { openUrl } from '@tauri-apps/plugin-opener';
 import { invoke } from '@tauri-apps/api/core';
 import { useI18n } from '../i18n';
+import { REPO_URL } from '../lib/repo';
 import { LangSwitch } from './LangSwitch';
 import { Button } from './Button';
 import type { AppSettings } from '../types';
@@ -19,8 +20,6 @@ interface Props {
   // 点击 NEW 徽标：关闭设置并打开交互式更新弹窗。
   onOpenUpdate: () => void;
 }
-
-const REPO_URL = 'https://github.com/GDWhisper/oh-my-llama';
 
 // 设置浮窗：居中弹层，承载语言设置与关于（含手动「检查更新」+「自动检查」开关）。
 // 复用公共 modal 遮罩与样式。
