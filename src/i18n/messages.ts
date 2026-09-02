@@ -24,6 +24,7 @@ export const zh = {
 
   // 运行状态
   'status.running': '运行中',
+  'status.external': '外部服务',
   'status.loading': '加载中',
   'status.unresponsive': '无响应',
   'status.stopped': '已停止',
@@ -50,6 +51,7 @@ export const zh = {
   'control.serverAddr': '服务地址：{url}',
   'control.serverAddrStopped': '服务地址：服务未启动',
   'control.loading': '服务地址：模型加载中...',
+  'control.externalAddr': '服务地址：已被外部服务占用（{url}）',
   'control.starting': '正在启动...',
   'control.start': '启动',
   'control.stopping': '正在停止...',
@@ -627,6 +629,7 @@ export const en: Record<MessageKey, string> = {
   'app.share.copyFailed': 'Copy failed, please copy manually',
 
   'status.running': 'Running',
+  'status.external': 'External',
   'status.loading': 'Loading',
   'status.unresponsive': 'Unresponsive',
   'status.stopped': 'Stopped',
@@ -651,6 +654,7 @@ export const en: Record<MessageKey, string> = {
   'control.serverAddr': 'Service address: {url}',
   'control.serverAddrStopped': 'Service address: not started',
   'control.loading': 'Service address: model loading...',
+  'control.externalAddr': 'Service address: occupied by an external service ({url})',
   'control.starting': 'Starting...',
   'control.start': 'Start',
   'control.stopping': 'Stopping...',

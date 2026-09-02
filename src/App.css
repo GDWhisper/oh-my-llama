@@ -1270,6 +1270,12 @@ button:disabled {
   color: #065f46;
 }
 
+/* 外部服务：端口被本应用之外的服务占用，信息性提示（非本方服务的「运行中」绿色）。 */
+.status.external {
+  background: #dbeafe;
+  color: #1e40af;
+}
+
 .status.loading {
   background: #fef3c7;
   color: #92400e;
