@@ -567,6 +567,21 @@ export const zh = {
 
   // 更新（方案 A：手动检查、可见可取消；自动检查仅提示+徽标）
   'settings.autoCheck': '自动检查更新',
+
+  // 窗口关闭行为 / 系统托盘（最小化到托盘）
+  'settings.windowClose': '关闭窗口时',
+  'settings.windowCloseHint': '点击窗口右上角关闭按钮（X）时的行为。',
+  'settings.windowCloseAsk': '每次询问',
+  'settings.windowCloseTray': '最小化到系统托盘',
+  'settings.windowCloseQuit': '直接退出应用',
+  'tray.show': '显示主窗口',
+  'tray.quit': '退出',
+  'tray.promptTitle': '要退出还是最小化到托盘？',
+  'tray.promptBody':
+    '直接退出会停止 llama-server；最小化到托盘后服务继续运行，点击托盘图标即可回到窗口。',
+  'tray.promptRemember': '记住我的选择，不再询问',
+  'tray.promptMinimize': '最小化到托盘',
+  'tray.promptQuit': '直接退出',
   'update.badgeNew': 'NEW',
   'update.badgeTitle': '发现新版本，点击查看',
   'update.toastTitle': '发现新版本',
@@ -1148,6 +1163,21 @@ export const en: Record<MessageKey, string> = {
 
   // 更新（方案 A：手动检查、可见可取消；自动检查仅提示+徽标）
   'settings.autoCheck': 'Automatically check for updates',
+
+  // Window close behavior / system tray (minimize to tray)
+  'settings.windowClose': 'When Closing the Window',
+  'settings.windowCloseHint': 'What happens when you click the window close (X) button.',
+  'settings.windowCloseAsk': 'Ask every time',
+  'settings.windowCloseTray': 'Minimize to system tray',
+  'settings.windowCloseQuit': 'Quit the application',
+  'tray.show': 'Show Main Window',
+  'tray.quit': 'Quit',
+  'tray.promptTitle': 'Quit or minimize to tray?',
+  'tray.promptBody':
+    'Quitting stops llama-server. Minimizing to the tray keeps it running; click the tray icon to return.',
+  'tray.promptRemember': 'Remember my choice and do not ask again',
+  'tray.promptMinimize': 'Minimize to Tray',
+  'tray.promptQuit': 'Quit',
   'update.badgeNew': 'NEW',
   'update.badgeTitle': 'New version available, click to view',
   'update.toastTitle': 'Update available',

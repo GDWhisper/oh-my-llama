@@ -1490,6 +1490,11 @@ button:disabled {
   font-weight: 500;
   color: #111827;
 }
+/* 设置浮窗「关闭窗口行为」的多个单选项：纵向排列需要行间距
+   （「自动检查更新」是单行开关，不命中相邻选择器）。 */
+.settings-section .settings-check-row + .settings-check-row {
+  margin-top: 8px;
+}
 
 /* 右上角自动检查提示（方案 A：自动检查发现新版本时的非打扰提示） */
 .update-toast {

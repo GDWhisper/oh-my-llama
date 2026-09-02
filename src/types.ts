@@ -73,10 +73,13 @@ export interface ServerLogLine {
 // update_proxy 留空 = 更新直连；填写 = 仅走该代理地址。
 // auto_check_updates = 启动时是否自动检查更新（不打扰：仅提示+徽标，绝不静默安装）。
 // recent_servers = 本机用过的 llama-server 可执行文件路径（索引 0 最近用过），供路径输入框给候选。
+// minimize_to_tray = 窗口关闭行为：null = 未选择过（关闭时弹窗询问）；
+// true = 最小化到系统托盘；false = 直接退出。
 export interface AppSettings {
   update_proxy: string;
   auto_check_updates: boolean;
   recent_servers: string[];
+  minimize_to_tray: boolean | null;
 }
 
 // llama-server 路径输入框的候选项（list_recent_servers / remove_recent_server 的载荷）。

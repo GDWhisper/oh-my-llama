@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
+import { listen } from '@tauri-apps/api/event';
 import { useServer } from './hooks/useServer';
 import { ControlPanel } from './components/ControlPanel';
 import { LogPanel } from './components/LogPanel';
@@ -15,6 +16,7 @@ import { UpdateDialog } from './components/UpdateDialog';
 import { UpdateToast } from './components/UpdateToast';
 import { Toast } from './components/Toast';
 import { ConfirmDialog } from './components/ConfirmDialog';
+import { CloseBehaviorDialog } from './components/CloseBehaviorDialog';
 import { MetricsPanel } from './components/MetricsPanel';
 import { useUpdater } from './hooks/useUpdater';
 import type { AppSettings } from './types';
@@ -200,6 +202,34 @@ export default function App() {
     }, AUTO_CHECK_INTERVAL_MS);
     return () => clearInterval(id);
   }, [autoCheck]);
+
+  // 托盘菜单文案：i18n 真源在前端，语言切换时（t 仅随 lang 变化）重新下发。
+  // 后端在托盘尚未就绪时静默忽略；StrictMode 双挂载重复 invoke 幂等无害。
+  useEffect(() => {
+    invoke('set_tray_labels', { show: t('tray.show'), quit: t('tray.quit') }).catch(() => {});
+  }, [t]);
+
+  // 关闭行为询问：用户未选择过关闭偏好时，点窗口 X 由后端 emit 触发。
+  // 监听随组件卸载解除（StrictMode 挂载-卸载-挂载后不留残留回调）。
+  const [closePromptOpen, setClosePromptOpen] = useState(false);
+  useEffect(() => {
+    let disposed = false;
+    let unlisten: (() => void) | undefined;
+    listen('window-close-prompt', () => setClosePromptOpen(true)).then((u) => {
+      if (disposed) u();
+      else unlisten = u;
+    });
+    return () => {
+      disposed = true;
+      unlisten?.();
+    };
+  }, []);
+  // 弹窗决策落点：remember 时后端固化偏好；「退出」路径上后端停服并退出进程，
+  // invoke 无响应属预期，故 catch 吞掉连接中断类错误。
+  const resolveClosePrompt = (minimize: boolean, remember: boolean) => {
+    setClosePromptOpen(false);
+    invoke('resolve_close_choice', { minimize, remember }).catch(() => {});
+  };
 
   // 「分享配置」：复制当前选中配置的【已落盘快照】（不含未保存改动）。
   // 快照取 default 模板(defaultConfig) 或 命名配置(configs[activeName])，
@@ -488,6 +518,11 @@ export default function App() {
           setPendingRestore(false);
         }}
         onCancel={() => setPendingRestore(false)}
+      />
+      <CloseBehaviorDialog
+        open={closePromptOpen}
+        onDecide={resolveClosePrompt}
+        onCancel={() => setClosePromptOpen(false)}
       />
     </main>
   );

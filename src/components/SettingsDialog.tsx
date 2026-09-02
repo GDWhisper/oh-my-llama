@@ -37,6 +37,8 @@ export function SettingsDialog({
   const [autoCheck, setAutoCheck] = useState(false);
   const [proxySaved, setProxySaved] = useState(false);
   const [proxyError, setProxyError] = useState('');
+  // 窗口关闭行为三态：null = 每次询问（未选择过的默认），true = 最小化到托盘，false = 直接退出。
+  const [closePref, setClosePref] = useState<boolean | null>(null);
 
   useEffect(() => {
     if (!open) return;
@@ -70,12 +72,22 @@ export function SettingsDialog({
       .then((s) => {
         setProxy(s.update_proxy ?? '');
         setAutoCheck(Boolean(s.auto_check_updates));
+        setClosePref(s.minimize_to_tray ?? null);
       })
       .catch(() => {
         setProxy('');
         setAutoCheck(false);
+        setClosePref(null);
       });
   }, [open]);
+
+  // 切换「关闭窗口行为」并立即落盘：乐观回填，再以后端返回值校准。
+  const saveClosePref = (pref: boolean | null) => {
+    setClosePref(pref);
+    invoke<AppSettings>('set_close_pref', { pref })
+      .then((s) => setClosePref(s.minimize_to_tray ?? null))
+      .catch(() => {});
+  };
 
   // 保存「更新代理 + 自动检查」两项（settings.json），二者一并写入，互不覆盖。
   // 代理在「保存」按钮处落盘（见 onSaveProxy），自动检查开关则在勾选时即时落盘。
@@ -158,6 +170,43 @@ export function SettingsDialog({
               <div className="settings-proxy-ok">{t('settings.updateProxySaved')}</div>
             )}
             {proxyError && <div className="settings-proxy-err">{proxyError}</div>}
+          </div>
+
+          <div className="settings-section">
+            <div className="settings-section-head">
+              <span className="settings-label">{t('settings.windowClose')}</span>
+              <span className="settings-hint">{t('settings.windowCloseHint')}</span>
+            </div>
+            <label className="settings-check-row">
+              <input
+                type="radio"
+                name="close-pref"
+                className="settings-checkbox"
+                checked={closePref === null}
+                onChange={() => saveClosePref(null)}
+              />
+              <span className="settings-check-label">{t('settings.windowCloseAsk')}</span>
+            </label>
+            <label className="settings-check-row">
+              <input
+                type="radio"
+                name="close-pref"
+                className="settings-checkbox"
+                checked={closePref === true}
+                onChange={() => saveClosePref(true)}
+              />
+              <span className="settings-check-label">{t('settings.windowCloseTray')}</span>
+            </label>
+            <label className="settings-check-row">
+              <input
+                type="radio"
+                name="close-pref"
+                className="settings-checkbox"
+                checked={closePref === false}
+                onChange={() => saveClosePref(false)}
+              />
+              <span className="settings-check-label">{t('settings.windowCloseQuit')}</span>
+            </label>
           </div>
 
           <div className="settings-section">

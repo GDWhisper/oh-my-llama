@@ -9,7 +9,9 @@ use std::os::windows::process::CommandExt;
 use std::str::FromStr;
 use std::time::Duration;
 use sysinfo::System;
-use tauri::{AppHandle, Emitter, Listener, Manager};
+use tauri::menu::{Menu, MenuItem};
+use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
+use tauri::{AppHandle, Emitter, Manager};
 use tauri_plugin_opener::OpenerExt;
 #[cfg(windows)]
 use windows_sys::Win32::Foundation::{CloseHandle, HANDLE};
@@ -152,11 +154,14 @@ pub struct ServerLogLine {
 }
 
 // ── 应用级设置（与服务器启动配置 ServerConfig 解耦）────────────────────
-// 当前含三项：
+// 当前含四项：
 //  - update_proxy：留空 = 更新直连（不读任何代理环境变量）；填写 = 仅走用户显式指定的代理地址。
 //  - auto_check_updates：启动时是否自动检查更新（不打扰：仅弹右上提示+版本旁 NEW 徽标，
 //    绝不静默下载/安装；安装仍需用户在弹窗里显式确认）。
 //  - recent_servers：本机用过的 llama-server 可执行文件路径（最近使用优先），供前端输入框给候选。
+//  - minimize_to_tray：窗口关闭行为。None = 用户尚未选择过（点关闭按钮时弹窗询问）；
+//    Some(true) = 最小化到系统托盘（服务保持运行）；Some(false) = 直接退出。
+//    仅在用户主动选择（弹窗勾选记住 / 设置界面改选）时才落为 Some，询问弹窗关闭不算。
 // 仅持久化到 APPDATA/OhMyLlama/settings.json，不污染 configs.toml，
 // 也不干预用户代理客户端的全局/规则模式。
 // 注意：本结构是「整体读-改-写」落盘的，任何写 settings.json 的命令都必须先 load_settings
@@ -169,6 +174,8 @@ pub struct AppSettings {
     pub auto_check_updates: bool,
     #[serde(default)]
     pub recent_servers: Vec<String>,
+    #[serde(default)]
+    pub minimize_to_tray: Option<bool>,
 }
 
 fn settings_path(app_data: &std::path::Path) -> std::path::PathBuf {
@@ -249,6 +256,59 @@ async fn save_settings(
     // 立即生效：本次会话内下一次「检查更新」即按新代理策略（无需重启）。
     apply_update_proxy_env(&proxy);
     Ok(settings)
+}
+
+// ── 窗口关闭行为（最小化到托盘）────────────────────────────────────────
+// 设置界面落盘三态偏好：None = 每次询问，Some(true) = 最小化到托盘，Some(false) = 直接退出。
+// 返回落盘后的完整设置，前端用它回填（与 save_settings 风格一致）。
+#[tauri::command]
+async fn set_close_pref(pref: Option<bool>) -> Result<AppSettings, String> {
+    let app_data = resolve_app_data()?;
+    let mut settings = load_settings(&app_data);
+    settings.minimize_to_tray = pref;
+    save_settings_json(&app_data, &settings)?;
+    Ok(settings)
+}
+
+// 关闭询问弹窗的用户决策：remember 时把选择固化为偏好（此后不再询问），
+// 然后按本次决策执行——最小化 = 隐藏窗口（服务继续跑），退出 = graceful_exit（先停服）。
+// 退出路径上 app.exit 会在 Ok 之前终止进程，前端对该 invoke 的响应丢失属预期。
+#[tauri::command]
+async fn resolve_close_choice(
+    app: AppHandle,
+    minimize: bool,
+    remember: bool,
+) -> Result<(), String> {
+    if remember {
+        let app_data = resolve_app_data()?;
+        let mut settings = load_settings(&app_data);
+        settings.minimize_to_tray = Some(minimize);
+        save_settings_json(&app_data, &settings)?;
+    }
+    if minimize {
+        if let Some(win) = app.get_webview_window("main") {
+            let _ = win.hide();
+        }
+    } else {
+        graceful_exit(&app);
+    }
+    Ok(())
+}
+
+// 托盘菜单文案下发：i18n 真源在前端 messages.ts，语言切换/启动时由前端调用。
+// 按 ID 重建菜单（事件 handler 挂在托盘上，与菜单实例无关），未就绪时静默跳过。
+#[tauri::command]
+async fn set_tray_labels(app: AppHandle, show: String, quit: String) -> Result<(), String> {
+    let Some(tray) = app.tray_by_id(TRAY_ID) else {
+        return Ok(());
+    };
+    let show_item = MenuItem::with_id(&app, TRAY_ID_SHOW, &show, true, None::<&str>)
+        .map_err(|e| e.to_string())?;
+    let quit_item = MenuItem::with_id(&app, TRAY_ID_QUIT, &quit, true, None::<&str>)
+        .map_err(|e| e.to_string())?;
+    let menu = Menu::with_items(&app, &[&show_item, &quit_item]).map_err(|e| e.to_string())?;
+    tray.set_menu(Some(menu)).map_err(|err| err.to_string())?;
+    Ok(())
 }
 
 // ── llama-server 路径历史（最近使用）───────────────────────────────────
@@ -392,22 +452,95 @@ pub fn run() {
             remove_recent_server,
             read_settings,
             save_settings,
+            set_close_pref,
+            resolve_close_choice,
+            set_tray_labels,
             get_system_metrics,
             get_param_registry
         ])
         .setup(|app| {
-            let app_handle = app.handle().clone();
-            let _ = app_handle
-                .clone()
-                .listen("tauri://close-requested", move |_| {
-                    // listen 回调是同步闭包，stop_server_inner 是 async；
-                    // 必须 block_on 真正执行，否则 future 会被直接丢弃、服务端不会被停止。
-                    let _ = tauri::async_runtime::block_on(stop_server_inner(&app_handle));
-                });
+            // ── 系统托盘 ────────────────────────────────────────────────
+            // 左键单击 = 显示主窗口；右键 = 菜单（显示/退出）。菜单文案的 i18n 真源在前端，
+            // 启动后由 set_tray_labels 按 t() 下发，此处英文仅为前端尚未就绪时的兜底。
+            let show_item = MenuItem::with_id(app, TRAY_ID_SHOW, "Show", true, None::<&str>)?;
+            let quit_item = MenuItem::with_id(app, TRAY_ID_QUIT, "Quit", true, None::<&str>)?;
+            let tray_menu = Menu::with_items(app, &[&show_item, &quit_item])?;
+            TrayIconBuilder::with_id(TRAY_ID)
+                .icon(
+                    app.default_window_icon()
+                        .expect("bundle icon missing")
+                        .clone(),
+                )
+                .tooltip("Oh My Llama")
+                .menu(&tray_menu)
+                // 左键不弹菜单：左键单击直接恢复主窗口，菜单留给右键（Windows 惯例）。
+                .show_menu_on_left_click(false)
+                .on_menu_event(|app, event| match event.id.as_ref() {
+                    id if id == TRAY_ID_SHOW => show_main_window(app),
+                    id if id == TRAY_ID_QUIT => graceful_exit(app),
+                    _ => {}
+                })
+                .on_tray_icon_event(|tray, event| {
+                    if let TrayIconEvent::Click {
+                        button: MouseButton::Left,
+                        button_state: MouseButtonState::Up,
+                        ..
+                    } = event
+                    {
+                        show_main_window(tray.app_handle());
+                    }
+                })
+                .build(app)?;
             Ok(())
+        })
+        .on_window_event(|window, event| {
+            // ── 窗口关闭分流（唯一关闭入口）─────────────────────────────
+            // 此前关窗停服靠 tauri://close-requested 事件，但该事件在 prevent_close
+            // （托盘隐藏）时同样会发出，会把仍在运行的服务误停。故改为在此统一分流：
+            // 只有真正退出（Some(false) / 弹窗选退出 / 托盘退出）才走 graceful_exit 停服；
+            // 托盘隐藏时服务保持运行；未选择过时 prevent 后交前端弹窗询问。
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                api.prevent_close();
+                let app = window.app_handle();
+                // 读盘一次拿当前偏好：关闭是低频操作，小 JSON 的同步读可接受，
+                // 换取「设置落盘后下一次关窗立即生效」而无需内存态同步。
+                let pref = resolve_app_data()
+                    .ok()
+                    .map(|dir| load_settings(&dir).minimize_to_tray)
+                    .unwrap_or(None);
+                match pref {
+                    Some(true) => {
+                        let _ = window.hide();
+                    }
+                    Some(false) => graceful_exit(app),
+                    None => {
+                        let _ = app.emit("window-close-prompt", ());
+                    }
+                }
+            }
         })
         .run(tauri::generate_context!())
         .expect("error while running oh my llama");
+}
+
+// ── 托盘与退出路径 ─────────────────────────────────────────────────────
+const TRAY_ID: &str = "main-tray";
+const TRAY_ID_SHOW: &str = "tray-show";
+const TRAY_ID_QUIT: &str = "tray-quit";
+
+fn show_main_window(app: &AppHandle) {
+    if let Some(win) = app.get_webview_window("main") {
+        let _ = win.unminimize();
+        let _ = win.show();
+        let _ = win.set_focus();
+    }
+}
+
+// 唯一退出路径：先停受管服务再退出（与旧 tauri://close-requested 行为一致）。
+// 停服失败不阻断退出：进程都要结束了，状态刷不回前端无意义。
+fn graceful_exit(app: &AppHandle) {
+    let _ = tauri::async_runtime::block_on(stop_server_inner(app));
+    app.exit(0);
 }
 
 // ── 多配置管理：命名配置库 + 默认配置（工厂默认值，只读模板）────────────
@@ -2227,6 +2360,7 @@ enabled_advanced_params = ["ctx_size"]
                 "F:/llama-vulkan/llama-server.exe".into(),
                 "F:/llama/llama-server.exe".into(),
             ],
+            minimize_to_tray: None,
         };
         save_settings_json(&dir, &settings).expect("save settings");
         let loaded = load_settings(&dir);
@@ -2243,6 +2377,34 @@ enabled_advanced_params = ["ctx_size"]
         let legacy = load_settings(&dir);
         assert!(legacy.auto_check_updates);
         assert!(legacy.recent_servers.is_empty());
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn minimize_to_tray_pref_round_trip_and_legacy_default() {
+        // 缺字段 = 用户从未选择过（None），关闭时弹窗询问——旧 settings.json 必须如此解析。
+        let legacy: AppSettings =
+            serde_json::from_str(r#"{"update_proxy":"","auto_check_updates":false}"#)
+                .expect("parse legacy settings");
+        assert_eq!(legacy.minimize_to_tray, None);
+
+        // 三态往返：Some(true)=托盘 / Some(false)=退出 落盘后原样读回。
+        let dir = std::env::temp_dir().join(format!("llama_tray_test_{}", std::process::id()));
+        let _ = std::fs::create_dir_all(dir.join("OhMyLlama"));
+        for pref in [Some(true), Some(false), None] {
+            let settings = AppSettings {
+                minimize_to_tray: pref,
+                ..AppSettings::default()
+            };
+            save_settings_json(&dir, &settings).expect("save settings");
+            assert_eq!(load_settings(&dir).minimize_to_tray, pref);
+        }
+
+        // 显式写出的 null（None 的 JSON 表示）也要能读回 None，不得报错。
+        std::fs::write(settings_path(&dir), r#"{"minimize_to_tray":null}"#)
+            .expect("write null pref");
+        assert_eq!(load_settings(&dir).minimize_to_tray, None);
 
         let _ = std::fs::remove_dir_all(&dir);
     }
