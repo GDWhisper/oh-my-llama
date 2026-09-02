@@ -4,6 +4,22 @@
 
 > 本文件为**详细改动历史**（含涉及的文件与实现机制）；GitHub Release 页面为对应版本的**总结性**说明。
 
+## [0.1.7] - 2026-09-02
+
+### 新增功能
+- **关闭窗口可最小化到系统托盘**：`src-tauri/Cargo.toml` 为 tauri 启用 `tray-icon` feature；`src-tauri/src/lib.rs` 创建托盘——左键单击恢复窗口，右键菜单「显示 / 退出」，菜单文案由前端经 `set_tray_labels` 命令按 i18n 下发（切语言后同步）。关闭分流收拢到 `on_window_event`：选托盘时仅隐藏窗口、服务照常运行；退出统一走 `graceful_exit` 先停服再退出，替换原先端 `tauri://close-requested` 监听（`prevent_close` 下该事件仍会发出，曾会在托盘场景误停服务）。`AppSettings` 新增 `minimize_to_tray` 三态偏好（`None`=每次询问 / `Some(true)`=托盘 / `Some(false)`=直接退出），旧 `settings.json` 缺字段按 `None` 解析、向后兼容。前端新建 `src/components/CloseBehaviorDialog.tsx`：首次关闭窗口时弹窗询问，勾选「记住选择」固化偏好；设置浮窗新增「关闭窗口时」三选一。`src/types.ts` 同步 `AppSettings`，`src/i18n/messages.ts` 补双语文案，`src/App.tsx` 接线。
+- **llama-server 路径「输入 + 候选」组合框**：`src/components/PathField.tsx` 由纯输入框升级为聚焦即弹候选列表。候选两来源：本机最近启动成功过的路径（`settings.json` 新增 `recent_servers` 字段，MRU 上限 10，`lib.rs` 在启动成功时经 `remember_recent_server` 记录）+ 各命名配置里已填的路径（每次现扫 `configs.toml`，不落盘、不改配置结构），因此首次启动前也有内容。判重统一走 `server_key`（trim + `\` 转 `/` + 小写），与前端候选过滤同构，避免「看着一样其实两行」；配置路径按 `server_key` 排序补在后面，抵消 HashMap 迭代顺序不稳定。被命名配置占用的路径不显示删除 ×；`save_settings` 改为读-改-写，避免新字段覆盖 `settings.json` 其他设置。新增 `list_recent_servers` 命令与 `ServerCandidate` 类型（`src/types.ts` 同步），`src/components/BasicParamsPanel.tsx` 换用组合框。
+- **配置命名弹窗「填入模型名称」按钮**：`src/components/NameDialog.tsx` 新增一键把所选模型文件名回填到名称输入框（自动去掉目录与 `.gguf` 后缀，`src/lib/advanced.ts` 新增 `modelBasename`）。三种弹窗形态取各自候选：「另存为」取当前表单模型，「重命名」取被重命名配置的模型（下拉框可重命名非激活配置，不能沿用表单值），「新建空配置」无候选则不显示按钮。按钮 `mousedown` 阻止默认行为以保持输入框焦点，回填后回车仍是提交。`src/hooks/useServer.ts` 提供各形态候选模型，`src/i18n/messages.ts` 补双语文案。
+- **应用内展示更新说明**：更新弹窗原先只有占位正文（`latest.json.notes` 恒为空），用户在应用内看不到新版本改了什么。新建 `src/components/ReleaseNotes.tsx` 渲染 Markdown 子集（标题 / 列表 / 引用 / 粗体 / 链接），`ready` 态保留 version/body 在「重启安装」确认界面继续展示；新增「在 GitHub 查看完整说明」链接，`REPO_URL` 抽到 `src/lib/repo.ts` 与设置页共用。CI `.github/workflows/release.yml` 新增「Read release notes」步骤，按 tag 名读 `.dev_docs/release-notes-vX.Y.Z.md` 注入 `releaseBody`（同时落 GitHub Release 正文与 `latest.json.notes`）；发布指南与模板改为要求说明文件在打标签前随版本号一起 commit。
+
+### 功能优化
+- **轻量提示（toast）可手动关闭**：原 toast 为纯 div + 2.2s `setTimeout`，鼠标悬停也会消失、误操作时看不清内容。抽成 `src/components/Toast.tsx`：底部进度条动画走完才关闭，悬停暂停动画，点 × 立即关闭；消失时机直接监听该动画的 `animationend`，倒计时与动画同源、不会与 CSS 时长失步；`src/hooks/useServer.ts` 只存消息与用于重挂载重置动画的序号，避免每帧刷新进度导致整个 App 重渲染。
+- **设置浮窗分组卡片化**：`src/components/SettingsDialog.tsx` 选项按组以卡片呈现，选项行整行可点、图标辅助扫读（`src/App.css` 配套样式），降低长表单的视觉密度。
+- **自动检查更新对已忽略版本静默**：`src/hooks/useUpdater.ts` 新增 `dismissedRef`——用户点过「以后再说」或关闭弹窗的版本，自动检查不再重复弹提示与徽标，直到出现更高版本；手动检查不受此限制（那是用户主动要的反馈）。
+
+### Bug 修复
+- **手动「检查更新」被误判为自动检查**：设置页按钮 `onClick={onCheckUpdate}` 把点击事件对象透传进 `check(auto)`，事件对象为 truthy 被当成自动检查——v0.1.6 中手动检查无更新时毫无反馈、发现更新也不弹主窗（仅角落提示）。`check` 签名改为 `auto?: boolean` 且只认字面 `true`（`auto === true`），手动检查恢复正常弹窗与「已是最新」反馈。
+
 ## [0.1.6] - 2026-08-27
 
 ### 新增功能
