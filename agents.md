@@ -1,177 +1,103 @@
-# agents.md — 智能体协作准则（AI Agent Guidelines）
+# AGENTS.md — oh-my-llama 智能体操作规范
 
-> **适用范围**：任何在本项目（`oh-my-llama`，Tauri 2 + React/TypeScript 桌面应用）中工作的 AI 代码代理、代码生成模型或自动化助手，**必须**严格遵守本文件。本文件优先级高于模型的默认习惯。
->
-> **如何使用**：每次动手改代码前先读完本文件；当任务触及"停止并请示"条款时，先停、先问，不要自行推进。
->
-> **动手前另请重点阅读文末「七、不得回退的工程护栏」**——其中列出的工程化不变量禁止以任何理由回退或绕过。
+> 动手前先读完本文件：这里只记录**读代码、看配置、跑命令推断不出来**的信息，优先级高于模型默认习惯。产品介绍见 `README.md`，发布全流程见 `.dev_docs/release-guide.md`，均不在此重复。
 
----
+## 本文件的维护规范（修改本文件前先读）
 
-## 〇、当前工程结构（动手前必读）
+- **准入测试**：每条新增内容必须同时满足 ① 新 Agent 不读本文件、只读代码/配置/跑命令**推断不出来**；② 搞错了**会出问题**。两条缺其一，不写。
+- **禁止写入**：易腐快照（命令数、测试数、组件清单、目录树、版本号）；配置文件与 lint 规则的内容复述（只准给链接）；与 README / `.dev_docs/` 重复的介绍性文字；「保持简洁」「高质量」之类无法判定违反与否的模糊指令；TODO 占位；密钥等敏感信息。
+- **命令必须实测存在**（`package.json` / CI / scripts 里找得到）才可写入；规则必须能回答「违反了如何指出」。
+- 新增前先找可否**更新既有条目**；条目变得可推断或已过时时，**删除**而不是打补丁。
+- 拿不准该不该写 → 不写。本文件每次对话都进上下文，啰嗦稀释重点。
 
-本项目已完成 P0→P2 整改与 P3 工程化加固（lint/format 门禁、默认值后端单一真源、release 构建冒烟）。任何改动都**不得破坏以下已确立的结构与不变量**；不清楚某段代码为何存在时，先读完本节与第七节，不要"顺手简化"。
+## 定位与导航
 
-### 目录与职责
+Oh My Llama：管理 `llama-server` 启动配置、参数与日志的桌面工具。Tauri 2 双层架构：`src/`（React/TS 表现层）只经 invoke 桥与后端通信；`src-tauri/src/`（Rust）承载进程、文件、系统交互。
+
+| 位置 | 职责 |
+|---|---|
+| `src/hooks/useServer.ts` | 前端状态与命令聚合点；配置值全部来自后端 |
+| `src/types.ts` | IPC 类型契约，必须与 Rust 命令保持同步 |
+| `src-tauri/src/lib.rs` | 命令注册（`generate_handler!`）、进程管理、持久化；单元测试全在文件尾 `mod tests` |
+| `src-tauri/src/params.rs` | 高级参数注册表 —— **生成文件**（见「架构约束」第 6 条） |
+| `src/i18n/messages.ts` | zh/en 字典，zh 为键集唯一真源 |
+| `.dev_docs/` | 发布指南、Release Note 模板、工程化评审报告 |
+
+## 常用命令
+
+```bash
+npm install
+npm run tauri dev                    # 全应用开发，Vite 端口 6060
+npm run check                        # 全量门禁 = tsc + eslint + prettier + cargo fmt --check + clippy -D warnings
+cargo test --lib --manifest-path src-tauri/Cargo.toml                     # 单元测试
+cargo test --lib --manifest-path src-tauri/Cargo.toml build_server_args   # 跑单个测试（按名过滤）
+npm run tauri build                  # 构建安装包
+npm run lint:fix                     # eslint 自动修复
+npm run format                       # prettier 格式化
+powershell scripts/dev-server.ps1 -Action start|stop|restart              # 管理 dev server（含端口占用处理）
 ```
-oh-my-llama/                    # 前端 React/TS + 构建配置
-├── src/
-│   ├── main.tsx                   # 入口，仅挂载 <App/>
-│   ├── App.tsx                    # 纯组合根；含"加载配置中…"门控（config 为 null 时拦截渲染）
-│   ├── types.ts                   # 前后端类型契约（ServerConfig / ServerStatus / ServerLogLine）
-│   ├── hooks/useServer.ts         # 状态 + 命令聚合；配置值全部来自后端，无硬编码默认值
-│   ├── lib/advanced.ts            # 高级参数常量与纯函数工具
-│   └── components/                # 6 个展示型组件（props 强类型，无业务逻辑）
-│       ├── ControlPanel / LogPanel / BasicParamsPanel
-│       └── AdvancedParamsPanel / PreviewBar / ConfigPanel
-│   ├── hooks/useUpdater.ts       # 更新通道状态机（方案 A：手动检查、可见可取消）
-│   └── components/                # 含 SettingsDialog（语言+关于）与 UpdateDialog（进度/取消/安装确认）
-├── src-tauri/
-│   ├── src/lib.rs                 # 9 个 IPC 命令 + 5 个单元测试；ServerConfig::default() 为默认值唯一真源
-│   ├── src/main.rs                # 入口，调用 lib.rs 的 run()
-│   ├── Cargo.toml                 # 依赖精简，features 显式
-│   ├── tauri.conf.json            # CSP 显式（非 null）；assetProtocol 已禁用
-│   └── capabilities/default.json  # 最小权限：core:default + opener:default
-└── .dev_docs/engineering-readiness.md   # 工程化就绪评审报告（含 P3 各状态）
-```
 
-### 已确立的关键不变量
-- **默认值唯一真源在后端**：`ServerConfig::default()`（Rust）+ `get_default_config` 命令；前端 `useServer` 挂载时并行拉取 `read_config`+`get_default_config` 并占位回退，`config` 初始 `null`。前端无任何硬编码默认值。
-- **门禁必须常绿**：`npm run check`（tsc + eslint + prettier + cargo fmt + clippy `-D warnings`）与 `cargo test --lib`（5 项）必须保持通过。
-- **安全配置已收紧**：CSP 显式、asset 协议禁用、capabilities 最小权限——不得回退。
-- **Git 工作流**：dev 分支为集成分支；重大改动先落 dev，勿直提交 main。
+- 门禁必须常绿：提交前跑 `npm run check`；改了 Rust 逻辑再跑 `cargo test --lib`。CI（`.github/workflows/build-check.yml`）在 dev 每次 push 时三平台跑同一门禁并完整打包。
+- 门禁红了修根因；禁止用 `#[allow]`、删检查项、放宽规则等方式转绿。
 
-### IPC 命令清单（新增命令须同步三处）
-`read_config` · `get_default_config` · `save_config` · `get_status` · `start_server` · `stop_server` · `open_preview` · `read_logs` · `clear_logs`
-> 新增 / 修改命令时：① 在 `invoke_handler!` 注册；② 同步 `src/types.ts`；③ 确认 capabilities 覆盖（**自定义 app 命令默认允许**，仅插件命令与核心 JS API 才需显式授权，不要因此误加冗余 permission）。
+## 架构约束（这些「看起来反常」但有意为之，不要顺手修正）
 
----
+1. **默认值唯一真源在后端**：默认值只定义在 `ServerConfig::default()`（lib.rs）；前端经 `get_default_config` 获取，`App.tsx` 在 config 为 null 时拦截渲染（「加载配置中…」）。前端禁止出现任何硬编码 `ServerConfig` 默认值字面量。
+2. **版本号唯一真源是 `src-tauri/tauri.conf.json` 的 `"version"`**。`Cargo.toml` 与 `package.json` 刻意省略 version 字段；`Cargo.lock` 里 `oh-my-llama 0.0.0` 是预期状态，**不要回填**。发版只改这一处。
+3. **llama-server 经伪终端（portable-pty）启动**：根治管道下 stdout 块缓冲、日志不实时的问题。不要改回普通 `std::process` 管道。
+4. **进程守护平台双分支**：Windows 走 windows-sys Job Object（KILL_ON_JOB_CLOSE），非 Windows 走 libc 进程组；两套 `cfg` 门控都必须保留。
+5. **`useServer` 内注册 Tauri 事件监听必须用 `listenGuarded`**：StrictMode 双挂载曾导致监听残留、日志双份。
+6. **`params.rs` 是生成文件**：由 `scripts/gen_structured_params.py`（仅开发期）整体生成。新增/修改结构化高级参数 → 改脚本里的 PARAMS 表并重跑脚本，不要手改 `params.rs`。
+7. **i18n**：用户可见文案一律走 `t()`；新键必须同时加进 `messages.ts` 的 zh 与 en（zh 用 `as const` 固定键集，en 缺键会编译报错）。
 
-## 一、核心准则（Core Principles）
+## 边界与禁区（历史整改所得，禁止回退）
 
-### 1. 长期主义（Long-termism）
-- 一切改动以**项目长期可维护性**为第一优先级。宁可多花一步做对，也不图一时省事留下技术债。
-- 禁止"能跑就行"式补丁：不依赖巧合、隐藏副作用、复制粘贴或注释掉报错来绕过问题。
-- 代码要像写给未来的维护者（包括你自己）看的说明书一样清晰；复杂逻辑必须有注释解释**为什么**，而非复述**是什么**。
+- 安全配置：`tauri.conf.json` 的 `csp` 保持显式策略（禁止置 `null`）；`assetProtocol` 保持禁用；`capabilities/default.json` 保持最小权限，不为图省事批量放开。
+- 禁止删除 `App.tsx` 的配置加载门控，或把 `config` 初始值改回硬编码对象。
+- 禁止重新引入源码文本替换补丁脚本（`patch_*.py` / `patch.diff` 之类）。
+- 禁止提交：`dist/`、`src-tauri/target/`、`src-tauri/gen/schemas/`、`.codegraph/`、`tmp/`；提交必须显式排除 `.claude/` 与 `.mcp.json`（外来 AI 工具脚手架）——用显式 `git add <文件列表>`，不要 `git add -A`。
+- 禁止绕过门禁与钩子：`--no-verify`、`--ignore-scripts`、去掉 clippy `-D warnings`、从 check 中剔除 eslint / prettier。
+- 缺陷修复先复现、定位根因、归层归类；禁止症状层打补丁（`unwrap` 吞错、`sleep` 绕时序、放宽权限掩盖越界）。
 
-### 2. 严守分层（Strict Layering）
-本项目为标准 Tauri 2 双层架构，层级边界不可混淆：
+## 必须先停下来请示（STOP & ASK）
 
-- **表现层 / 前端（`src/`，React + TypeScript）**
-  - 只负责 UI 渲染与用户交互；通过 `@tauri-apps/api` 的 `invoke` 调用后端命令。
-  - **禁止**在前端直接实现进程管理、文件读写、系统交互等本属后端的逻辑。
-  - **禁止**在前端硬编码业务默认值之外的系统路径。
+落入以下任一情形时停止编码，说明后等待明确指示，不得自行推进：
 
-- **核心层 / 后端（`src-tauri/src/`，Rust + Tauri）**
-  - 只通过 `#[tauri::command]` 暴露能力、用 `tauri::State` 管理状态、用 `std::process` 管理子进程。
-  - **禁止**后端命令直接操作 DOM 或返回未经序列化的内部类型。**禁止在代码里硬编码**端口/域名/版本/binary 名等配置项。
+1. 新增 npm / crates 依赖，或破坏性框架/语言版本升级——须说明现有手段为何不足、候选的安全/维护/体积成本。
+2. 破坏双层分层（前端直接做进程/文件/系统操作，后端碰 DOM），或修改共享状态结构。
+3. 多方案在性能/可维护性/复杂度上取舍明显且无法判定最优——给 2–3 个候选。
 
-- **配置层（`tauri.conf.json`、`capabilities/`、`Cargo.toml`、`package.json`、`vite.config.ts`）**
-  - 能力、权限、构建与打包的单一事实来源；权限遵循**最小可用**原则。
+请示必须包含：背景、已排除的简单方案、每个候选的影响（触及文件/层、新依赖、是否触碰上述禁区、回退难度）、你的推荐及理由。禁止只抛选项不表态。
 
-- 跨层通信**只**走 Tauri 的 invoke 桥（命令 + 类型契约），不绕开契约私自耦合前后端。
+## 常见任务配方
 
-### 3. 缺陷修复必须追溯根因（Root-cause First）
-- 修复任何缺陷前，先**复现并定位根因**，从软件工程角度判断它属于哪一层、哪一类问题（逻辑错误 / 边界条件 / 并发 / 资源泄漏 / 配置错误）。
-- **禁止**在症状层打补丁：例如用 `unwrap` 吞错、用 `sleep` 等时序手法绕过竞态、用更宽松的权限掩盖越界访问、用文本替换脚本（patch 类脚本）覆盖源码。
-- 修复后必须验证：同一根因不应以另一种形式复发；若修复会触碰其他层，需回到第二节的停止条款评估。
+| 要做 | 动哪里 |
+|---|---|
+| 新增 IPC 命令 | ① 加 `#[tauri::command]` 并注册进 `generate_handler!`；② 同步 `src/types.ts`；③ 自定义 app 命令默认可用，仅**插件**命令需在 `capabilities/default.json` 显式授权 |
+| 新增配置字段 | 后端 `ServerConfig` 加字段、`default()` 给默认值（唯一真源）→ 同步 `src/types.ts` → 前端使用；前端不写默认值字面量 |
+| 新增/修改高级参数 | 改 `scripts/gen_structured_params.py` 的 PARAMS 表 → 重跑生成 → 补 i18n 双语文案 |
+| 新增用户可见文案 | `src/i18n/messages.ts` zh/en 同时加键 + 组件用 `t()` |
+| 发布版本 | 先读 `.dev_docs/release-guide.md`；Release Note 复制 `.dev_docs/release-note-template.md`，不得另起炉灶 |
 
-###  4. 奥卡姆剃刀与可维护性的平衡（抽象有度）
-- **默认不增实体**：没有真实收益时，不引入多余的抽象层、配置项、依赖、工具函数或开关；新实体须由**当前已确证**的需求证明，而非"将来可能用到"。
-- **但出现以下任一信号时，必须主动增加抽象层或拆分模块来解耦**——此时"当下代码量最少"要让位于"未来改起来省力"：
-  1. **逻辑重复**：同一段判断 / 转换 / 校验 / 分支在 ≥2 处出现（含复制粘贴或近似实现），应抽出共享函数 / 模块 / 工具，确立单一真源。
-  2. **修改影响面大**：一处改动因耦合会牵动多个文件、多个层或多种命令，应引入边界（接口 / 适配器 / 状态机 / 注册表）把易变部分隔离，使改动收敛在局部。
-  3. **业务易变**：参数集、字段、外部协议或 UI 形态预期会持续扩展（例如「一键传参」的参数识别表），应以**数据驱动 + 类型安全**的表 / 配置 / 注册机制承载，而非散落的 `if/else` 与硬编码分支。
-- **判定准绳**：一个抽象层是否成立的唯一标准是——它是否降低了"未来修改同一类需求"的代价。若抽离后同类改动被收敛到一处、新增同类只需加一行数据，则抽象成立；若只是把一件事拆成三件却没缩小影响面，则属过度设计，应按奥卡姆剃刀回退。
-- 与「长期主义」（准则 1）一致：宁可为此多写一点样板与类型，也不要让未来的维护者为一次本应局部的修改去翻遍整个代码库。
----
+## 环境
 
-## 二、必须停止编码并请示的触发条件（STOP & ASK）
+- 开发机为 Windows，脚本为 PowerShell；Node ≥ 18（CI 用 22），Rust stable。
+- dev 与 main 工作树**共享 node_modules** 与端口 6060 → 同一时间只能跑一个 dev server，用 `scripts/dev-server.ps1` 启停。
+- 本目录是 **dev 工作树**；main 分支被另一工作树（`F:\llama_run\tauri-launcher`）占用，**此处不能 `git checkout main`**，dev→main 合并须到 main 工作树执行。改动先落 dev，勿直提交 main。
+- 跑 `gh` 前先 `unset HTTPS_PROXY HTTP_PROXY https_proxy http_proxy`（本机代理常未运行，直连报 EOF）；仓库 git 已设 `http.sslBackend openssl`，勿改。
+- 运行期配置存于 `%APPDATA%/OhMyLlama/configs.toml`（TOML）；updater 签名私钥仅存本地 `~/.tauri/oh-my-llama.key`，绝不入库（CI 经 secret 注入）。
 
-当任务落入以下任一情形时，**立即停止编写/修改代码**，向用户说明并等待明确指示，不得自行推进：
+## 测试约定
 
-### 情形 1：必须破坏现有分层架构，或修改核心基础类
-- 触发：必须破坏现有分层、修改核心基础类 / 共享状态结构、或新增大规模跨层耦合，才能完成当前任务。
-- 先停下来说明：将破坏哪一层、影响哪些已有调用方、是否存在**不破坏分层**的可行替代方案。
+- 只有 Rust 单元测试，全部位于 `src-tauri/src/lib.rs` 尾部 `mod tests`；前端无测试框架，UI 改动用 `npm run tauri dev` 手动自测。
+- 配置序列化往返、参数构建、PTY 读取、注册表唯一性等纯逻辑已有用例覆盖；改动相关逻辑须保持 `cargo test --lib` 绿，新增同类纯逻辑应补对应用例。
 
-### 情形 2：需引入新的外部依赖，或做重大框架升级
-- 触发：需要新增 npm / crates 依赖，或将框架或语言版本做破坏性升级（如 Tauri 1→2、React 大版本、Vite 大版本、Rust edition 变更等）。
-- 先停下来说明：为什么现有依赖不足以解决问题、候选依赖的安全 / 维护 / 体积成本、是否可用更轻量的原生方案。**若给出候选依赖选项，须逐条说明选中它的影响并给出你的推荐理由（格式见第三节）。**
+## 术语
 
-### 情形 3：多方案各有明显取舍，且无法判定最优
-- 触发：存在多种实现路径，在**性能 / 可维护性 / 复杂度**上有明显权衡，而当前信息不足以判断哪条更优。
-- 先停下来给出 2–3 个方案的对比（含取舍与你的倾向），由用户拍板；**不要替用户做架构决策**。**对比必须包含每个选项的影响与你的推荐理由（格式见第三节），不得只抛选项让用户盲选。**
+- **一键传参**：粘贴整段命令行，由 `src/lib/parseArgs.ts` 解析——已知参数归位字段，未知参数原样保留为自定义参数。
+- **配置分享**：一键复制启动参数到剪切板，产出的命令行与后端启动逻辑完全一致。
+- **方案 A（更新通道）**：内置 updater，手动检查、进度可见可取消；前端经 JS API 驱动 check/download/install，Rust 侧仅注册 Builder。
+- **门禁**：`npm run check` + `cargo test --lib`。
 
 ---
-
-## 三、请示时应当提供的内容
-
-每次停止请示，至少包含：
-
-- **背景**：要解决的真实问题是什么（不是"要改哪一行"）。
-- **已排除项**：已经考虑过但被否的简单方案及原因。
-- **候选方案**：对情形 2 / 3，列出 2–3 个候选方案（避免过多导致选择疲劳）。
-- **每个选项的影响（强制）**：以"选项"形式请示时，**禁止只罗列选项**——必须给每个选项用一两句话写清"选中它会带来什么影响"：改动触及哪些文件 / 层、是否引入新依赖及其安全 / 体积 / 维护成本、是否触碰既有不变量（见第七节）、后续回退难度等。让用户能在知情前提下判断，而不是盲选。
-- **推荐理由（强制）**：若你倾向于某个（或某几个）选项，**必须同时写明推荐原因**——为什么它更优、更符合本项目准则（长期主义 / 严守分层 / 奥卡姆剃刀 / 门禁常绿等），或为何其他方案次优。**禁止只抛选项、不表态、不给理由，把架构与取舍决策完全推给用户。**
-- **影响面**：预计改动触及哪些文件 / 层 / 对外契约（命令签名、权限、配置）。
-
-> **反例（禁止）**：只问"用 A 还是 B？"后附两个干瘪选项，不解释各自代价、也不表态。**正例**：给出 A/B，分别说明各自影响（A 引入 X 依赖、改动 Y 文件；B 不改依赖但需自写 Z、可维护性较差），并明确"推荐 A，因为……"。
-
----
-
-## 四、明确禁止的"速赢"陷阱（Don'ts）
-
-- 禁止用 `text.replace` 类脚本对源码做"文本手术"（会导致静默失效、版本历史失真）；所有改动交给版本控制。
-- 禁止以"本地能跑"为由关闭安全机制（如把 `tauri.conf.json` 的 `csp` 置 `null`、把 asset 协议 `scope` 放宽为 `**`）作为绕过手段。
-- 禁止把构建产物 / 工具运行时缓存（如 `dist/`、`target/`、`/gen/schemas/`、`.codegraph/`）提交进仓库。
-- 禁止让 Rust 命令与前端类型契约（`src/types.ts`）长期不一致而不同步。
-- 禁止以"门禁太严 / CI 太慢 / 本地能跑"等理由关闭或绕过 `npm run check` 中的任一环节（`cargo clippy -D warnings`、`eslint`、`prettier`、`cargo fmt --check`）；告警要修根因，不要靠 `#[allow]` 或删配置项掩盖（详见第七节）。
-
----
-
-## 五、工作流约定（建议）
-
-1. 动手前先读相关层代码，确认改动落点符合分层。
-2. 小步提交、单一职责；一次 commit 解决一个问题。
-3. 涉及命令签名 / 权限 / 配置变更时，同步更新 `types.ts`、capabilities 与文档。
-4. 不确定时，回到第二节的停止条款。
-
----
-
-## 七、不得回退的工程护栏（DO NOT REVERT）
-
-以下均为已落地的工程化成果，**禁止以"简化""本地能跑""门禁太严""CI 太慢"等任何理由回退或绕过**。回退会直接抵消历史整改，属本准则重点防范行为。
-
-1. **Lint / Format 门禁（`npm run check` 必须常绿）**
-   - 禁止移除 `eslint.config.js` / `.prettierrc.json` / `.prettierignore`，或从 `check:frontend` 中剔除 eslint / prettier。
-   - 禁止把 `check:rust` 的 `cargo clippy ... -D warnings` 改为不带 `-D warnings`，或给代码加 `#[allow(clippy::...)]` 让红变绿——**修根因，不修告警**。
-   - 提交前确保 `cargo fmt` 已执行，`cargo fmt --check` 不报错。
-
-2. **默认值后端单一真源**
-   - 禁止在前端重新引入 `DEFAULT_CONFIG`、`ADVANCED_DEFAULT` 或任何硬编码的 `ServerConfig` 默认值字面量。
-   - 禁止删除 `App.tsx` 的加载门控（`if (!config) return <加载中…>`）或将 `config` 初始值改回硬编码对象。
-   - 新增配置字段时，默认值**只在后端** `ServerConfig::default()` 定义一处，前端通过 `get_default_config` 获取。
-
-3. **安全配置已收紧（不可回退）**
-   - `tauri.conf.json` 的 `csp` 必须保持显式策略，**禁止置 `null`**。
-   - `assetProtocol` 保持禁用，**禁止重新启用**（除非确有前端使用 asset 协议的需求，并同步收紧 `scope` 而非放宽到 `**`）。
-   - `capabilities/default.json` 维持最小权限；新增权限须说明必要性，不得为"图省事"批量放开。
-
-4. **测试必须保留且常绿**
-   - `src-tauri/src/lib.rs` 的 5 个单元测试不得删除，不得用 `#[ignore]` 跳过来让门禁通过；改动相关逻辑后须使 `cargo test --lib` 仍绿。
-
-5. **禁止文本手术补丁**：不得重新引入 `patch_frontend.py` / `patch_rust.py` / `patch.diff` 之类的源码文本替换脚本（历史已清除，见第四节 Don'ts）。
-
-6. **提交纪律**
-   - 禁止 `git commit --no-verify`、`npm install --ignore-scripts` 等绕过门禁的手段。
-   - 重大改动先落 dev 分支，勿直提交 main；一次 commit 单一职责。
-
----
-
-## 八、文档索引（Document Index）
-
-本项目的详细参考文档位于 `.dev_docs/`。当任务触及下列任一触发条件时，**必须**先阅读对应文档再动手，不得凭默认习惯推进。
-
-- **`.dev_docs/release-guide.md`** — 当需要进行版本发布（提交 / 打标签 / 触发 CI / 编写 Release Note 或更新 CHANGELOG）时，**必须**阅读该文档。内含发布全流程、Git worktree 合并约定、`gh` 代理坑、「CHANGELOG=详细改动历史 / Release Note=总结性三段式（新增功能·功能优化·Bug 修复，不放下载栏目）」的硬性分工，以及**更新通道（方案 A 签名与 updater 产物）**的密钥/CI/发版章节。
-- **`.dev_docs/release-note-template.md`** — 发布时编写 GitHub Release Note 的**唯一真源模板**。顶部固定文案（「本版本亮点由发布 agent 基于 CHANGELOG 手动总结。详细条目见 CHANGELOG.md。」）+ 三大强制分类（新增功能 / 功能优化 / Bug 修复）+ 末尾「详细改动参考 CHANGELOG」。编写 Release Note 时**必须**复制此模板、不得另起炉灶。
-- **`.dev_docs/engineering-readiness.md`** — 当评估工程化就绪状态、审计 P3 门禁（lint/format/测试/安全配置），或判断是否可进入需求开发阶段时，**必须**阅读该文档。
+*本文件刻意未写入：目录树与组件清单（直接读代码，变化快）、lint/format 规则细节（见 `eslint.config.js` / `.prettierrc.json`）、IPC 命令全量清单（见 `lib.rs` 的 `generate_handler!`）、依赖与技术栈版本（见 `package.json` / `Cargo.toml`）、发布步骤细节（见 `.dev_docs/release-guide.md`）——抄进来即过时。*
