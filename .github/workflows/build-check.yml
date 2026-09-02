@@ -1,12 +1,12 @@
 name: Cross-platform Build Check
 
-# 跨平台编译/打包冒烟（不发版）：dev 分支每次 push 与手动触发时，
-# 在 Windows / Linux / macOS(arm64) 上验证 npm run check 门禁与 tauri 完整打包。
-# 目的：Windows 本地无法交叉验证的非 Windows 编译问题（cfg 门控、Linux 系统依赖、macOS 打包）
-# 在这里暴露；release.yml 只负责发版时真正产出 Release 资产。
+# 跨平台检查（不发版）：dev / main 每次 push 与手动触发时，在 Windows / Linux / macOS(arm64)
+# 上跑 npm run check 门禁（clippy 已做三平台编译检查）。tauri 完整打包冒烟只在 main 上执行——
+# dev 只检查不打包；合并进 main 时才验证非 Windows 的链接与打包问题（本机仅 Windows，
+# 无法交叉验证），发版时 release.yml 真正产出 Release 资产。
 on:
   push:
-    branches: [dev]
+    branches: [dev, main]
   workflow_dispatch:
 
 jobs:
@@ -46,10 +46,12 @@ jobs:
       - name: Run gates (tsc + eslint + prettier + fmt + clippy)
         run: npm run check
 
-      # 完整打包验证（不发布、不上传产物）。tauri.conf.json 的 createUpdaterArtifacts=true，
-      # 缺私钥时 tauri 会直接报错（实测 v2 行为：非"降级成功"），故注入与 release.yml 相同的
-      # 签名私钥 secret；产物带 .sig / latest.json 但仅留存在 runner，随 job 结束丢弃。
+      # 完整打包冒烟（不发布、不上传产物），仅在 main 上执行。tauri.conf.json 的
+      # createUpdaterArtifacts=true，缺私钥时 tauri 会直接报错（实测 v2 行为：非"降级成功"），
+      # 故注入与 release.yml 相同的签名私钥 secret；产物带 .sig / latest.json 但仅留存在
+      # runner，随 job 结束丢弃。
       - name: Build bundles (no release)
+        if: github.ref_name == 'main'
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
         run: npm run tauri build
