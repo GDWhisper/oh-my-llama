@@ -886,10 +886,25 @@ body {
   color: #111827;
 }
 
+/* 设置浮窗：分组多，比通用弹窗更宽、限高可滚动，组间留白也收得更紧 */
+.settings-modal {
+  width: min(420px, 90vw);
+  max-height: calc(100vh - 48px);
+}
+
+.settings-modal .modal-body {
+  gap: 12px;
+  overflow-y: auto;
+}
+
+/* 分组卡片：设置项增多后靠卡片边界与统一留白区分组，替代纯文本堆叠 */
 .settings-section {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 8px;
+  padding: 12px 14px;
+  border: 1px solid #e5e7eb;
+  border-radius: 12px;
 }
 
 .settings-section-head {
@@ -899,9 +914,22 @@ body {
 }
 
 .settings-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   font-size: 13px;
-  font-weight: 500;
+  font-weight: 600;
   color: #111827;
+}
+
+.settings-label svg {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.4;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  color: #9ca3af;
+  flex-shrink: 0;
 }
 
 .settings-hint {
@@ -934,6 +962,12 @@ body {
   box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.2);
 }
 
+/* 「保存」按钮与输入框等高，避免行内两个控件高度参差 */
+.settings-proxy-row .btn {
+  height: 32px;
+  padding: 0 12px;
+}
+
 .settings-proxy-ok {
   font-size: 12px;
   color: #16a34a;
@@ -957,6 +991,8 @@ body {
   align-items: center;
   justify-content: center;
   gap: 6px;
+  /* 两个语言按钮等分整行，让选择区看起来是刻意的一组 */
+  flex: 1 1 0;
   width: auto;
   /* 按字体大小自适应内边距与高度，避免固定大尺寸 */
   padding: 0.55em 1.1em;
@@ -984,12 +1020,17 @@ body {
   flex-shrink: 0;
 }
 
-/* 关于分组（设置浮窗内） */
+/* 关于分组（设置浮窗内）：标签在左、版本号与徽标在右 */
 .about-row {
   display: flex;
   align-items: center;
+  justify-content: space-between;
   gap: 8px;
-  margin-bottom: 10px;
+}
+.about-meta {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
 }
 .about-value {
   font-weight: 600;
@@ -1469,7 +1510,7 @@ button:disabled {
   background: #dc2626;
 }
 
-/* 设置浮窗内「自动检查」开关行 */
+/* 设置浮窗内「自动检查」开关行（关闭行为确认弹窗同样复用） */
 .settings-check-row {
   display: flex;
   align-items: center;
@@ -1490,10 +1531,21 @@ button:disabled {
   font-weight: 500;
   color: #111827;
 }
-/* 设置浮窗「关闭窗口行为」的多个单选项：纵向排列需要行间距
-   （「自动检查更新」是单行开关，不命中相邻选择器）。 */
-.settings-section .settings-check-row + .settings-check-row {
-  margin-top: 8px;
+
+/* 设置浮窗内的可点选项行（关闭行为单选组 / 自动检查开关）：
+   负 margin 让 hover 高亮铺满行宽、热区更大，行距由行内 padding 提供 */
+.settings-option-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 -8px;
+  padding: 5px 8px;
+  border-radius: 8px;
+  cursor: pointer;
+  user-select: none;
+}
+.settings-option-row:hover {
+  background: #f3f4f6;
 }
 
 /* 右上角自动检查提示（方案 A：自动检查发现新版本时的非打扰提示） */
