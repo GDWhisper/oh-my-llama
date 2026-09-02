@@ -37,7 +37,7 @@ npm run format                       # prettier 格式化
 powershell scripts/dev-server.ps1 -Action start|stop|restart              # 管理 dev server（含端口占用处理）
 ```
 
-- 门禁必须常绿：提交前跑 `npm run check`；改了 Rust 逻辑再跑 `cargo test --lib`。CI（`.github/workflows/build-check.yml`）在 dev/main 每次 push 时三平台跑同一门禁；完整打包冒烟仅在 main（dev 只检查不打包，发版资产由 release.yml 在 tag 时产出）。
+- 门禁必须常绿：提交前跑 `npm run check`；改了 Rust 逻辑再跑 `cargo test --lib`。CI（`.github/workflows/build-check.yml`）在 dev 每次 push 时三平台跑同一门禁并完整打包。
 - 门禁红了修根因；禁止用 `#[allow]`、删检查项、放宽规则等方式转绿。
 
 ## 架构约束（这些「看起来反常」但有意为之，不要顺手修正）
