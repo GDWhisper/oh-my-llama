@@ -111,6 +111,8 @@ export default function App() {
     clearAdvanced,
     setAdvancedEnabled,
     registry,
+    serverCandidates,
+    forgetServerPath,
     addStructuredKey,
     removeStructuredKey,
     setStructuredValue,
@@ -394,7 +396,13 @@ export default function App() {
             showToast={showToast}
           />
           {/* （追加提醒弹窗已移除） */}
-          <BasicParamsPanel config={config} models={models} onChange={setConfig} />
+          <BasicParamsPanel
+            config={config}
+            models={models}
+            serverCandidates={serverCandidates}
+            onForgetServerPath={forgetServerPath}
+            onChange={setConfig}
+          />
           <AdvancedParamsPanel
             config={config}
             adjustingAdvanced={adjustingAdvanced}

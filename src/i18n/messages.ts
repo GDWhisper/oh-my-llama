@@ -12,6 +12,7 @@ export const zh = {
   'common.delete': '删除',
   'common.saving': '保存中...',
   'common.browse': '浏览…',
+  'common.forgetCandidate': '从历史中移除',
   'common.close': '关闭',
   'common.save': '保存',
 
@@ -598,6 +599,7 @@ export const en: Record<MessageKey, string> = {
   'common.delete': 'Delete',
   'common.saving': 'Saving...',
   'common.browse': 'Browse…',
+  'common.forgetCandidate': 'Remove from history',
   'common.close': 'Close',
   'common.save': 'Save',
 

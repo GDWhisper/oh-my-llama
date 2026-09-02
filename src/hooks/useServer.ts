@@ -1,7 +1,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
-import type { ConfigsState, ParamSpec, ServerConfig, ServerLogLine, ServerStatus } from '../types';
+import type {
+  ConfigsState,
+  ParamSpec,
+  ServerCandidate,
+  ServerConfig,
+  ServerLogLine,
+  ServerStatus,
+} from '../types';
 import {
   ADVANCED_ORDER,
   OPTIONAL_ADVANCED_OPTIONS,
@@ -351,6 +358,48 @@ export function useServer() {
     };
   }, [config?.model_dir]);
 
+  // ── llama-server 路径候选（最近使用 + 命名配置里用过的路径）────────────────
+  // 合并逻辑全在后端：历史真源是 settings.json，配置路径每次现扫 configs.toml，
+  // 前端只读不算，因此无需 ref 镜像与竞态门控。
+  const [serverCandidates, setServerCandidates] = useState<ServerCandidate[]>([]);
+
+  const refreshServerCandidates = useCallback(async () => {
+    try {
+      setServerCandidates(await invoke<ServerCandidate[]>('list_recent_servers'));
+    } catch (err) {
+      console.error(err);
+    }
+  }, []);
+
+  // 从历史里忘掉一条（候选项上的 ×）：后端直接回传重算后的候选，省掉一次重拉。
+  const forgetServerPath = useCallback(async (path: string) => {
+    try {
+      setServerCandidates(await invoke<ServerCandidate[]>('remove_recent_server', { path }));
+    } catch (err) {
+      console.error(err);
+    }
+  }, []);
+
+  // 挂载拉一次；窗口重新聚焦 / 标签页可见时重拉——与模型目录重扫同一套路，
+  // 因为候选的真源是「启动过没启动过、配置里填了什么」，外部改动切回窗口即应反映。
+  useEffect(() => {
+    void refreshServerCandidates();
+    const refresh = () => {
+      void refreshServerCandidates();
+    };
+    const onVisibility = () => {
+      if (document.visibilityState === 'visible') {
+        refresh();
+      }
+    };
+    window.addEventListener('focus', refresh);
+    document.addEventListener('visibilitychange', onVisibility);
+    return () => {
+      window.removeEventListener('focus', refresh);
+      document.removeEventListener('visibilitychange', onVisibility);
+    };
+  }, [refreshServerCandidates]);
+
   // 即时刷新（状态探测 + 模型存在性/大小复查）：供 1.5s 轮询与「系统唤醒」事件共用，
   // 单一真源，避免轮询体重复。loadStatus/checkModelExists/loadModelSize 仅依赖稳定 ref
   // 与状态 setter，闭包恒稳定，故 useCallback 依赖为空。
@@ -616,6 +665,8 @@ export function useServer() {
     try {
       await invoke('start_server', { config });
       await loadStatus();
+      // 后端只在启动成功后记账，这里重拉一次即可让新路径立刻出现在候选里
+      void refreshServerCandidates();
     } catch (err) {
       const message = err instanceof Error ? err.message : t('err.startFallback');
       setError(message);
@@ -863,6 +914,8 @@ export function useServer() {
     availableAdvancedOptions,
     enabledAdvancedKeys,
     registry,
+    serverCandidates,
+    forgetServerPath,
     configs,
     activeName,
     isDefault,

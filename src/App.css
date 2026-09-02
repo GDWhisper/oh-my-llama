@@ -411,6 +411,7 @@ body {
 }
 
 .field-path {
+  position: relative;
   display: flex;
   align-items: stretch;
   gap: 8px;
@@ -431,6 +432,76 @@ body {
 }
 
 .browse-btn:hover {
+  background: #f3f4f6;
+}
+
+/* 路径输入框的「最近用过」候选浮层：视觉沿用 .select-list 下拉。
+   整行是路径，靠省略号截断 + title 看全串。 */
+.path-suggest {
+  position: absolute;
+  z-index: 20;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  margin: 0;
+  padding: 4px;
+  list-style: none;
+  background: #ffffff;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.12);
+  max-height: 240px;
+  overflow-y: auto;
+}
+
+.path-suggest-item {
+  display: flex;
+  align-items: center;
+}
+
+.path-suggest-text {
+  flex: 1;
+  min-width: 0;
+  text-align: left;
+  padding: 8px 10px;
+  font-size: 13px;
+  color: #1f2937;
+  background: transparent;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.path-suggest-text:hover {
+  background: #f3f4f6;
+}
+
+/* × 移除按钮：与 .option-delete 同套尺寸，只在给了回调时出现 */
+.path-suggest-remove {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  margin-right: 4px;
+  font-size: 16px;
+  line-height: 1;
+  color: #9ca3af;
+  background: transparent;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  transition:
+    color 0.15s,
+    background 0.15s;
+}
+
+.path-suggest-remove:hover {
+  color: #dc2626;
   background: #f3f4f6;
 }
 

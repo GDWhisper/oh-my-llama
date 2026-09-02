@@ -72,7 +72,17 @@ export interface ServerLogLine {
 // 应用级设置（与服务器启动配置 ServerConfig 解耦）。
 // update_proxy 留空 = 更新直连；填写 = 仅走该代理地址。
 // auto_check_updates = 启动时是否自动检查更新（不打扰：仅提示+徽标，绝不静默安装）。
+// recent_servers = 本机用过的 llama-server 可执行文件路径（索引 0 最近用过），供路径输入框给候选。
 export interface AppSettings {
   update_proxy: string;
   auto_check_updates: boolean;
+  recent_servers: string[];
+}
+
+// llama-server 路径输入框的候选项（list_recent_servers / remove_recent_server 的载荷）。
+// 后端把「最近用过」和「各命名配置里用过的路径」合并成一份候选；
+// used_by_config = 该路径仍被某条命名配置引用 —— 从历史里忘掉它不会有可见效果，故不给 ×。
+export interface ServerCandidate {
+  path: string;
+  used_by_config: boolean;
 }
