@@ -527,6 +527,8 @@ export const zh = {
   'settings.title': '设置',
   'settings.language': '语言',
   'settings.languageHint': '切换后立即生效，并记住你的选择。',
+  'settings.update': '更新',
+  'settings.updateHint': '检查并安装新版本。',
   'settings.close': '关闭设置',
   'settings.updateProxy': '更新代理',
   'settings.updateProxyHint':
@@ -562,6 +564,7 @@ export const zh = {
 
   // 关于
   'about.title': '关于',
+  'about.desc': 'Oh My Llama 是一款集中管理 llama-server 启动配置、参数与日志的桌面工具。',
   'about.version': '版本',
   'about.repo': '项目仓库',
 
@@ -1120,6 +1123,8 @@ export const en: Record<MessageKey, string> = {
   'settings.title': 'Settings',
   'settings.language': 'Language',
   'settings.languageHint': 'Changes apply immediately and your choice is remembered.',
+  'settings.update': 'Updates',
+  'settings.updateHint': 'Check for and install new versions.',
   'settings.close': 'Close Settings',
   'settings.updateProxy': 'Update Proxy',
   'settings.updateProxyHint':
@@ -1158,6 +1163,8 @@ export const en: Record<MessageKey, string> = {
 
   // 关于
   'about.title': 'About',
+  'about.desc':
+    'Oh My Llama is a desktop tool for centrally managing llama-server launch configs, parameters, and logs.',
   'about.version': 'Version',
   'about.repo': 'Repository',
 

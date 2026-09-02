@@ -890,10 +890,11 @@ body {
 .settings-modal {
   width: min(420px, 90vw);
   max-height: calc(100vh - 48px);
+  padding: 16px 20px;
 }
 
 .settings-modal .modal-body {
-  gap: 12px;
+  gap: 10px;
   overflow-y: auto;
 }
 
@@ -902,7 +903,7 @@ body {
   display: flex;
   flex-direction: column;
   gap: 8px;
-  padding: 12px 14px;
+  padding: 10px 14px;
   border: 1px solid #e5e7eb;
   border-radius: 12px;
 }
@@ -1020,26 +1021,48 @@ body {
   flex-shrink: 0;
 }
 
-/* 关于分组（设置浮窗内）：标签在左、版本号与徽标在右 */
-.about-row {
+/* 「更新」卡片内的版本行：标签在左，版本号、NEW 徽标与检查按钮在右 */
+.settings-meta-row {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 8px;
 }
-.about-meta {
+.settings-meta {
   display: inline-flex;
   align-items: center;
   gap: 6px;
 }
-.about-value {
+.settings-meta-value {
   font-weight: 600;
   color: #111827;
 }
-.about-actions {
+/* 版本行的「检查更新」用紧凑高度，避免这一行比其他行高出太多 */
+.settings-meta .btn {
+  height: 30px;
+  padding: 0 12px;
+}
+
+/* 「更新」卡片内的子级小标题（更新代理）：比卡片标题低一级、不带图标 */
+.settings-sublabel {
+  font-size: 12px;
+  font-weight: 600;
+  color: #374151;
+}
+
+/* 「关于」卡片的简介与仓库入口 */
+.settings-about-desc {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: #6b7280;
+}
+.settings-repo-row {
   display: flex;
-  gap: 10px;
-  flex-wrap: wrap;
+}
+.settings-repo-row .btn {
+  height: 32px;
+  padding: 0 12px;
 }
 
 /* 更新浮窗 */
@@ -1539,7 +1562,7 @@ button:disabled {
   align-items: center;
   gap: 8px;
   margin: 0 -8px;
-  padding: 5px 8px;
+  padding: 4px 8px;
   border-radius: 8px;
   cursor: pointer;
   user-select: none;
