@@ -74,16 +74,16 @@ export function useServer() {
   // 启动命令行现由「原始参数」卡片从 config 实时派生展示，此处不再单独保存。
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
-  // 轻量提示（保存成功 / 复制成功等）：固定底部居中，约 2.2s 后自动消失。
-  const [toast, setToast] = useState<string | null>(null);
-  const toastTimer = useRef<number | null>(null);
+  // 轻量提示（保存成功 / 复制成功等）：固定底部居中，倒计时走完或用户手动关闭后消失。
+  // 计时交给 Toast 组件（由进度条动画驱动），此处只存消息 + 用于重挂载重置动画的序号，
+  // 避免每帧更新进度导致整个 App 重渲染。
+  const [toast, setToast] = useState<{ id: number; message: string } | null>(null);
+  const toastSeq = useRef(0);
   const showToast = (message: string) => {
-    setToast(message);
-    if (toastTimer.current !== null) {
-      window.clearTimeout(toastTimer.current);
-    }
-    toastTimer.current = window.setTimeout(() => setToast(null), 2200);
+    toastSeq.current += 1;
+    setToast({ id: toastSeq.current, message });
   };
+  const dismissToast = () => setToast(null);
   const [starting, setStarting] = useState(false);
   const [stopping, setStopping] = useState(false);
   const [advancedEnabled, setAdvancedEnabled] =
@@ -845,6 +845,7 @@ export function useServer() {
     error,
     toast,
     showToast,
+    dismissToast,
     models,
     modelMissing,
     modelSize,

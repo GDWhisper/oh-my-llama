@@ -1286,22 +1286,78 @@ button:disabled {
   font-size: 13px;
 }
 
-/* 轻量提示（复制成功等）：固定底部居中，2.2s 后由 JS 置空自动消失 */
+/* 轻量提示（复制成功等）：固定底部居中。自动消失时长只在此处 .toast-progress 定义，
+   动画走完由 Toast 组件回调置空；悬停暂停进度条动画即暂停倒计时。 */
 .toast {
   position: fixed;
   left: 50%;
   bottom: 28px;
   transform: translateX(-50%);
   z-index: 50;
-  padding: 10px 18px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  max-width: min(520px, calc(100vw - 48px));
+  padding: 10px 12px 12px 18px;
   border-radius: 10px;
   background: #16a34a;
   color: #ffffff;
   font-size: 13px;
   font-weight: 500;
   box-shadow: 0 6px 20px rgba(0, 0, 0, 0.18);
-  pointer-events: none;
+  overflow: hidden;
   animation: toast-in 160ms ease-out;
+}
+
+.toast-text {
+  flex: 1;
+  min-width: 0;
+}
+
+.toast-close {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: none;
+  border-radius: 5px;
+  background: transparent;
+  color: #ffffff;
+  opacity: 0.75;
+  cursor: pointer;
+}
+
+.toast-close:hover {
+  opacity: 1;
+  background: rgba(255, 255, 255, 0.2);
+}
+
+/* 底部倒计时进度条：横向收缩到 0，动画结束即自动消失。 */
+.toast-progress {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  width: 100%;
+  height: 3px;
+  background: rgba(255, 255, 255, 0.55);
+  transform-origin: left center;
+  animation: toast-countdown 2200ms linear forwards;
+}
+
+.toast:hover .toast-progress {
+  animation-play-state: paused;
+}
+
+@keyframes toast-countdown {
+  from {
+    transform: scaleX(1);
+  }
+  to {
+    transform: scaleX(0);
+  }
 }
 
 @keyframes toast-in {

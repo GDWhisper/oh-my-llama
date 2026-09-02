@@ -13,6 +13,7 @@ import { useI18n } from './i18n';
 import { SettingsDialog } from './components/SettingsDialog';
 import { UpdateDialog } from './components/UpdateDialog';
 import { UpdateToast } from './components/UpdateToast';
+import { Toast } from './components/Toast';
 import { ConfirmDialog } from './components/ConfirmDialog';
 import { MetricsPanel } from './components/MetricsPanel';
 import { useUpdater } from './hooks/useUpdater';
@@ -67,6 +68,7 @@ export default function App() {
     error,
     toast,
     showToast,
+    dismissToast,
     models,
     modelMissing,
     modelSize,
@@ -427,7 +429,7 @@ export default function App() {
       </div>
 
       {error && <div className="error-banner">{error}</div>}
-      {toast && <div className="toast">{toast}</div>}
+      {toast && <Toast key={toast.id} message={toast.message} onDismiss={dismissToast} />}
       <SettingsDialog
         open={showSettings}
         onClose={() => setShowSettings(false)}
