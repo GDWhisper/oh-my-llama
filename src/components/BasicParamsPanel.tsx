@@ -1,4 +1,4 @@
-import type { ServerConfig } from '../types';
+import type { ServerCandidate, ServerConfig } from '../types';
 import { modelBasename } from '../lib/advanced';
 import { useI18n } from '../i18n';
 import { PathField } from './PathField';
@@ -8,6 +8,9 @@ interface Props {
   config: ServerConfig;
   // 检测到的 .gguf 模型文件名列表（不含绝对路径，仅用于下拉框展示）
   models: string[];
+  // llama-server 路径候选（后端合并「最近使用」与「各命名配置里用过的路径」）
+  serverCandidates: ServerCandidate[];
+  onForgetServerPath: (path: string) => void;
   onChange: (config: ServerConfig) => void;
 }
 
@@ -15,7 +18,13 @@ interface Props {
 // 用 / 作分隔符，Windows 与 llama.cpp 均接受。
 const joinModelPath = (dir: string, name: string): string => `${dir.replace(/[\\/]$/, '')}/${name}`;
 
-export function BasicParamsPanel({ config, models, onChange }: Props) {
+export function BasicParamsPanel({
+  config,
+  models,
+  serverCandidates,
+  onForgetServerPath,
+  onChange,
+}: Props) {
   const { t } = useI18n();
   const serverFilters = [
     { name: t('basic.filterExe'), extensions: ['exe'] },
@@ -41,6 +50,8 @@ export function BasicParamsPanel({ config, models, onChange }: Props) {
           label={t('basic.serverPath')}
           value={config.llama_server_path}
           filters={serverFilters}
+          suggestions={serverCandidates}
+          onRemoveSuggestion={onForgetServerPath}
           onChange={(value) => onChange({ ...config, llama_server_path: value })}
         />
         <PathField

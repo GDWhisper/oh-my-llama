@@ -411,6 +411,7 @@ body {
 }
 
 .field-path {
+  position: relative;
   display: flex;
   align-items: stretch;
   gap: 8px;
@@ -431,6 +432,76 @@ body {
 }
 
 .browse-btn:hover {
+  background: #f3f4f6;
+}
+
+/* 路径输入框的「最近用过」候选浮层：视觉沿用 .select-list 下拉。
+   整行是路径，靠省略号截断 + title 看全串。 */
+.path-suggest {
+  position: absolute;
+  z-index: 20;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  margin: 0;
+  padding: 4px;
+  list-style: none;
+  background: #ffffff;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.12);
+  max-height: 240px;
+  overflow-y: auto;
+}
+
+.path-suggest-item {
+  display: flex;
+  align-items: center;
+}
+
+.path-suggest-text {
+  flex: 1;
+  min-width: 0;
+  text-align: left;
+  padding: 8px 10px;
+  font-size: 13px;
+  color: #1f2937;
+  background: transparent;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.path-suggest-text:hover {
+  background: #f3f4f6;
+}
+
+/* × 移除按钮：与 .option-delete 同套尺寸，只在给了回调时出现 */
+.path-suggest-remove {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  margin-right: 4px;
+  font-size: 16px;
+  line-height: 1;
+  color: #9ca3af;
+  background: transparent;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  transition:
+    color 0.15s,
+    background 0.15s;
+}
+
+.path-suggest-remove:hover {
+  color: #dc2626;
   background: #f3f4f6;
 }
 
@@ -741,6 +812,13 @@ body {
   box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.15);
 }
 
+/* 「填入模型名称」行：.modal 是 flex 列且 stretch，包一层 flex 行让按钮按内容宽度左对齐；
+   负 margin 收紧与输入框的间距（modal gap 12px 对这一组「输入框 + 回填按钮」偏松）。 */
+.name-fill-row {
+  display: flex;
+  margin-top: -6px;
+}
+
 /* 通用二次确认弹窗 */
 .modal-overlay {
   position: fixed;
@@ -808,10 +886,25 @@ body {
   color: #111827;
 }
 
+/* 设置浮窗：分组多，比通用弹窗更宽、限高可滚动，组间留白也收得更紧 */
+.settings-modal {
+  width: min(420px, 90vw);
+  max-height: calc(100vh - 48px);
+}
+
+.settings-modal .modal-body {
+  gap: 12px;
+  overflow-y: auto;
+}
+
+/* 分组卡片：设置项增多后靠卡片边界与统一留白区分组，替代纯文本堆叠 */
 .settings-section {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 8px;
+  padding: 12px 14px;
+  border: 1px solid #e5e7eb;
+  border-radius: 12px;
 }
 
 .settings-section-head {
@@ -821,9 +914,22 @@ body {
 }
 
 .settings-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   font-size: 13px;
-  font-weight: 500;
+  font-weight: 600;
   color: #111827;
+}
+
+.settings-label svg {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.4;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  color: #9ca3af;
+  flex-shrink: 0;
 }
 
 .settings-hint {
@@ -856,6 +962,12 @@ body {
   box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.2);
 }
 
+/* 「保存」按钮与输入框等高，避免行内两个控件高度参差 */
+.settings-proxy-row .btn {
+  height: 32px;
+  padding: 0 12px;
+}
+
 .settings-proxy-ok {
   font-size: 12px;
   color: #16a34a;
@@ -879,6 +991,8 @@ body {
   align-items: center;
   justify-content: center;
   gap: 6px;
+  /* 两个语言按钮等分整行，让选择区看起来是刻意的一组 */
+  flex: 1 1 0;
   width: auto;
   /* 按字体大小自适应内边距与高度，避免固定大尺寸 */
   padding: 0.55em 1.1em;
@@ -906,12 +1020,17 @@ body {
   flex-shrink: 0;
 }
 
-/* 关于分组（设置浮窗内） */
+/* 关于分组（设置浮窗内）：标签在左、版本号与徽标在右 */
 .about-row {
   display: flex;
   align-items: center;
+  justify-content: space-between;
   gap: 8px;
-  margin-bottom: 10px;
+}
+.about-meta {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
 }
 .about-value {
   font-weight: 600;
@@ -944,18 +1063,69 @@ body {
   color: #9ca3af;
 }
 .update-notes {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.update-notes-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: #6b7280;
+}
+.release-notes {
   max-height: 220px;
   overflow: auto;
-  white-space: pre-wrap;
   word-break: break-word;
   background: #f8fafc;
   border: 1px solid #e5e7eb;
   border-radius: 8px;
-  padding: 10px 12px;
-  margin: 0 0 16px;
+  padding: 10px 14px;
   font-size: 12.5px;
   line-height: 1.6;
   color: #374151;
+}
+.release-notes > :first-child {
+  margin-top: 0;
+}
+.release-notes > :last-child {
+  margin-bottom: 0;
+}
+.release-notes .rn-heading {
+  font-weight: 600;
+  color: #111827;
+  margin: 12px 0 4px;
+}
+.release-notes ul {
+  margin: 4px 0;
+  padding-left: 18px;
+}
+.release-notes li {
+  margin: 2px 0;
+}
+.release-notes p {
+  margin: 4px 0;
+}
+.release-notes blockquote {
+  margin: 6px 0;
+  padding-left: 10px;
+  border-left: 2px solid #d1d5db;
+  color: #6b7280;
+}
+.release-notes strong {
+  font-weight: 600;
+  color: #111827;
+}
+.update-notes-link {
+  align-self: flex-start;
+  background: none;
+  border: none;
+  padding: 0;
+  font-size: 12px;
+  font-weight: 400;
+  color: #2563eb;
+}
+.update-notes-link:hover {
+  text-decoration: underline;
 }
 .update-ready-text {
   margin: 4px 0 16px;
@@ -1228,22 +1398,78 @@ button:disabled {
   font-size: 13px;
 }
 
-/* 轻量提示（复制成功等）：固定底部居中，2.2s 后由 JS 置空自动消失 */
+/* 轻量提示（复制成功等）：固定底部居中。自动消失时长只在此处 .toast-progress 定义，
+   动画走完由 Toast 组件回调置空；悬停暂停进度条动画即暂停倒计时。 */
 .toast {
   position: fixed;
   left: 50%;
   bottom: 28px;
   transform: translateX(-50%);
   z-index: 50;
-  padding: 10px 18px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  max-width: min(520px, calc(100vw - 48px));
+  padding: 10px 12px 12px 18px;
   border-radius: 10px;
   background: #16a34a;
   color: #ffffff;
   font-size: 13px;
   font-weight: 500;
   box-shadow: 0 6px 20px rgba(0, 0, 0, 0.18);
-  pointer-events: none;
+  overflow: hidden;
   animation: toast-in 160ms ease-out;
+}
+
+.toast-text {
+  flex: 1;
+  min-width: 0;
+}
+
+.toast-close {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: none;
+  border-radius: 5px;
+  background: transparent;
+  color: #ffffff;
+  opacity: 0.75;
+  cursor: pointer;
+}
+
+.toast-close:hover {
+  opacity: 1;
+  background: rgba(255, 255, 255, 0.2);
+}
+
+/* 底部倒计时进度条：横向收缩到 0，动画结束即自动消失。 */
+.toast-progress {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  width: 100%;
+  height: 3px;
+  background: rgba(255, 255, 255, 0.55);
+  transform-origin: left center;
+  animation: toast-countdown 2200ms linear forwards;
+}
+
+.toast:hover .toast-progress {
+  animation-play-state: paused;
+}
+
+@keyframes toast-countdown {
+  from {
+    transform: scaleX(1);
+  }
+  to {
+    transform: scaleX(0);
+  }
 }
 
 @keyframes toast-in {
@@ -1284,7 +1510,7 @@ button:disabled {
   background: #dc2626;
 }
 
-/* 设置浮窗内「自动检查」开关行 */
+/* 设置浮窗内「自动检查」开关行（关闭行为确认弹窗同样复用） */
 .settings-check-row {
   display: flex;
   align-items: center;
@@ -1304,6 +1530,22 @@ button:disabled {
   font-size: 13px;
   font-weight: 500;
   color: #111827;
+}
+
+/* 设置浮窗内的可点选项行（关闭行为单选组 / 自动检查开关）：
+   负 margin 让 hover 高亮铺满行宽、热区更大，行距由行内 padding 提供 */
+.settings-option-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 -8px;
+  padding: 5px 8px;
+  border-radius: 8px;
+  cursor: pointer;
+  user-select: none;
+}
+.settings-option-row:hover {
+  background: #f3f4f6;
 }
 
 /* 右上角自动检查提示（方案 A：自动检查发现新版本时的非打扰提示） */

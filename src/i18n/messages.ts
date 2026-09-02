@@ -12,6 +12,7 @@ export const zh = {
   'common.delete': '删除',
   'common.saving': '保存中...',
   'common.browse': '浏览…',
+  'common.forgetCandidate': '从历史中移除',
   'common.close': '关闭',
   'common.save': '保存',
 
@@ -90,6 +91,7 @@ export const zh = {
   'name.createHint': '将创建一个空白（默认参数）的新配置。',
   'name.renamePlaceholder': '请输入新的配置名称',
   'name.autoPlaceholder': '若不填写将按日期时间自动生成',
+  'name.fillModelName': '填入模型名称',
 
   // 必要参数卡片
   'basic.title': '必要参数',
@@ -538,12 +540,15 @@ export const zh = {
   'update.current': '当前版本',
   'update.latest': '最新版本',
   'update.notes': '更新说明',
+  'update.viewRelease': '在 GitHub 查看完整说明',
   'update.download': '下载并安装',
   'update.downloading': '正在下载…',
   'update.later': '稍后',
   'update.ready': '下载完成，重启以安装',
   'update.installNow': '重启安装',
   'update.noUpdate': '已是最新版本',
+  'update.noUpdateTitle': '检查完成',
+  'update.readyTitle': '更新已就绪',
   'update.error': '更新检查失败',
   'update.errorBody': '无法连接更新服务器，请稍后重试。',
   'update.retry': '重试',
@@ -562,6 +567,21 @@ export const zh = {
 
   // 更新（方案 A：手动检查、可见可取消；自动检查仅提示+徽标）
   'settings.autoCheck': '自动检查更新',
+
+  // 窗口关闭行为 / 系统托盘（最小化到托盘）
+  'settings.windowClose': '关闭窗口时',
+  'settings.windowCloseHint': '点击窗口右上角关闭按钮（X）时的行为。',
+  'settings.windowCloseAsk': '每次询问',
+  'settings.windowCloseTray': '最小化到系统托盘',
+  'settings.windowCloseQuit': '直接退出应用',
+  'tray.show': '显示主窗口',
+  'tray.quit': '退出',
+  'tray.promptTitle': '要退出还是最小化到托盘？',
+  'tray.promptBody':
+    '直接退出会停止 llama-server；最小化到托盘后服务继续运行，点击托盘图标即可回到窗口。',
+  'tray.promptRemember': '记住我的选择，不再询问',
+  'tray.promptMinimize': '最小化到托盘',
+  'tray.promptQuit': '直接退出',
   'update.badgeNew': 'NEW',
   'update.badgeTitle': '发现新版本，点击查看',
   'update.toastTitle': '发现新版本',
@@ -594,6 +614,7 @@ export const en: Record<MessageKey, string> = {
   'common.delete': 'Delete',
   'common.saving': 'Saving...',
   'common.browse': 'Browse…',
+  'common.forgetCandidate': 'Remove from history',
   'common.close': 'Close',
   'common.save': 'Save',
 
@@ -668,6 +689,7 @@ export const en: Record<MessageKey, string> = {
   'name.createHint': 'A new blank config (default parameters) will be created.',
   'name.renamePlaceholder': 'Enter a new config name',
   'name.autoPlaceholder': 'Leave empty to auto-generate by date/time',
+  'name.fillModelName': 'Fill model name',
 
   'basic.title': 'Required Parameters',
   'basic.filterExe': 'Executable',
@@ -1111,12 +1133,15 @@ export const en: Record<MessageKey, string> = {
   'update.current': 'Current',
   'update.latest': 'Latest',
   'update.notes': 'Release notes',
+  'update.viewRelease': 'View full notes on GitHub',
   'update.download': 'Download & install',
   'update.downloading': 'Downloading…',
   'update.later': 'Later',
   'update.ready': 'Download complete. Restart to install',
   'update.installNow': 'Restart to install',
   'update.noUpdate': 'You are on the latest version',
+  'update.noUpdateTitle': 'Check complete',
+  'update.readyTitle': 'Update ready',
   'update.error': 'Update check failed',
   'update.errorBody': 'Could not reach the update server. Try again later.',
   'update.retry': 'Retry',
@@ -1138,6 +1163,21 @@ export const en: Record<MessageKey, string> = {
 
   // 更新（方案 A：手动检查、可见可取消；自动检查仅提示+徽标）
   'settings.autoCheck': 'Automatically check for updates',
+
+  // Window close behavior / system tray (minimize to tray)
+  'settings.windowClose': 'When Closing the Window',
+  'settings.windowCloseHint': 'What happens when you click the window close (X) button.',
+  'settings.windowCloseAsk': 'Ask every time',
+  'settings.windowCloseTray': 'Minimize to system tray',
+  'settings.windowCloseQuit': 'Quit the application',
+  'tray.show': 'Show Main Window',
+  'tray.quit': 'Quit',
+  'tray.promptTitle': 'Quit or minimize to tray?',
+  'tray.promptBody':
+    'Quitting stops llama-server. Minimizing to the tray keeps it running; click the tray icon to return.',
+  'tray.promptRemember': 'Remember my choice and do not ask again',
+  'tray.promptMinimize': 'Minimize to Tray',
+  'tray.promptQuit': 'Quit',
   'update.badgeNew': 'NEW',
   'update.badgeTitle': 'New version available, click to view',
   'update.toastTitle': 'Update available',

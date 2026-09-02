@@ -27,6 +27,8 @@ interface Props {
   onRename: (name: string) => void;
   onDelete: (name: string) => void;
   nameDialog: { open: boolean; mode: DialogMode };
+  // 命名弹窗「填入模型名称」候选（已去目录与 .gguf 后缀）；空串表示无候选、不显示按钮。
+  nameDialogModelName: string;
   onNameConfirm: (name: string) => void;
   onNameCancel: () => void;
 }
@@ -50,6 +52,7 @@ export function ConfigManager({
   onRename,
   onDelete,
   nameDialog,
+  nameDialogModelName,
   onNameConfirm,
   onNameCancel,
 }: Props) {
@@ -235,6 +238,7 @@ export function ConfigManager({
         open={nameDialog.open}
         mode={nameDialog.mode}
         defaultValue={nameDialog.mode === 'rename' ? renameTarget : undefined}
+        modelSuggestion={nameDialogModelName}
         onConfirm={onNameConfirm}
         onCancel={onNameCancel}
       />

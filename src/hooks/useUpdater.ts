@@ -23,7 +23,8 @@ export type UpdaterStatus =
       auto?: boolean;
     }
   | { kind: 'downloading'; received: number; total?: number }
-  | { kind: 'ready' }
+  // version/body：下载完成后仍保留，供「重启安装」前的确认界面继续展示更新说明与 GitHub 链接。
+  | { kind: 'ready'; version: string; body?: string }
   | { kind: 'no-update' }
   | { kind: 'error'; message: string };
 
@@ -57,6 +58,9 @@ export function useUpdater() {
   const foundRef = useRef<FoundMeta | null>(null);
   // 已知待处理更新（徽标/提示已存在）：自动检查据此跳过重复查询，避免反复弹提示。
   const pendingRef = useRef<PendingUpdate | null>(null);
+  // 用户已点过「以后再说」/关闭弹窗的版本：自动检查不再就同一版本重复提醒（徽标 + 提示），
+  // 直到出现更新的版本。手动检查不受此限制——那是用户主动要的反馈。
+  const dismissedRef = useRef<string | null>(null);
   // 取消标记：download() 的 Promise 在 close() 后会 reject，
   // 借此区分「用户主动取消」与「真实错误」，避免误报。
   const cancelledRef = useRef(false);
@@ -69,20 +73,31 @@ export function useUpdater() {
 
   // 检查更新。auto=true 表示由「自动检查（启动/周期）」触发：
   //  - 已知有待处理更新（pendingRef 存在）→ 直接跳过，避免重复弹提示；
+  //  - 发现的版本已被用户忽略（dismissedRef）→ 同样静默跳过；
   //  - 发现新版本 → 不打扰主弹窗，仅置右上 toast + 版本徽标；
   //  - 无更新/失败 → 完全静默，绝不弹窗。
   const check = useCallback(
-    async (auto = false) => {
+    async (auto?: boolean) => {
+      // 只认字面 true：调用点把点击事件直接透传进来时（onClick={onCheckUpdate}），
+      // 事件对象是 truthy 的，会被误判成自动检查而静默掉用户主动发起的检查。
+      const isAuto = auto === true;
       cancelledRef.current = false;
       // 自动检查：已有待处理更新则跳过（周期轮询不会重复打扰）。
-      if (auto && pendingRef.current) return;
+      if (isAuto && pendingRef.current) return;
       setToast(null);
       setStatus({ kind: 'checking' });
       try {
         const u = await checkUpdate();
         if (!u) {
+          // 无更新：丢弃旧的版本元信息，避免 dismiss 时把已装上的版本误记为「已忽略」。
+          foundRef.current = null;
           // 无更新：手动检查展示「已是最新」，自动检查静默。
-          setStatus(auto ? { kind: 'idle' } : { kind: 'no-update' });
+          setStatus(isAuto ? { kind: 'idle' } : { kind: 'no-update' });
+          return;
+        }
+        if (isAuto && dismissedRef.current === u.version) {
+          // 用户已就该版本说过「以后再说」：自动检查不再重新提醒。
+          setStatus({ kind: 'idle' });
           return;
         }
         const meta: FoundMeta = {
@@ -93,7 +108,7 @@ export function useUpdater() {
         updateRef.current = u;
         foundRef.current = meta;
         setPending(meta);
-        if (auto) {
+        if (isAuto) {
           // 自动检查：仅提示 + 徽标，不弹主弹窗（auto=true 让 UpdateDialog 隐藏自身）。
           setStatus({ kind: 'available', update: u, ...meta, auto: true });
           setToast({ version: u.version, current: u.currentVersion });
@@ -101,7 +116,7 @@ export function useUpdater() {
           setStatus({ kind: 'available', update: u, ...meta, auto: false });
         }
       } catch (err) {
-        if (auto) {
+        if (isAuto) {
           // 自动检查失败：静默，不打扰用户（不弹错误框）。
           setStatus({ kind: 'idle' });
           return;
@@ -145,7 +160,7 @@ export function useUpdater() {
           return s;
         });
       });
-      setStatus({ kind: 'ready' });
+      setStatus({ kind: 'ready', version: u.version, body: u.body });
     } catch (err) {
       // 用户取消：close() 触发 reject，状态已由 cancel() 复位，此处静默吞掉。
       if (cancelledRef.current) return;
@@ -178,7 +193,10 @@ export function useUpdater() {
   }, []);
 
   // 关闭对话框：释放资源并回到 idle，同时清除徽标与提示。
+  // 记下被忽略的版本——周期自动检查不会再就它重复提醒（出现更新版本时自然失效）。
   const dismiss = useCallback(() => {
+    const ignored = foundRef.current?.version;
+    if (ignored) dismissedRef.current = ignored;
     updateRef.current?.close().catch(() => {});
     updateRef.current = null;
     foundRef.current = null;

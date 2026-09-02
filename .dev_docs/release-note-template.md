@@ -1,6 +1,6 @@
 # Release Note 模板（发布时使用）
 
-> 本模板为发布 agent 编写 GitHub Release Note 的唯一真源。每次发布前复制本模板，填入对应版本的实际内容，经 `--notes-file` 写入草稿 Release。
+> 本模板为发布 agent 编写 GitHub Release Note 的唯一真源。每次发布**前**（提交 / 打标签之前）复制本模板，填入对应版本的实际内容，按 **`.dev_docs/release-notes-vX.Y.Z.md`** 固定文件名保存并随版本号一起 commit——`release.yml` 会按 tag 名读取该文件，把全文注入 Release 正文与 `latest.json.notes`（应用内更新弹窗显示的就是它）。
 > 正文**必须**包含下列三大类（哪怕某一类为空，也要保留标题并写明「无」）；**不要**放「下载」栏目（资产区会自动展示）；**不要**使用 emoji。
 > 详细历史与实现机制见 `CHANGELOG.md`；Release Note 只写两个已发布版本之间**用户可见**的差异（详见 `release-guide.md` 第三节红线）。
 
@@ -19,7 +19,7 @@
 > 详细改动参考 CHANGELOG
 ```
 
-> **注意：正文不要写「# Oh My Llama vX.Y.Z」这类 H1 标题。** 用 `gh release ... --notes-file` 且未指定 `--title` 时，GitHub 会自动用 tag 名（如 `v0.1.3`）生成页面大标题；若正文再写一遍 H1，页面会出现两个标题，重复且难看。版本号交给 GitHub 自动标题即可。
+> **注意：正文不要写「# Oh My Llama vX.Y.Z」这类 H1 标题。** Release 标题由 `tauri-action` 的 `releaseName`（`Oh My Llama v__VERSION__`）自动生成；正文再写一遍 H1，页面会出现两个标题，重复且难看。版本号交给自动标题即可。
 
 ## 填写要点
 - 顶部那句固定文案**不要改动**，它向用户说明本页内容是人工（agent）基于 CHANGELOG 提炼的总结，而非自动生成。

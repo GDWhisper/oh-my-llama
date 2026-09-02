@@ -29,15 +29,17 @@
    > - `package.json` 因 `"private": true` 可省略 `version`，重新生成的 `package-lock.json` 同样不含该字段。
    >
    > 这样做的原因：历史上版本号散落 4 个文件 5 处、靠人肉同步，实际漂移过（曾同时存在 0.1.0 / 0.1.1 / 0.1.2 三个值）。收敛为单一真源后，漂移在结构上不再可能发生。
-2. **提交**（在 `dev`）：`git add` 仅项目文件，**排除 `.claude/`、`.mcp.json`**。commit message 用中文、概述本版本改动。可用 `git commit -F - <<'EOF'` 喂多行。
-3. **推送 dev**：`git push origin dev`。
-4. **合并到 main 工作树**：`cd F:/llama_run/tauri-launcher && git fetch origin && git merge --no-ff dev -m "Merge dev into main for vX.Y.Z"`。用 `--no-ff` 保留合并记录；**不要**在 `dev` 工作树 checkout main。
-5. **推送 main**：`git push origin main`。
-6. **打标签触发 CI**：`git tag -a vX.Y.Z -m "Oh My Llama vX.Y.Z"` + `git push origin vX.Y.Z`。推送标签即触发 `release.yml`（三平台并行：Windows / Ubuntu 22.04 / macOS arm64）构建。
-7. **等待构建（前台，不可拆成两轮）**：`unset` 代理后在**前台**执行 `gh run watch <run_id> --repo GDWhisper/oh-my-llama --exit-status`（三平台并行，实测最长约 8-9 分钟，Bash 命令超时给足 600000ms）。**禁止用 `run_in_background` 把等待拆到后台**——后台返回后控制权已交还用户，发布步骤极易被漏掉；必须等到构建结束**在同一轮对话里**继续后续步骤。构建成功时 Release 以**草稿**形式生成（`releaseDraft: true`），这只是中间态，**不是终点**。
-8. **更新 CHANGELOG.md**（见第三节分工）。
-9. **发布 Release（强制收尾，不可省略 / 不可推迟）**：构建一结束（同一轮）**立即**执行 `gh release edit vX.Y.Z --notes-file <path> --draft=false --latest`。**必须**补 notes（草稿默认 body 是占位符 `See the assets to download and install.`）。**这是发布流程的最后一个动作；在它完成前，任务视为未完成，不得向用户报告「已发布 / 完成 / 可直接下载」。**
-10. **验证已正式发布**：`gh release view vX.Y.Z --repo GDWhisper/oh-my-llama`，确认输出含 `draft: false` 且 `Latest` 标记存在。只有亲眼看到 `draft: false`，才算发布成功、才能回复用户。
+2. **编写发布说明文件 + 更新 CHANGELOG（⛔ 必须在提交/打标签之前）**：复制 `.dev_docs/release-note-template.md` 按第三节分工填写，保存为 **`.dev_docs/release-notes-vX.Y.Z.md`**（文件名固定，CI 按 tag 名精确读取），同时更新 `CHANGELOG.md`。
+   > **为什么必须前置**：`release.yml` 的「Read release notes」步骤从 **tag 所在 commit** 读该文件，把全文注入 `tauri-action` 的 `releaseBody`；`releaseBody` 会同时写进 **GitHub Release 正文**与 **`latest.json` 的 `notes` 字段**，后者才是**应用内更新弹窗**显示的更新说明。文件不在 tag 里 → 应用内永远只看到占位符。（另注：`tauri-action` 的 `body_path` 输入只改 Release 正文、**不进 `latest.json`**，不能用来替代这套机制。）
+3. **提交**（在 `dev`）：`git add` 仅项目文件，**排除 `.claude/`、`.mcp.json`**。版本号、发布说明文件、CHANGELOG **一起进这一个 commit**（保证它们随 tag 落地）。commit message 用中文、概述本版本改动。可用 `git commit -F - <<'EOF'` 喂多行。
+4. **推送 dev**：`git push origin dev`。
+5. **合并到 main 工作树**：`cd F:/llama_run/tauri-launcher && git fetch origin && git merge --no-ff dev -m "Merge dev into main for vX.Y.Z"`。用 `--no-ff` 保留合并记录；**不要**在 `dev` 工作树 checkout main。
+6. **推送 main**：`git push origin main`。
+7. **打标签触发 CI**：`git tag -a vX.Y.Z -m "Oh My Llama vX.Y.Z"` + `git push origin vX.Y.Z`。推送标签即触发 `release.yml`（三平台并行：Windows / Ubuntu 22.04 / macOS arm64）构建。
+8. **等待构建（前台，不可拆成两轮）**：`unset` 代理后在**前台**执行 `gh run watch <run_id> --repo GDWhisper/oh-my-llama --exit-status`（三平台并行，实测最长约 8-9 分钟，Bash 命令超时给足 600000ms）。**禁止用 `run_in_background` 把等待拆到后台**——后台返回后控制权已交还用户，发布步骤极易被漏掉；必须等到构建结束**在同一轮对话里**继续后续步骤。构建成功时 Release 以**草稿**形式生成（`releaseDraft: true`），这只是中间态，**不是终点**。
+9. **核对更新说明已自动注入**：`gh release view vX.Y.Z --repo GDWhisper/oh-my-llama --json body -q .body` 看正文是否为发布说明全文。若仍是占位符 `See the assets to download and install.`，说明 tag 所在 commit 缺 `.dev_docs/release-notes-vX.Y.Z.md`（第 2 步）——**补文件、重打 tag**，不要用 `--notes-file` 糊过去：`--notes-file` 只改 Release 正文，**不会重写已上传的 `latest.json`**，应用内更新弹窗仍是空的。
+10. **发布 Release（强制收尾，不可省略 / 不可推迟）**：构建一结束（同一轮）**立即**执行 `gh release edit vX.Y.Z --draft=false --latest`。**这是发布流程的最后一个动作；在它完成前，任务视为未完成，不得向用户报告「已发布 / 完成 / 可直接下载」。**
+11. **验证已正式发布**：`gh release view vX.Y.Z --repo GDWhisper/oh-my-llama`，确认输出含 `draft: false` 且 `Latest` 标记存在。只有亲眼看到 `draft: false`，才算发布成功、才能回复用户。
 
 > ## ⛔ 强制收尾铁律（历史踩坑）
 > CI 默认生成 **草稿** Release（`releaseDraft: true`），这是设计使然，**每次都会是 draft**。草稿=未发布，用户看到的就是「draft、没内容」。
@@ -52,7 +54,7 @@
 ## 三、CHANGELOG 与 Release Note 的分工（用户硬性要求）
 
 - **`CHANGELOG.md` = 详细改动历史**：每条写**涉及的文件与实现机制**（如 `ConfigManager` 加按钮、`lib.rs` 新增 `file_size` 命令、`App.css` 用 `.btn-secondary:disabled` 特异度压制通用 `button:disabled` 等）。按 `### 新增功能 / ### 功能优化 / ### Bug 修复` 三类组织。文件头注明「本文件为详细改动历史，Release 页面为总结性说明」。
-- **GitHub Release Note = 总结性**：**统一使用模板文件 `.dev_docs/release-note-template.md`**（复制后填入实际内容，经 `--notes-file` 写入）。模板已内嵌以下强制要求：
+- **GitHub Release Note = 总结性**：**统一使用模板文件 `.dev_docs/release-note-template.md`**（复制后填入实际内容），保存为 **`.dev_docs/release-notes-vX.Y.Z.md`** 并随版本 commit 入库——CI 从 tag 所在 commit 读它注入 `releaseBody`，同时落到 Release 正文与 `latest.json.notes`（应用内更新弹窗）。模板已内嵌以下强制要求：
   - **顶部固定文案**（不可改动）：`本版本亮点由发布 agent 基于 CHANGELOG 手动总结。详细条目见 CHANGELOG.md。`
   - **正文必须包含三大类**（顺序固定、缺一不可，空类也要保留标题并写「无」）：
     - `### 新增功能`
@@ -71,7 +73,8 @@
 
 - **gh 报 EOF** → 先 `unset HTTPS_PROXY HTTP_PROXY https_proxy http_proxy`（或 `env -u` 四个变量后再执行 `gh`）。
 - **git 代理覆盖语法**：本机全局 `http(s).proxy` 指向 `127.0.0.1:7897`，且该代理可能未运行（动态）。覆盖时**必须用带点的键** `-c "http.proxy=" -c "https.proxy="`（空值=直连）；写 `-c https_proxy=`（下划线）会被 git 报 `key does not contain a section`、`-c http.proxy=<url>` 则路由经过代理。若直连报 `Connection was reset`/`Could not connect`，改 `-c "http.proxy=http://127.0.0.1:7897" -c "https.proxy=http://127.0.0.1:7897"`；若报 `Could not connect to 127.0.0.1`，说明代理没开，退回直连。两者交替试，勿把命令里的 `-` 误写成参数分隔。
-- **草稿 ≠ 已发布** → CI 永远先生成 draft（`releaseDraft: true`）。必须 `gh release edit --notes-file ... --draft=false --latest` 并 `gh release view` 确认 `draft: false` 才算发布成功。构建成功、资产齐全都**不算**发布完成。
+- **草稿 ≠ 已发布** → CI 永远先生成 draft（`releaseDraft: true`）。必须 `gh release edit --draft=false --latest` 并 `gh release view` 确认 `draft: false` 才算发布成功。构建成功、资产齐全都**不算**发布完成。
+- **应用内更新说明为空 / 只有占位符** → 发布说明文件必须在**打标签之前**进 commit（`.dev_docs/release-notes-vX.Y.Z.md`）；CI 从 tag 所在 commit 读取。事后用 `gh release edit --notes-file` 只能补 Release 正文，**重写不了已上传的 `latest.json.notes`**，应用内仍看不到说明——只能补文件、删 tag 重打。
 - **资产 URL 显示 `untagged-...`** → 属 tauri-action 上传时的内部路径，Release 仍正确挂在 tag 下，无需处理。
 - **`dev` 不能 checkout main** → 合并去 `main` 工作树执行 `git merge --no-ff dev`。
 - **提交排除 `.claude/`、`.mcp.json`**。
@@ -85,11 +88,13 @@
 - [ ] 前端门禁 `npm run check:frontend` 通过
 - [ ] （如有 Rust 改动）`cargo check` / `clippy -D warnings` / `fmt --check` 通过
 - [ ] 版本号已在 `src-tauri/tauri.conf.json`（唯一真源）提升，且与将要打的 tag 一致
+- [ ] `CHANGELOG.md` 已更新（详细、三类分段）
+- [ ] Release Note 已**复制 `release-note-template.md` 模板**填好，存为 `.dev_docs/release-notes-vX.Y.Z.md` 并随版本号一起 commit（含顶部固定文案、三大类齐全、无下载栏目、底部「详细改动参考 CHANGELOG」、**无开发期内部增减类条目**）
 - [ ] `git add` 已排除 `.claude/`、`.mcp.json`
 - [ ] `dev` 已推送、`main` 已合并并推送
 - [ ] tag `vX.Y.Z` 已推送并触发 CI
-- [ ] `CHANGELOG.md` 已更新（详细、三类分段）
-- [ ] Release Note 已**复制 `release-note-template.md` 模板**用 `--notes-file` 写入（含顶部固定文案、三大类齐全、无下载栏目、底部「详细改动参考 CHANGELOG」、**无开发期内部增减类条目**），并 `--draft=false --latest`
+- [ ] `gh release view vX.Y.Z --json body` 确认正文已是发布说明全文（仍是占位符说明 tag 里缺文件，需补文件重打 tag）
+- [ ] 已 `--draft=false --latest` 发布
 - [ ] `gh release view vX.Y.Z` 确认输出含 `draft: false`（**未确认前不得回复用户「已发布」**）
 - [ ] 资产已生成（Windows `setup.exe` + `.msi`；Linux `.deb` / `.rpm` / `.AppImage`；macOS arm64 `.dmg`；各平台 `.sig` + `latest.json`）
 - [ ] 本地已生成签名私钥 `~/.tauri/oh-my-llama.key`（公钥已写入 `src-tauri/tauri.conf.json` 的 `plugins.updater.pubkey`）
