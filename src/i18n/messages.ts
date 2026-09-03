@@ -314,6 +314,7 @@ export const zh = {
   'log.raw': '原生',
   'log.clear': '清空日志',
   'log.empty': '暂无日志输出…',
+  'log.loadOlder': '↑ 加载更早日志',
   'log.backToBottom': '↓ 回到底部',
 
   // 一键传参解析预览行
@@ -915,6 +916,7 @@ export const en: Record<MessageKey, string> = {
   'log.raw': 'Raw',
   'log.clear': 'Clear Logs',
   'log.empty': 'No log output yet…',
+  'log.loadOlder': '↑ Load older logs',
   'log.backToBottom': '↓ Back to bottom',
 
   'preview.serverPath': 'Launcher path → {value}',

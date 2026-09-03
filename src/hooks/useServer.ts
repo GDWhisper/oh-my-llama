@@ -63,6 +63,39 @@ async function listenGuarded<T>(
 // 避免把慢加载误判为假死。60s = 约 40 次 1.5s 轮询，远超单次瞬断窗口。
 const UNRESPONSIVE_MS = 60000;
 
+// 状态轮询频率：窗口可见 1.5s；隐藏/托盘常驻降到 8s——本应用设计上长期驻留托盘，
+// 隐藏期间满频轮询（含 /health 探测与模型文件 stat）是恒定浪费。visibilitychange 切换
+// delay 会重建定时器；系统唤醒有 tauri://resume 即查兜底，切回窗口最多延迟一个新周期。
+const POLL_INTERVAL_MS = 1500;
+const POLL_INTERVAL_HIDDEN_MS = 8000;
+
+// 前端日志行：在 IPC 契约 ServerLogLine 之上补一个单调递增 id（纯前端派生，非 IPC 字段）。
+// 列表 key 用它：后端缓冲满载发生 shift() 后，基于 ts+index 的 key 会全体变化导致整列表
+// 重挂载（约 2 万节点的持续分配/GC 压力）；单调 id 让既有行 key 恒定，只追加新行。
+export type LogLine = ServerLogLine & { id: number };
+
+// 前端日志缓冲上限（与后端有界缓冲同值，超出时保留最新行）。
+const MAX_LOG_LINES = 5000;
+// log://line 增量行的合并窗口（毫秒）：模型加载期 llama-server 以 \r 原地刷新进度条，
+// 每秒可产生几十行事件；逐行 setLogs 会让整个 App 以行频重渲染。攒进 ref 缓冲后按此窗口
+// 批量 flush，渲染频率与日志行频解耦（200ms 肉眼无感，重渲染次数降一个量级）。
+const LOG_FLUSH_MS = 200;
+
+// status 轮询结果浅比较：字段全等则复用旧引用，跳过 setStatus 触发的全树重渲染。
+// 服务静止时每轮探测结果完全一致，原来每 1.5s 必然全树重渲染一次属纯浪费；
+// ServerStatus 字段均为原始值/可选原始值，浅比较足够。
+function sameStatus(a: ServerStatus | null, b: ServerStatus): boolean {
+  return (
+    !!a &&
+    a.running === b.running &&
+    a.managed === b.managed &&
+    a.pid === b.pid &&
+    a.port === b.port &&
+    a.host === b.host &&
+    a.url === b.url
+  );
+}
+
 export function useServer() {
   const { t } = useI18n();
   // 初始为 null：挂载后由后端默认值填充，加载完成前由 App 渲染加载占位。
@@ -77,7 +110,10 @@ export function useServer() {
   const [unresponsive, setUnresponsive] = useState(false);
   const wasReadyRef = useRef(false);
   const unreachableSinceRef = useRef<number | null>(null);
-  const [logs, setLogs] = useState<ServerLogLine[]>([]);
+  const [logs, setLogs] = useState<LogLine[]>([]);
+  // 待 flush 的增量日志缓冲 + 单调行号源：均为 ref，高频写不参与渲染、不触发重渲染。
+  const logBufferRef = useRef<LogLine[]>([]);
+  const logIdSeq = useRef(0);
   // 启动命令行现由「原始参数」卡片从 config 实时派生展示，此处不再单独保存。
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
@@ -194,7 +230,8 @@ export function useServer() {
     }
     try {
       const data = await invoke<ServerStatus>('get_status', { config: cfg });
-      setStatus(data);
+      // 浅比较去重：静止时复用旧引用，React 跳过重渲染；返回新引用才触发更新。
+      setStatus((prev) => (sameStatus(prev, data) ? prev : data));
       // 受管但持续无响应判定：只有"曾经可服务"之后又持续探测不到，才标无响应；
       // 从没 Ready 过（大模型仍在加载）一律只算 加载中，避免把慢加载误判为假死。
       // 此逻辑只读 ref/常量与稳定 setter，无过期 state 依赖，轮询/唤醒/启停后均可复用。
@@ -273,8 +310,9 @@ export function useServer() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // 日志实时透传：挂载时先拉一次历史，随后订阅后端 log://line 增量事件逐行追加，
-  // 不再靠轮询——这样进度/输出一产生就实时出现在面板。log://clear 用于清空同步。
+  // 日志实时透传：挂载时先拉一次历史，随后订阅后端 log://line 增量事件。
+  // 增量行先进 ref 缓冲，由定时器按 LOG_FLUSH_MS 批量 flush 进 state——避免逐行
+  // setLogs 造成整个 App 以日志行频重渲染。log://clear 用于清空同步（立即生效）。
   // 用 listenGuarded 注册：StrictMode 双挂载下若本 effect 已被卸载，注册成功后立即
   // 取消，避免残留 listener 把每条日志追加两遍（每行双份）。
   useEffect(() => {
@@ -284,7 +322,7 @@ export function useServer() {
       try {
         const data = await invoke<ServerLogLine[]>('read_logs');
         if (!disposed) {
-          setLogs(data);
+          setLogs(data.map((line) => ({ ...line, id: logIdSeq.current++ })));
         }
       } catch (err) {
         console.error(err);
@@ -292,13 +330,8 @@ export function useServer() {
       const unLine = await listenGuarded<ServerLogLine>(
         'log://line',
         (line) => {
-          setLogs((prev) => {
-            const next = [...prev, line];
-            if (next.length > 5000) {
-              next.shift();
-            }
-            return next;
-          });
+          // 只攒不渲染：批量 flush 见下方定时器。
+          logBufferRef.current.push({ ...line, id: logIdSeq.current++ });
         },
         () => disposed,
       );
@@ -307,15 +340,32 @@ export function useServer() {
       }
       const unClear = await listenGuarded(
         'log://clear',
-        () => setLogs([]),
+        () => {
+          // clear 优先于缓冲：丢弃未 flush 的增量行并立即清空，保持时序语义。
+          logBufferRef.current = [];
+          setLogs([]);
+        },
         () => disposed,
       );
       if (unClear) {
         unlisteners.push(unClear);
       }
     })();
+    // 批量 flush：缓冲非空才 setLogs，静止时零开销。一次追加 + 一次上限裁剪。
+    const flushTimer = window.setInterval(() => {
+      const batch = logBufferRef.current;
+      if (disposed || batch.length === 0) {
+        return;
+      }
+      logBufferRef.current = [];
+      setLogs((prev) => {
+        const next = [...prev, ...batch];
+        return next.length > MAX_LOG_LINES ? next.slice(next.length - MAX_LOG_LINES) : next;
+      });
+    }, LOG_FLUSH_MS);
     return () => {
       disposed = true;
+      window.clearInterval(flushTimer);
       unlisteners.forEach((un) => un());
     };
   }, []);
@@ -417,7 +467,19 @@ export function useServer() {
     }
   }, []);
 
-  useInterval(refreshNow, 1500);
+  // 轮询频率随窗口可见性切换：可见 1.5s，隐藏/托盘 8s（切 delay 即重建 useInterval）。
+  const [pollDelay, setPollDelay] = useState(() =>
+    document.visibilityState === 'hidden' ? POLL_INTERVAL_HIDDEN_MS : POLL_INTERVAL_MS,
+  );
+  useEffect(() => {
+    const syncPollDelay = () =>
+      setPollDelay(
+        document.visibilityState === 'hidden' ? POLL_INTERVAL_HIDDEN_MS : POLL_INTERVAL_MS,
+      );
+    document.addEventListener('visibilitychange', syncPollDelay);
+    return () => document.removeEventListener('visibilitychange', syncPollDelay);
+  }, []);
+  useInterval(refreshNow, pollDelay);
 
   // 系统从睡眠/休眠唤醒时立即刷新状态：睡眠期间 JS 定时器被系统挂起，
   // 仅靠 1.5s 轮询会在唤醒后延迟最多一个周期才反映「睡眠中被回收/挂死的服务」。
@@ -705,6 +767,8 @@ export function useServer() {
   const handleClearLogs = async () => {
     try {
       await invoke('clear_logs');
+      // 缓冲里可能有尚未 flush 的增量行：一并丢弃，避免清空后 200ms 内又被 flush 出来。
+      logBufferRef.current = [];
       setLogs([]);
     } catch (err) {
       console.error(err);

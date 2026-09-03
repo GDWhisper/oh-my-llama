@@ -1362,6 +1362,25 @@ button:disabled {
   color: #ffffff;
 }
 
+/* 渲染窗口上方「加载更早日志」按钮：贴 terminal 顶部居中，风格与 term-jump 同族 */
+.term-older {
+  align-self: center;
+  flex: 0 0 auto;
+  margin: 2px 0 4px;
+  padding: 3px 12px;
+  border-radius: 999px;
+  border: 1px solid #26314f;
+  background: rgba(17, 26, 51, 0.92);
+  color: #cbd5e1;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.term-older:hover {
+  background: #1b2547;
+  color: #ffffff;
+}
+
 .term-line {
   display: flex;
   gap: 8px;
