@@ -3,7 +3,7 @@ import { en, zh, type Lang, type MessageKey, type Translator } from './messages'
 import { I18nContext } from './useI18n';
 
 // 轻量自研 i18n（无外部依赖）：Context + useI18n hook。
-// 语言持久化到 localStorage（应用级、跨配置生效），默认中文。
+// 语言持久化到 localStorage（应用级、跨配置生效）；首次启动（无保存偏好）跟随系统语言，zh 系 → 中文，其余 → English。
 
 const DICTS: Record<Lang, Record<MessageKey, string>> = { zh, en };
 const STORAGE_KEY = 'oh-my-llama:lang';
@@ -15,9 +15,14 @@ function detectLang(): Lang {
       return saved;
     }
   } catch {
-    // localStorage 不可用时退回默认
+    // localStorage 不可用时退回系统语言检测
   }
-  return 'zh';
+  // 无保存偏好（首次启动）：跟随系统语言；navigator 不可用时兜底中文。
+  try {
+    return (navigator.language ?? '').toLowerCase().startsWith('zh') ? 'zh' : 'en';
+  } catch {
+    return 'zh';
+  }
 }
 
 export function I18nProvider({ children }: { children: ReactNode }) {

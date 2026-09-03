@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useState } from 'react';
 import type { ServerConfig } from '../types';
 import { useI18n } from '../i18n';
 import { Button } from './Button';
@@ -6,6 +6,7 @@ import { IconButton } from './IconButton';
 import { NameDialog } from './NameDialog';
 import { ConfirmDialog } from './ConfirmDialog';
 import { TruncatedText } from './TruncatedText';
+import { useDropdownSearch } from '../hooks/useDropdownSearch';
 
 type DialogMode = 'save-as-new' | 'create-empty' | 'rename';
 
@@ -34,7 +35,8 @@ interface Props {
 }
 
 // 配置管理卡片：位于左侧栏顶部（必要参数上方），统一管理必要参数与高级参数。
-// 通过自定义下拉框切换配置；默认配置为只读模板，保存时会提示生成新配置。
+// 通过可搜索的自定义下拉框切换配置（与「选择模型」同款，共用 useDropdownSearch）；
+// 默认配置为只读模板，保存时会提示生成新配置。
 // 每个命名配置右侧带 ✎ 重命名图标（在 × 删除图标左侧），点击后弹窗输入新名称；
 // 默认配置无 ✎ / ×（不可重命名、不可删除）。
 export function ConfigManager({
@@ -62,26 +64,38 @@ export function ConfigManager({
   // 当前正在请求删除的配置名；非 null 时展示删除确认弹窗。
   // 注意：删除弹窗打开时下拉框保持展开（open 不变）。
   const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
-  const boxRef = useRef<HTMLDivElement | null>(null);
 
-  // 点击下拉框外部时收起列表（但删除弹窗打开时不处理，避免误关）。
-  useEffect(() => {
-    if (!open) return;
-    const onDown = (event: MouseEvent) => {
-      if (boxRef.current && !boxRef.current.contains(event.target as Node)) {
-        setOpen(false);
-      }
-    };
-    document.addEventListener('mousedown', onDown);
-    return () => document.removeEventListener('mousedown', onDown);
-  }, [open]);
-
-  const currentLabel = activeName === 'default' ? t('config.default') : activeName;
+  // 下拉条目：默认配置固定在最前（按展示文案参与搜索），其余按名称排序。
+  const entries: { key: string; label: string }[] = [
+    { key: 'default', label: t('config.default') },
+    ...names.map((name) => ({ key: name, label: name })),
+  ];
 
   const choose = (name: string) => {
     onSelect(name);
     setOpen(false);
   };
+
+  // 与「选择模型」同款的可搜索下拉：搜索框、点击外部关闭、空间自适应展开方向、回车选中共用一套行为。
+  const {
+    query,
+    setQuery,
+    filtered,
+    dropUp,
+    boxRef,
+    triggerRef,
+    listRef,
+    searchRef,
+    onSearchKeyDown,
+  } = useDropdownSearch({
+    open,
+    items: entries,
+    getLabel: (entry) => entry.label,
+    onClose: () => setOpen(false),
+    onSelectFirst: (entry) => choose(entry.key),
+  });
+
+  const currentLabel = activeName === 'default' ? t('config.default') : activeName;
 
   const confirmDelete = () => {
     if (deleteTarget) {
@@ -151,6 +165,7 @@ export function ConfigManager({
               <button
                 type="button"
                 className="select-trigger"
+                ref={triggerRef}
                 onClick={() => setOpen((value) => !value)}
               >
                 <span className="select-value">
@@ -161,46 +176,58 @@ export function ConfigManager({
                 </span>
               </button>
               {open && (
-                <ul className="select-list">
-                  <li className="select-option">
-                    <button
-                      type="button"
-                      className={`option-main${activeName === 'default' ? ' selected' : ''}`}
-                      onClick={() => choose('default')}
-                    >
-                      <TruncatedText text={t('config.default')} />
-                    </button>
-                  </li>
-                  {names.map((name) => (
-                    <li key={name} className="select-option">
-                      <button
-                        type="button"
-                        className={`option-main${activeName === name ? ' selected' : ''}`}
-                        onClick={() => choose(name)}
-                      >
-                        <TruncatedText text={name} />
-                      </button>
-                      <button
-                        type="button"
-                        className="option-rename"
-                        title={t('config.renameTitle', { name })}
-                        aria-label={t('config.renameAria', { name })}
-                        onClick={() => onRename(name)}
-                      >
-                        ✎
-                      </button>
-                      <button
-                        type="button"
-                        className="option-delete"
-                        title={t('config.deleteTitle', { name })}
-                        aria-label={t('config.deleteAria', { name })}
-                        onClick={() => setDeleteTarget(name)}
-                      >
-                        ×
-                      </button>
-                    </li>
-                  ))}
-                </ul>
+                <div ref={listRef} className={`select-list${dropUp ? ' drop-up' : ''}`}>
+                  <div className="model-search">
+                    <input
+                      ref={searchRef}
+                      type="text"
+                      className="model-search-input"
+                      placeholder={t('config.searchPlaceholder')}
+                      value={query}
+                      onChange={(event) => setQuery(event.currentTarget.value)}
+                      onKeyDown={onSearchKeyDown}
+                    />
+                  </div>
+                  {filtered.length === 0 ? (
+                    <div className="model-search-empty">{t('config.noMatch')}</div>
+                  ) : (
+                    <ul className="model-options">
+                      {filtered.map((entry) => (
+                        <li key={entry.key} className="select-option">
+                          <button
+                            type="button"
+                            className={`option-main${activeName === entry.key ? ' selected' : ''}`}
+                            onClick={() => choose(entry.key)}
+                          >
+                            <TruncatedText text={entry.label} />
+                          </button>
+                          {entry.key !== 'default' && (
+                            <>
+                              <button
+                                type="button"
+                                className="option-rename"
+                                title={t('config.renameTitle', { name: entry.key })}
+                                aria-label={t('config.renameAria', { name: entry.key })}
+                                onClick={() => onRename(entry.key)}
+                              >
+                                ✎
+                              </button>
+                              <button
+                                type="button"
+                                className="option-delete"
+                                title={t('config.deleteTitle', { name: entry.key })}
+                                aria-label={t('config.deleteAria', { name: entry.key })}
+                                onClick={() => setDeleteTarget(entry.key)}
+                              >
+                                ×
+                              </button>
+                            </>
+                          )}
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
               )}
             </div>
             <IconButton label={t('config.restore')} onClick={onRestoreConfig} disabled={!isDirty}>

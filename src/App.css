@@ -679,7 +679,7 @@ body {
   overflow-y: auto;
 }
 
-/* 空间不足时向上展开（由 ModelSelect 测量视口后加 .drop-up） */
+/* 空间不足时向上展开（由 useDropdownSearch 测量视口后加 .drop-up） */
 .select-list.drop-up {
   top: auto;
   bottom: calc(100% + 4px);
@@ -1021,11 +1021,10 @@ body {
   flex-shrink: 0;
 }
 
-/* 「更新」卡片内的版本行：标签在左，版本号、NEW 徽标与检查按钮在右 */
+/* 「更新」卡片内的版本行：版本标签、版本号、NEW 徽标与检查按钮靠左聚拢成一组 */
 .settings-meta-row {
   display: flex;
   align-items: center;
-  justify-content: space-between;
   gap: 8px;
 }
 .settings-meta {

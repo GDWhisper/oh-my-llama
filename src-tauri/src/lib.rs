@@ -160,6 +160,7 @@ pub struct ServerLogLine {
 //  - auto_check_updates：启动时是否自动检查更新（不打扰：仅弹右上提示+版本旁 NEW 徽标，
 //    绝不静默下载/安装；安装仍需用户在弹窗里显式确认）。
 //  - recent_servers：本机用过的 llama-server 可执行文件路径（最近使用优先），供前端输入框给候选。
+//  - recent_model_dirs：本机用过的模型目录（同款最近使用机制），供模型目录输入框给候选。
 //  - minimize_to_tray：窗口关闭行为。None = 用户尚未选择过（点关闭按钮时弹窗询问）；
 //    Some(true) = 最小化到系统托盘（服务保持运行）；Some(false) = 直接退出。
 //    仅在用户主动选择（弹窗勾选记住 / 设置界面改选）时才落为 Some，询问弹窗关闭不算。
@@ -175,6 +176,8 @@ pub struct AppSettings {
     pub auto_check_updates: bool,
     #[serde(default)]
     pub recent_servers: Vec<String>,
+    #[serde(default)]
+    pub recent_model_dirs: Vec<String>,
     #[serde(default)]
     pub minimize_to_tray: Option<bool>,
 }
@@ -316,101 +319,111 @@ async fn set_tray_labels(app: AppHandle, show: String, quit: String) -> Result<(
     Ok(())
 }
 
-// ── llama-server 路径历史（最近使用）───────────────────────────────────
-// 只做一件事：记住本机用过的 llama-server 可执行文件路径，供前端路径输入框给出候选。
-// 与 ServerConfig 解耦：ServerConfig.llama_server_path 仍是「本次启动用哪个二进制」的唯一真源，
-// 这里只是「用过哪些」的历史。存 settings.json 而非 configs.toml，故清理历史不影响任何命名配置。
+// ── 路径历史（最近使用）───────────────────────────────────────────────
+// 同一套机制服务两种路径：llama-server 可执行文件（recent_servers）与模型目录
+// （recent_model_dirs）。只做一件事：记住本机用过的路径，供前端路径输入框给出候选。
+// 与 ServerConfig 解耦：配置字段仍是「本次启动用哪个」的唯一真源，这里只是「用过哪些」
+// 的历史。存 settings.json 而非 configs.toml，故清理历史不影响任何命名配置。
 // Vec 顺序即新鲜度：索引 0 为最近一次使用，因此无需再给每条路径附 last_used_at 字段。
-const RECENT_SERVERS_MAX: usize = 10;
+const RECENT_PATHS_MAX: usize = 10;
 
 // 路径归一化去重键：Windows 下路径大小写不敏感、且 / 与 \ 常混用
 // （一键传参回填的往往是 / 分隔），不归一会攒出指向同一个文件的重复条目。
-fn server_key(path: &str) -> String {
+fn path_key(path: &str) -> String {
     path.trim().replace('\\', "/").to_ascii_lowercase()
 }
 
 /// 把 path 记为「最近用过」：命中已有条目时先摘掉再插到队首，最后截断到上限。
 /// 纯函数（不经手 settings.json），因此 MRU 顺序、大小写/分隔符去重与上限语义可直接单测。
-fn remember_recent_server(list: &mut Vec<String>, path: &str) {
+fn remember_recent_path(list: &mut Vec<String>, path: &str) {
     let trimmed = path.trim();
     if trimmed.is_empty() {
         return;
     }
-    let key = server_key(trimmed);
-    list.retain(|item| server_key(item) != key);
+    let key = path_key(trimmed);
+    list.retain(|item| path_key(item) != key);
     list.insert(0, trimmed.to_string());
-    list.truncate(RECENT_SERVERS_MAX);
+    list.truncate(RECENT_PATHS_MAX);
 }
 
-/// 输入框候选项。`used_by_config` 表示这条路径仍被某个命名配置引用：
-/// 从历史里忘掉它对它没有可见效果（下次扫配置还会出来），故前端不给这类条目挂 ×。
+/// 路径输入框候选项（llama-server 路径与模型目录共用）。`used_by_config` 表示这条路径
+/// 仍被某个命名配置引用：从历史里忘掉它对它没有可见效果（下次扫配置还会出来），
+/// 故前端不给这类条目挂 ×。
 #[derive(Debug, Clone, Serialize)]
-struct ServerCandidate {
+struct PathCandidate {
     path: String,
     used_by_config: bool,
 }
 
 /// 候选 = 已记账的最近使用 + 各命名配置里用过的路径。
-/// 后者是零操作兜底：装好新版还没启动过服务，也能直接从既有配置里挑二进制。
-/// 纯函数（不经手磁盘），排序、去重、上限语义可直接单测。
-fn server_candidates(
+/// 后者是零操作兜底：装好新版还没启动过服务，也能直接从既有配置里挑。
+/// config_paths 由调用方按路径种类提取（llama_server_path / model_dir），
+/// 合并、去重、排序与上限语义全在这里共享。纯函数（不经手磁盘），可直接单测。
+fn path_candidates<'a>(
     used: &[String],
-    configs: &HashMap<String, ServerConfig>,
-) -> Vec<ServerCandidate> {
-    let config_keys: HashSet<String> = configs
-        .values()
-        .map(|cfg| server_key(&cfg.llama_server_path))
+    config_paths: impl IntoIterator<Item = &'a str>,
+) -> Vec<PathCandidate> {
+    let mut from_configs: Vec<&str> = config_paths.into_iter().collect();
+    let config_keys: HashSet<String> = from_configs
+        .iter()
+        .map(|path| path_key(path))
         .filter(|key| !key.is_empty())
         .collect();
     let mut seen: HashSet<String> = HashSet::new();
-    let mut out: Vec<ServerCandidate> = Vec::new();
+    let mut out: Vec<PathCandidate> = Vec::new();
     let mut push = |path: &str, used_by_config: bool| {
         let trimmed = path.trim();
-        if trimmed.is_empty() || !seen.insert(server_key(trimmed)) {
+        if trimmed.is_empty() || !seen.insert(path_key(trimmed)) {
             return;
         }
-        out.push(ServerCandidate {
+        out.push(PathCandidate {
             path: trimmed.to_string(),
             used_by_config,
         });
     };
     for path in used {
-        push(path, config_keys.contains(&server_key(path)));
+        push(path, config_keys.contains(&path_key(path)));
     }
-    // HashMap 迭代顺序不稳定，配置来源先按归一化键排序再追加，避免候选顺序每次跳动。
-    let mut from_configs: Vec<&str> = configs
-        .values()
-        .map(|cfg| cfg.llama_server_path.as_str())
-        .collect();
-    from_configs.sort_unstable_by_key(|path| server_key(path));
+    // 调用方来源（HashMap）迭代顺序不稳定，配置来源先按归一化键排序再追加，避免候选顺序每次跳动。
+    from_configs.sort_unstable_by_key(|path| path_key(path));
     for path in from_configs {
         push(path, true);
     }
-    out.truncate(RECENT_SERVERS_MAX);
+    out.truncate(RECENT_PATHS_MAX);
     out
 }
 
 #[tauri::command]
-async fn list_recent_servers() -> Result<Vec<ServerCandidate>, String> {
+async fn list_recent_servers() -> Result<Vec<PathCandidate>, String> {
     let app_data = resolve_app_data()?;
     let used = load_settings(&app_data).recent_servers;
     let store = load_store(&configs_path(&app_data));
-    Ok(server_candidates(&used, &store.configs))
+    Ok(path_candidates(
+        &used,
+        store
+            .configs
+            .values()
+            .map(|cfg| cfg.llama_server_path.as_str()),
+    ))
 }
 
 /// 从历史里忘掉某条路径（前端候选项上的 × 按钮）。
 /// 直接回传重算后的候选列表，省掉前端再一次 invoke 刷新。
 #[tauri::command]
-async fn remove_recent_server(path: String) -> Result<Vec<ServerCandidate>, String> {
+async fn remove_recent_server(path: String) -> Result<Vec<PathCandidate>, String> {
     let app_data = resolve_app_data()?;
     let mut settings = load_settings(&app_data);
-    let key = server_key(&path);
-    settings
-        .recent_servers
-        .retain(|item| server_key(item) != key);
+    let key = path_key(&path);
+    settings.recent_servers.retain(|item| path_key(item) != key);
     save_settings_json(&app_data, &settings)?;
     let store = load_store(&configs_path(&app_data));
-    Ok(server_candidates(&settings.recent_servers, &store.configs))
+    Ok(path_candidates(
+        &settings.recent_servers,
+        store
+            .configs
+            .values()
+            .map(|cfg| cfg.llama_server_path.as_str()),
+    ))
 }
 
 /// 服务成功拉起后记账：把这条路径提到历史队首。
@@ -421,7 +434,47 @@ fn touch_server_used(path: &str) {
         return;
     };
     let mut settings = load_settings(&app_data);
-    remember_recent_server(&mut settings.recent_servers, path);
+    remember_recent_path(&mut settings.recent_servers, path);
+    let _ = save_settings_json(&app_data, &settings);
+}
+
+// ── 模型目录历史：与 llama-server 路径历史同款机制，仅字段与候选提取不同 ──
+
+#[tauri::command]
+async fn list_recent_model_dirs() -> Result<Vec<PathCandidate>, String> {
+    let app_data = resolve_app_data()?;
+    let used = load_settings(&app_data).recent_model_dirs;
+    let store = load_store(&configs_path(&app_data));
+    Ok(path_candidates(
+        &used,
+        store.configs.values().map(|cfg| cfg.model_dir.as_str()),
+    ))
+}
+
+/// 从模型目录历史里忘掉一条（前端候选项上的 × 按钮），语义与 remove_recent_server 相同。
+#[tauri::command]
+async fn remove_recent_model_dir(path: String) -> Result<Vec<PathCandidate>, String> {
+    let app_data = resolve_app_data()?;
+    let mut settings = load_settings(&app_data);
+    let key = path_key(&path);
+    settings
+        .recent_model_dirs
+        .retain(|item| path_key(item) != key);
+    save_settings_json(&app_data, &settings)?;
+    let store = load_store(&configs_path(&app_data));
+    Ok(path_candidates(
+        &settings.recent_model_dirs,
+        store.configs.values().map(|cfg| cfg.model_dir.as_str()),
+    ))
+}
+
+/// 服务成功拉起后把模型目录记进历史：与 touch_server_used 同款语义（用过就记住、失败静默）。
+fn touch_model_dir_used(path: &str) {
+    let Ok(app_data) = resolve_app_data() else {
+        return;
+    };
+    let mut settings = load_settings(&app_data);
+    remember_recent_path(&mut settings.recent_model_dirs, path);
     let _ = save_settings_json(&app_data, &settings);
 }
 
@@ -455,6 +508,8 @@ pub fn run() {
             list_models,
             list_recent_servers,
             remove_recent_server,
+            list_recent_model_dirs,
+            remove_recent_model_dir,
             read_settings,
             save_settings,
             set_close_pref,
@@ -1041,8 +1096,9 @@ async fn start_server(app: AppHandle, config: ServerConfig) -> Result<ServerStat
     );
 
     // 顺手记进路径历史（失败静默）：用户零操作也能攒出候选，下次换版本直接在输入框里选。
-    // 只记路径，不探测版本 —— 见 touch_server_used。
+    // 只记路径，不探测版本 —— 见 touch_server_used / touch_model_dir_used。
     touch_server_used(&config.llama_server_path);
+    touch_model_dir_used(&config.model_dir);
 
     // 立即把子进程交给 wait_process 监管：实时消费 stdout/stderr（原生日志透传）、
     // 进程退出时复位状态、回收 GPU。必须在阻塞等待端口就绪之前启动——否则模型加载
@@ -2274,13 +2330,13 @@ enabled_advanced_params = ["ctx_size"]
     }
 
     #[test]
-    fn remember_recent_server_keeps_mru_order() {
+    fn remember_recent_path_keeps_mru_order() {
         let mut list: Vec<String> = Vec::new();
-        remember_recent_server(&mut list, "F:/llama/llama-server.exe");
-        remember_recent_server(&mut list, "F:/llama-vulkan/llama-server.exe");
+        remember_recent_path(&mut list, "F:/llama/llama-server.exe");
+        remember_recent_path(&mut list, "F:/llama-vulkan/llama-server.exe");
         // 再次用过同一个文件（大小写与分隔符都不同、还带多余空格）：不新增条目，
         // 只把它提到队首；入库文本保留用户原本的写法，仅归一化键用于判重。
-        remember_recent_server(&mut list, " f:\\llama\\LLAMA-SERVER.EXE ");
+        remember_recent_path(&mut list, " f:\\llama\\LLAMA-SERVER.EXE ");
         assert_eq!(
             list,
             vec![
@@ -2289,29 +2345,29 @@ enabled_advanced_params = ["ctx_size"]
             ]
         );
         // 空白路径不入历史。
-        remember_recent_server(&mut list, "   ");
+        remember_recent_path(&mut list, "   ");
         assert_eq!(list.len(), 2);
 
         // 超出上限只裁尾巴，队首（最近用过）不动。
-        let newest = format!("F:/v{}/llama-server.exe", RECENT_SERVERS_MAX + 2);
-        for index in 0..(RECENT_SERVERS_MAX + 3) {
-            remember_recent_server(&mut list, &format!("F:/v{index}/llama-server.exe"));
+        let newest = format!("F:/v{}/llama-server.exe", RECENT_PATHS_MAX + 2);
+        for index in 0..(RECENT_PATHS_MAX + 3) {
+            remember_recent_path(&mut list, &format!("F:/v{index}/llama-server.exe"));
         }
-        assert_eq!(list.len(), RECENT_SERVERS_MAX);
+        assert_eq!(list.len(), RECENT_PATHS_MAX);
         assert_eq!(list[0], newest);
     }
 
     #[test]
-    fn server_key_dedupes_case_and_separator_variants() {
+    fn path_key_dedupes_case_and_separator_variants() {
         // 同一文件在 Windows 下可能以不同大小写、不同分隔符出现（手填 \ 、一键传参 / ），必须归一。
-        let a = server_key("F:\\llama\\llama-server.exe");
-        assert_eq!(a, server_key("f:/llama/llama-server.exe"));
-        assert_eq!(a, server_key("  F:/llama/llama-server.exe  "));
-        assert_ne!(a, server_key("F:/llama-vulkan/llama-server.exe"));
+        let a = path_key("F:\\llama\\llama-server.exe");
+        assert_eq!(a, path_key("f:/llama/llama-server.exe"));
+        assert_eq!(a, path_key("  F:/llama/llama-server.exe  "));
+        assert_ne!(a, path_key("F:/llama-vulkan/llama-server.exe"));
     }
 
     #[test]
-    fn server_candidates_merge_history_and_configs() {
+    fn path_candidates_merge_history_and_configs() {
         let mut configs: HashMap<String, ServerConfig> = HashMap::new();
         configs.insert(
             "cpu".into(),
@@ -2329,9 +2385,15 @@ enabled_advanced_params = ["ctx_size"]
             },
         );
         configs.insert("blank".into(), ServerConfig::default());
+        let server_paths = || {
+            configs
+                .values()
+                .map(|cfg| cfg.llama_server_path.as_str())
+                .collect::<Vec<_>>()
+        };
 
         let used = vec!["F:\\llama\\llama-server.exe".to_string()];
-        let list = server_candidates(&used, &configs);
+        let list = path_candidates(&used, server_paths());
         assert_eq!(
             list.iter()
                 .map(|item| item.path.as_str())
@@ -2357,21 +2419,47 @@ enabled_advanced_params = ["ctx_size"]
             "F:/b/llama-server.exe".to_string(),
             "F:/a/llama-server.exe".to_string(),
         ];
-        let list = server_candidates(&used, &orphans);
+        let list = path_candidates(
+            &used,
+            orphans.values().map(|cfg| cfg.llama_server_path.as_str()),
+        );
         assert_eq!(list[0].path, "F:/b/llama-server.exe");
         assert!(!list[0].used_by_config);
         assert!(list[1].used_by_config);
 
         // 合并后仍受上限约束：历史占满时，配置里的额外路径不会把列表撑破。
-        let crowded = (0..RECENT_SERVERS_MAX)
+        let crowded = (0..RECENT_PATHS_MAX)
             .map(|index| format!("F:/v{index}/llama-server.exe"))
             .collect::<Vec<_>>();
-        let list = server_candidates(&crowded, &configs);
-        assert_eq!(list.len(), RECENT_SERVERS_MAX);
+        let list = path_candidates(&crowded, server_paths());
+        assert_eq!(list.len(), RECENT_PATHS_MAX);
+
+        // 模型目录走同一套合并逻辑：从 model_dir 字段提取候选，语义与 llama-server 路径一致。
+        let mut model_configs: HashMap<String, ServerConfig> = HashMap::new();
+        model_configs.insert(
+            "qwen".into(),
+            ServerConfig {
+                model_dir: "F:\\models\\qwen".into(),
+                ..Default::default()
+            },
+        );
+        let used_dirs = vec!["F:/models/qwen".to_string(), "F:/models/llama".to_string()];
+        let list = path_candidates(
+            &used_dirs,
+            model_configs.values().map(|cfg| cfg.model_dir.as_str()),
+        );
+        assert_eq!(
+            list.iter()
+                .map(|item| item.path.as_str())
+                .collect::<Vec<_>>(),
+            vec!["F:/models/qwen", "F:/models/llama"]
+        );
+        assert!(list[0].used_by_config);
+        assert!(!list[1].used_by_config);
     }
 
     #[test]
-    fn settings_round_trip_preserves_recent_servers() {
+    fn settings_round_trip_preserves_path_histories() {
         let dir = std::env::temp_dir().join(format!("llama_srv_test_{}", std::process::id()));
         let _ = std::fs::create_dir_all(dir.join("OhMyLlama"));
         let settings = AppSettings {
@@ -2381,14 +2469,16 @@ enabled_advanced_params = ["ctx_size"]
                 "F:/llama-vulkan/llama-server.exe".into(),
                 "F:/llama/llama-server.exe".into(),
             ],
+            recent_model_dirs: vec!["F:/models/qwen".into(), "F:/models/llama".into()],
             minimize_to_tray: None,
         };
         save_settings_json(&dir, &settings).expect("save settings");
         let loaded = load_settings(&dir);
         assert_eq!(loaded.update_proxy, settings.update_proxy);
         assert_eq!(loaded.recent_servers, settings.recent_servers);
+        assert_eq!(loaded.recent_model_dirs, settings.recent_model_dirs);
 
-        // 没有 recent_servers 字段的旧 settings.json：必须解析成功且历史为空，
+        // 没有任何路径历史字段的旧 settings.json：必须解析成功且历史为空，
         // 不能因为多了一个字段就把用户已有设置整体丢掉。
         std::fs::write(
             settings_path(&dir),
@@ -2398,6 +2488,7 @@ enabled_advanced_params = ["ctx_size"]
         let legacy = load_settings(&dir);
         assert!(legacy.auto_check_updates);
         assert!(legacy.recent_servers.is_empty());
+        assert!(legacy.recent_model_dirs.is_empty());
 
         let _ = std::fs::remove_dir_all(&dir);
     }

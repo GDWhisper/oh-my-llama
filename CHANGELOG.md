@@ -4,6 +4,19 @@
 
 > 本文件为**详细改动历史**（含涉及的文件与实现机制）；GitHub Release 页面为对应版本的**总结性**说明。
 
+## [0.1.9] - 2026-09-04
+
+### 新增功能
+- **模型目录「最近使用」候选**：模型目录输入框升级为与 llama-server 路径输入框同款的「输入 + 候选」组合框，两处共用同一套后端路径历史机制。`src-tauri/src/lib.rs` 将原 llama-server 专属的 `server_key` / `remember_recent_server` / `server_candidates` 泛化为 `path_key` / `remember_recent_path` / `path_candidates`（候选来源由调用方按路径种类提取：`llama_server_path` / `model_dir`，合并、归一化去重、排序与 MRU 上限 10 的语义全部共享，纯函数可直接单测）；`AppSettings` 新增 `recent_model_dirs` 字段（`#[serde(default)]`，旧 `settings.json` 向后兼容），新增 `list_recent_model_dirs` / `remove_recent_model_dir` 命令（注册进 `generate_handler!`），`start_server` 成功拉起后在记 llama-server 路径的同时 `touch_model_dir_used`。前端 `src/types.ts` 将 `ServerCandidate` 更名为 `PathCandidate`（载荷注释同步），`src/hooks/useServer.ts` 新增 `modelDirCandidates` / `forgetModelDir` / `refreshModelDirCandidates`（与路径候选同批刷新：挂载、窗口聚焦、启动成功后），`src/components/BasicParamsPanel.tsx` 为模型目录字段传入 `suggestions` / `onRemoveSuggestion`，`src/components/PathField.tsx` 类型注解同步（组合框本体零改动即复用）。llama-server 路径与模型目录历史各自独立记账、互不串扰。
+- **选择配置下拉可搜索**：`src/components/ConfigManager.tsx` 的下拉框获得与「选择模型」同款的搜索能力——抽出共享 hook `src/hooks/useDropdownSearch.ts`（过滤 / 打开聚焦 / 点外关闭 / 空间不足向上展开 / 回车选中首项，`ModelSelect` 与 `ConfigManager` 共用，消除两处重复逻辑）。配置条目统一渲染：默认配置按展示文案参与搜索且不显示 ✎/×，命名配置按名称过滤并保留重命名 / 删除按钮。`src/i18n/messages.ts` 新增 `config.searchPlaceholder` / `config.noMatch` 中英双键；视觉复用 `.model-search` 系列样式，零新增 CSS。
+
+### 功能优化
+- **首次启动语言跟随系统**：`src/i18n/I18nProvider.tsx` 的 `detectLang` 在无已保存语言偏好（首次启动）时改为按 `navigator.language` 判定——`zh` 前缀 → 中文，其余 → English（原固定返回中文）；`localStorage` 不可用同样退回系统语言检测，仅当 `navigator` 也不可用时才兜底中文。已手动切换过语言的用户行为不变（保存的偏好优先）。
+- **设置浮窗「更新」卡片版本行布局**：`src/App.css` 的 `.settings-meta-row` 由两端分布（`space-between`）改为左侧聚拢成组，版本标签、版本号、NEW 徽标与检查按钮视觉归拢。
+
+### Bug 修复
+- 无
+
 ## [0.1.8] - 2026-09-03
 
 ### 新增功能
