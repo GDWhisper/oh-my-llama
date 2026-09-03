@@ -18,7 +18,7 @@ const sectionIcons = {
       <path d="M2.4 5.6h11.2M2.4 10.4h11.2" />
     </svg>
   ),
-  proxy: (
+  update: (
     <svg width="14" height="14" viewBox="0 0 16 16" aria-hidden="true">
       <path d="M14 8a6 6 0 1 1-6-6c1.68 0 3.29.67 4.49 1.83L14 5.33" />
       <path d="M14 2v3.33h-3.33" />
@@ -50,7 +50,7 @@ interface Props {
   onOpenUpdate: () => void;
 }
 
-// 设置浮窗：居中弹层，承载语言设置与关于（含手动「检查更新」+「自动检查」开关）。
+// 设置浮窗：居中弹层，承载语言、更新（版本 / 自动检查 / 代理）、关闭窗口行为与关于四组设置。
 // 复用公共 modal 遮罩与样式。
 export function SettingsDialog({
   open,
@@ -181,9 +181,62 @@ export function SettingsDialog({
           <div className="settings-section">
             <div className="settings-section-head">
               <span className="settings-label">
-                {sectionIcons.proxy}
-                {t('settings.updateProxy')}
+                {sectionIcons.update}
+                {t('settings.update')}
               </span>
+              <span className="settings-hint">{t('settings.updateHint')}</span>
+            </div>
+            <div className="settings-meta-row">
+              <span className="settings-hint">{t('about.version')}</span>
+              <span className="settings-meta">
+                <span className="settings-meta-value">{version}</span>
+                {pendingUpdate && (
+                  <button
+                    type="button"
+                    className="update-badge"
+                    title={t('update.badgeTitle')}
+                    aria-label={t('update.badgeTitle')}
+                    onClick={() => {
+                      onClose();
+                      onOpenUpdate();
+                    }}
+                  >
+                    {t('update.badgeNew')}
+                  </button>
+                )}
+                <Button
+                  variant="secondary"
+                  type="button"
+                  onClick={onCheckUpdate}
+                  disabled={checking}
+                >
+                  {checking ? t('update.checking') : t('update.check')}
+                </Button>
+              </span>
+            </div>
+            <label className="settings-option-row">
+              <input
+                type="checkbox"
+                className="settings-checkbox"
+                checked={autoCheck}
+                onChange={(event) => {
+                  setAutoCheck(event.target.checked);
+                  // 立即落盘（含当前代理值），无需点「保存」也能记住开关。
+                  invoke<AppSettings>('save_settings', {
+                    updateProxy: proxy,
+                    autoCheckUpdates: event.target.checked,
+                  })
+                    .then((s) => {
+                      setProxy(s.update_proxy);
+                      setAutoCheck(Boolean(s.auto_check_updates));
+                    })
+                    .catch(() => {});
+                }}
+              />
+              <span className="settings-check-label">{t('settings.autoCheck')}</span>
+            </label>
+            <div className="settings-section-head">
+              <span className="settings-sublabel">{t('settings.updateProxy')}</span>
               <span className="settings-hint">{t('settings.updateProxyHint')}</span>
             </div>
             <div className="settings-proxy-row">
@@ -254,57 +307,14 @@ export function SettingsDialog({
                 {t('about.title')}
               </span>
             </div>
-            <div className="about-row">
-              <span className="settings-hint">{t('about.version')}</span>
-              <span className="about-meta">
-                <span className="about-value">{version}</span>
-                {pendingUpdate && (
-                  <button
-                    type="button"
-                    className="update-badge"
-                    title={t('update.badgeTitle')}
-                    aria-label={t('update.badgeTitle')}
-                    onClick={() => {
-                      onClose();
-                      onOpenUpdate();
-                    }}
-                  >
-                    {t('update.badgeNew')}
-                  </button>
-                )}
-              </span>
-            </div>
-            <label className="settings-option-row">
-              <input
-                type="checkbox"
-                className="settings-checkbox"
-                checked={autoCheck}
-                onChange={(event) => {
-                  setAutoCheck(event.target.checked);
-                  // 立即落盘（含当前代理值），无需点「保存」也能记住开关。
-                  invoke<AppSettings>('save_settings', {
-                    updateProxy: proxy,
-                    autoCheckUpdates: event.target.checked,
-                  })
-                    .then((s) => {
-                      setProxy(s.update_proxy);
-                      setAutoCheck(Boolean(s.auto_check_updates));
-                    })
-                    .catch(() => {});
-                }}
-              />
-              <span className="settings-check-label">{t('settings.autoCheck')}</span>
-            </label>
-            <div className="about-actions">
+            <p className="settings-about-desc">{t('about.desc')}</p>
+            <div className="settings-repo-row">
               <Button
                 variant="secondary"
                 type="button"
                 onClick={() => openUrl(REPO_URL).catch(() => {})}
               >
                 {t('about.repo')}
-              </Button>
-              <Button type="button" onClick={onCheckUpdate} disabled={checking}>
-                {checking ? t('update.checking') : t('update.check')}
               </Button>
             </div>
           </div>

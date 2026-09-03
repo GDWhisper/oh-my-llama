@@ -20,6 +20,8 @@ interface MetricsSnapshot {
 }
 
 const INTERVAL = 1500;
+// 窗口隐藏/托盘常驻时降到 8s：面板看不见，满频采集是恒定浪费；切回即恢复满频。
+const INTERVAL_HIDDEN = 8000;
 
 function fmtMB(mb: number): string {
   if (mb >= 1024) return `${(mb / 1024).toFixed(1)} GB`;
@@ -44,11 +46,20 @@ export function MetricsPanel() {
         if (alive) setErr(String(e));
       }
     };
+    // 频率随窗口可见性切换：visibilitychange 时按当前可见性重建定时器。
+    const currentInterval = () =>
+      document.visibilityState === 'hidden' ? INTERVAL_HIDDEN : INTERVAL;
+    let id = window.setInterval(tick, currentInterval());
+    const onVisibility = () => {
+      window.clearInterval(id);
+      id = window.setInterval(tick, currentInterval());
+    };
     tick();
-    const id = window.setInterval(tick, INTERVAL);
+    document.addEventListener('visibilitychange', onVisibility);
     return () => {
       alive = false;
       window.clearInterval(id);
+      document.removeEventListener('visibilitychange', onVisibility);
     };
   }, []);
 

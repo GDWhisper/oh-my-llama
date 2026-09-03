@@ -4,6 +4,20 @@
 
 > 本文件为**详细改动历史**（含涉及的文件与实现机制）；GitHub Release 页面为对应版本的**总结性**说明。
 
+## [0.1.8] - 2026-09-03
+
+### 新增功能
+- **日志面板按需扩窗「加载更早日志」**：`src/components/LogPanel.tsx` 引入渲染窗口（`INITIAL_VISIBLE_LOGS = 800` / `LOAD_OLDER_STEP = 800`），默认只渲染过滤结果的尾部 800 行，仍有更早日志时顶部出现「↑ 加载更早日志」按钮按批扩窗（`src/i18n/messages.ts` 新增 `log.loadOlder` 中英双键，`src/App.css` 新增 `.term-older`）。满载 5000 行 × 每行 4 节点 ≈ 2 万 DOM 节点，此前每次批量 flush 都对全表做 reconciliation；改为窗口化后不引入虚拟滚动依赖即把开销降一个量级，流式场景（用户只关心最新输出）代价恒定。
+
+### 功能优化
+- **CPU 占用优化（前端渲染与轮询链路）**：静态审查结论与实施记录见 `docs/cpu-memory-audit-2026-09-03.md`（无内存泄露；2 处高优先级 CPU 热点 + 2 处中优先级持续开销，四项均已落地）。`src/hooks/useServer.ts`：`log://line` 增量行先写入 `logBufferRef`（ref 承载，高频写不参与渲染），由 `LOG_FLUSH_MS = 200` 定时器批量 flush 进 state，渲染频率与日志行频解耦（模型加载期 llama-server 以 `\r` 原地刷进度，逐行 `setLogs` 会让整棵 App 以行频重渲染）；行 key 由 `${ts}-${index}` 改单调递增 id（新增前端派生类型 `LogLine = ServerLogLine & { id }`，IPC 契约 `src/types.ts` 不变），消除后端有界缓冲满载 `shift()` 后全列表 key 变化导致的整列表重挂载；`setStatus` 前经 `sameStatus` 浅比较去重，服务静止时不再每 1.5s 触发全树重渲染；`handleClearLogs` 与 `log://clear` 一并丢弃未 flush 的缓冲行，保持清空时序语义。轮询频率随窗口可见性切换（可见 1.5s / 隐藏或托盘常驻 8s，`visibilitychange` 重建定时器），`src/components/MetricsPanel.tsx` 同构处理；状态轮询再加门控——仅 `managed || running` 时探测，空闲态 `useInterval` 传 `delay = null` 完全停表（外部起停服务属用户自身行为，OML 不为外部状态兜底探测；本应用启动撞端口时 `start_server` 即报失败，用户有反馈；冷启动必无受管进程，挂载时一次性 `loadStatus` 确认初始态）。
+- **后端进程探测与状态锁优化**：`src-tauri/src/lib.rs` 的 `is_process_running` 原每次调用 `System::new_all()` + `refresh_processes()` 全量枚举整机进程表（受管期间每 1.5s、启动等待期每 500ms 各一次），改为 `static PROCESS_PROBE_SYS: LazyLock<Mutex<System>>` 常驻实例 + `refresh_process(pid)` 单点增量刷新（与 `metrics.rs` 的 `SYSTEM` 分离，二者刷新语义不同、互不干扰）；`get_status` 的 `probe_health` 移出状态锁执行（该探测同步阻塞最长约 2.3s = 连接超时 800ms + 读超时 1500ms，端口被「TCP 可连但不回 HTTP」的服务占用时才会走满），消除劣化路径下 `stop_server` / `start_server` / `open_preview` 排队等锁；`owned_alive` 仍在拿锁后计算，语义不变。
+- **设置浮窗「更新」卡片整合**：`src/components/SettingsDialog.tsx` 将原先分散的版本信息、「检查更新」/「自动检查」开关与「更新代理」合并为单一「更新」卡片（`sectionIcons.proxy` 改为 `update`，新增 `settings.update` / `settings.updateHint` 文案），版本行与待更新徽标、检查按钮同排；「关于」卡片改为应用简介（新增 `about.desc`）+ 仓库入口。`src/App.css` 配套 `.settings-meta-row` 等样式，降低设置页信息密度。
+
+### Bug 修复
+- **外部服务占用端口被误标为本应用「运行中」**：后端 `get_status` 只要配置端口上有 `/health` 应答就置 `running = true`，归属差异只体现在 `managed`，而展示层判定只看 `running`——外部终端启动的 llama-server 或恰巧占用端口的其他 HTTP 服务会被渲染成自己的服务「运行中」，且此时停止按钮恰为禁用，状态与可执行操作自相矛盾。修复：展示态由四态扩为五态，判定收敛为纯函数 `src/lib/statusState.ts`（新增 `serverStatusState` / `StatusState`，供 `src/App.tsx` 头部徽章与 `src/components/ControlPanel.tsx` 控制区共用），`running && !managed` 判为「外部服务」并以蓝色信息态呈现（新增 `status.external`），地址行明确提示占用（新增 `control.externalAddr`）、「打开预览」禁用，停止按钮的红色危险态改由 `managed` 判定（仅受管含加载中时出现）。后端语义未动，仍忠实表达「端口有应答但不归本应用管」。
+- **关闭询问弹窗选「直接退出」后应用无响应**：`src-tauri/src/lib.rs` 的 `resolve_close_choice` 是 `async` 命令（跑在 tokio worker 线程上），原先调用 `graceful_exit`，而后者内部 `tauri::async_runtime::block_on` 会在 runtime 线程上嵌套创建 runtime，触发 tokio panic「Cannot start a runtime from within a runtime」——表现为点「直接退出」后既不退出也无任何报错。改为直接 `stop_server_inner(&app).await` 后再 `app.exit(0)`（`app.exit` 先于 `Ok` 返回终止进程，前端该次 invoke 响应丢失属预期）；`graceful_exit` 补注释限定其仅可用于主线程 / 事件循环上下文（托盘菜单、`on_window_event`），该约束同源适用于 v0.1.7「退出统一走 graceful_exit」的托盘路径。
+
 ## [0.1.7] - 2026-09-02
 
 ### 新增功能
@@ -222,6 +236,8 @@
 ### 说明
 - 本版本仅提供 Windows 安装包（`.exe` NSIS / `.msi`），无需预先安装 Node / Rust。
 
+[0.1.8]: https://github.com/GDWhisper/oh-my-llama/releases/tag/v0.1.8
+[0.1.7]: https://github.com/GDWhisper/oh-my-llama/releases/tag/v0.1.7
 [0.1.6]: https://github.com/GDWhisper/oh-my-llama/releases/tag/v0.1.6
 [0.1.3]: https://github.com/GDWhisper/oh-my-llama/releases/tag/v0.1.3
 [0.1.2]: https://github.com/GDWhisper/oh-my-llama/releases/tag/v0.1.2

@@ -7,6 +7,7 @@ use std::net::{IpAddr, SocketAddr, TcpListener, TcpStream, UdpSocket};
 #[cfg(windows)]
 use std::os::windows::process::CommandExt;
 use std::str::FromStr;
+use std::sync::LazyLock;
 use std::time::Duration;
 use sysinfo::System;
 use tauri::menu::{Menu, MenuItem};
@@ -271,7 +272,10 @@ async fn set_close_pref(pref: Option<bool>) -> Result<AppSettings, String> {
 }
 
 // 关闭询问弹窗的用户决策：remember 时把选择固化为偏好（此后不再询问），
-// 然后按本次决策执行——最小化 = 隐藏窗口（服务继续跑），退出 = graceful_exit（先停服）。
+// 然后按本次决策执行——最小化 = 隐藏窗口（服务继续跑），退出 = 先停服再退出进程。
+// 本命令为 async（跑在 tokio worker 线程上）：停服必须直接 .await，禁止经
+// graceful_exit 的 block_on——那会在 runtime 线程上嵌套起 runtime，触发
+// tokio panic「Cannot start a runtime from within a runtime」，退出无响应。
 // 退出路径上 app.exit 会在 Ok 之前终止进程，前端对该 invoke 的响应丢失属预期。
 #[tauri::command]
 async fn resolve_close_choice(
@@ -290,7 +294,8 @@ async fn resolve_close_choice(
             let _ = win.hide();
         }
     } else {
-        graceful_exit(&app);
+        let _ = stop_server_inner(&app).await;
+        app.exit(0);
     }
     Ok(())
 }
@@ -538,6 +543,9 @@ fn show_main_window(app: &AppHandle) {
 
 // 唯一退出路径：先停受管服务再退出（与旧 tauri://close-requested 行为一致）。
 // 停服失败不阻断退出：进程都要结束了，状态刷不回前端无意义。
+// 仅限主线程/事件循环上下文调用（托盘菜单、窗口关闭事件）。async 命令跑在
+// tokio worker 上，禁止调用本函数——须直接 `stop_server_inner(&app).await`
+// 后再 app.exit，否则 block_on 嵌套 runtime 触发 tokio panic（2026-09-03 实测）。
 fn graceful_exit(app: &AppHandle) {
     let _ = tauri::async_runtime::block_on(stop_server_inner(app));
     app.exit(0);
@@ -752,12 +760,18 @@ fn rename_named_config_in_store(
 #[tauri::command]
 async fn get_status(app: AppHandle, config: ServerConfig) -> Result<ServerStatus, String> {
     let state = app.state::<tauri::async_runtime::Mutex<ServerStatus>>();
+
+    // 探测不依赖状态，放锁外做：probe_health 同步阻塞最长约 2.3s（连接超时 800ms + 读超时
+    // 1500ms，端口被「TCP 可连但不回 HTTP」的服务占用时），持锁探测会令 stop/start/
+    // open_preview 排队等锁；回环端口未开的常规路径 connect 立即 refused，无感。
+    let listening = matches!(probe_health(&config.host, config.port), HealthProbe::Ready);
+
     let mut status = state.lock().await;
 
     // 两个独立事实，解耦判断：
     //  - listening：配置地址上是否真有服务在监听（用户关心的「服务在跑吗」）。
     //  - owned_alive：本应用拉起的进程是否仍存活（决定 managed / Stop 是否可用）。
-    let listening = matches!(probe_health(&config.host, config.port), HealthProbe::Ready);
+    // 探测与拿锁之间状态可能被 start/stop 修改，owned_alive 基于拿锁后的最新值计算。
     let owned_alive = status.managed && is_process_running(status.pid);
 
     if listening {
@@ -1586,6 +1600,12 @@ fn wait_until_ready(host: &str, port: u16, pid: u32, timeout: Duration) -> bool 
     }
 }
 
+/// 跨调用复用的 System 实例（sysinfo 推荐常驻并增量刷新）：探测只做单进程定点刷新，
+/// 避免每次调用 new_all() 全量枚举整机进程表（受管期间每 1.5s、启动等待期每 500ms 各一次）。
+/// 与 metrics.rs 的 SYSTEM 分离：那边按 CPU/内存语义刷新，互不干扰。
+static PROCESS_PROBE_SYS: LazyLock<std::sync::Mutex<System>> =
+    LazyLock::new(|| std::sync::Mutex::new(System::new()));
+
 fn is_process_running(pid: Option<u32>) -> bool {
     let Some(pid) = pid else {
         return false;
@@ -1593,10 +1613,11 @@ fn is_process_running(pid: Option<u32>) -> bool {
     if pid == 0 {
         return false;
     }
-    let mut sys = System::new_all();
-    sys.refresh_processes();
-    sys.processes()
-        .contains_key(&sysinfo::Pid::from(pid as usize))
+    let pid = sysinfo::Pid::from(pid as usize);
+    // 持锁路径无 panic 风险，中毒分支仅为防御：取出内部值继续用。
+    let mut sys = PROCESS_PROBE_SYS.lock().unwrap_or_else(|e| e.into_inner());
+    // refresh_process 返回该 pid 是否存在：进程已退出则为 false，与原语义一致。
+    sys.refresh_process(pid)
 }
 
 fn terminate_process(pid: u32) {

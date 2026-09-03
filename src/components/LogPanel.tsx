@@ -1,17 +1,23 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
-import type { ServerLogLine } from '../types';
+import type { LogLine } from '../hooks/useServer';
 import { useI18n } from '../i18n';
 import { Button } from './Button';
 
 type LogMode = 'brief' | 'raw';
 
 interface Props {
-  logs: ServerLogLine[];
+  logs: LogLine[];
   onClear: () => void;
 }
 
 // 距底多少像素以内仍视为“停在底部”。留一点冗余以容忍流式输出时一两行的抖动。
 const BOTTOM_THRESHOLD = 32;
+
+// 渲染窗口大小：满载 5000 行 × 每行 4 节点 ≈ 2 万 DOM 节点，每次批量 flush 都对全表做
+// reconciliation 开销大。默认只渲染尾部 N 行（流式场景用户只关心最新输出），
+// 向上翻历史时点顶部「加载更早日志」按批扩窗——不引入虚拟滚动依赖。
+const INITIAL_VISIBLE_LOGS = 800;
+const LOAD_OLDER_STEP = 800;
 
 // 判断节点是否真正承载滚动（overflow 为 auto/scroll/overlay 且内容溢出）。
 const isScroller = (n: HTMLElement): boolean => {
@@ -44,6 +50,8 @@ export function LogPanel({ logs, onClear }: Props) {
   // 用户是否正在按住拖动滚动条：拖动期间暂停自动置底，避免与用户操作打架。
   const holdingRef = useRef(false);
   const [showJump, setShowJump] = useState(false);
+  // 渲染窗口：只渲染可见过滤结果的尾部 N 行，向上翻历史时逐步扩窗。
+  const [visibleCount, setVisibleCount] = useState(INITIAL_VISIBLE_LOGS);
   // 当前真正承载滚动的容器（可能是 .terminal 自身，也可能是外层 .column.main/日志列）。
   const boundScrollerRef = useRef<HTMLElement | null>(null);
   const cleanupRef = useRef<(() => void) | null>(null);
@@ -94,7 +102,10 @@ export function LogPanel({ logs, onClear }: Props) {
   // scrollTop/scrollHeight，消除“流式快速追加时被误判为用户上滚而解锁”的竞态。
   // mode 纳入依赖：切换 简要/原生 内容大变时，若仍处锁定态则重新贴底。
   useLayoutEffect(() => {
-    const scroller = findScroller(termRef.current);
+    // 优先复用已绑定的滚动容器：findScroller 沿父链逐个 getComputedStyle 属强制样式计算，
+    // 每次 flush 都重找不值得；仅当缓存失效（如滚动容器随内容增长发生切换）时重新查找。
+    const cached = boundScrollerRef.current;
+    const scroller = cached && isScroller(cached) ? cached : findScroller(termRef.current);
     if (!scroller) return;
     // 滚动容器可能从 terminal 切到外层列（内容增长时），切换时重新绑定监听。
     if (boundScrollerRef.current !== scroller) {
@@ -129,6 +140,10 @@ export function LogPanel({ logs, onClear }: Props) {
   // 简要模式 = 仅应用结构化消息，排除原生透传(raw)与命令行(cmd)，保持简洁。
   const visible =
     mode === 'raw' ? logs : logs.filter((line) => line.level !== 'raw' && line.level !== 'cmd');
+  // 渲染窗口：只渲染尾部 visibleCount 行；仍有更早日志时顶部给出扩窗按钮。
+  const hasOlder = visible.length > visibleCount;
+  const windowed = hasOlder ? visible.slice(-visibleCount) : visible;
+  const loadOlder = () => setVisibleCount((count) => count + LOAD_OLDER_STEP);
 
   return (
     <div className="panel">
@@ -161,8 +176,13 @@ export function LogPanel({ logs, onClear }: Props) {
       <div className="terminal-viewport">
         <div className="terminal" ref={termRef}>
           {visible.length === 0 && <div className="terminal-empty">{t('log.empty')}</div>}
-          {visible.map((line, index) => (
-            <div className={`term-line ${line.level}`} key={`${line.ts}-${index}`}>
+          {hasOlder && (
+            <button type="button" className="term-older" onClick={loadOlder}>
+              {t('log.loadOlder')}
+            </button>
+          )}
+          {windowed.map((line) => (
+            <div className={`term-line ${line.level}`} key={line.id}>
               <span className="term-ts">{line.ts}</span>
               <span className="term-level">[{line.level}]</span>
               <span className="term-text">{line.text}</span>

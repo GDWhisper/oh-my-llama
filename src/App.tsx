@@ -10,6 +10,7 @@ import { RawParams } from './components/RawParams';
 import { IconButton } from './components/IconButton';
 import { ConfigManager } from './components/ConfigManager';
 import { configToCommand, splitExtraArg, type ApplyPlan } from './lib/parseArgs';
+import { serverStatusState } from './lib/statusState';
 import { useI18n } from './i18n';
 import { SettingsDialog } from './components/SettingsDialog';
 import { UpdateDialog } from './components/UpdateDialog';
@@ -342,24 +343,14 @@ export default function App() {
     );
   }
 
-  // 徽章四态：运行中 / 无响应（曾可服务但持续失联，疑似假死）/ 模型加载中
-  // （本应用已拉起、模型仍在加载）/ 已停止。仅看 running 会漏掉 managed&&!running
-  // 的加载中态；仅 managed 还会把"曾 Ready 后挂死"与"正常加载中"混为一谈，
-  // 故以 unresponsive 单独标识进程存活但已假死的异常态。
-  const statusText = status?.running
-    ? t('status.running')
-    : unresponsive
-      ? t('status.unresponsive')
-      : status?.managed
-        ? t('status.loading')
-        : t('status.stopped');
-  const statusClass = status?.running
-    ? 'running'
-    : unresponsive
-      ? 'unresponsive'
-      : status?.managed
-        ? 'loading'
-        : 'stopped';
+  // 徽章五态：运行中 / 外部服务（端口有服务应答但不归本应用管）/ 无响应（曾可服务但
+  // 持续失联，疑似假死）/ 模型加载中（本应用已拉起、模型仍在加载）/ 已停止。
+  // running 单独不足以区分「自己的服务」与「外部占用者」——归属差异在 managed 上，
+  // 判定收敛在 src/lib/statusState.ts；unresponsive 由 useServer 按 UNRESPONSIVE_MS 判定，
+  // 单独标识"进程存活但已假死"，避免与正常加载中混为一谈。
+  const statusState = serverStatusState(status, unresponsive);
+  const statusText = t(`status.${statusState}`);
+  const statusClass = statusState;
 
   return (
     <main className="app">

@@ -1,5 +1,6 @@
 import type { ServerConfig, ServerStatus } from '../types';
 import { modelBasename } from '../lib/advanced';
+import { serverStatusState } from '../lib/statusState';
 import { useI18n } from '../i18n';
 import { Button } from './Button';
 
@@ -50,6 +51,11 @@ export function ControlPanel({
   const noWebui =
     !!config && config.extra_args.some((flag, i) => i % 2 === 0 && flag === '--no-webui');
 
+  // 与头部徽章同一套五态判定：external（端口被外部服务占用）时不应把外部地址当自己的
+  // 服务地址展示、也不提供"打开预览"/"停止"——归属与操作语义保持一致。
+  // 此处不感知 unresponsive（无响应态只影响徽章文案，不影响本区操作可用性）。
+  const statusState = serverStatusState(status, false);
+
   // 模型大小（字节 → GB），仅文件存在且已取到大小时展示。
   const modelSizeGb =
     modelSize != null && !modelMissing && config?.model.trim()
@@ -68,11 +74,13 @@ export function ControlPanel({
           </div>
         )}
         <div className="preview-url">
-          {status?.running
+          {statusState === 'running'
             ? t('control.serverAddr', { url: previewUrl })
-            : status?.managed
-              ? t('control.loading')
-              : t('control.serverAddrStopped')}
+            : statusState === 'external'
+              ? t('control.externalAddr', { url: status?.url ?? '' })
+              : statusState === 'loading'
+                ? t('control.loading')
+                : t('control.serverAddrStopped')}
         </div>
       </div>
       <div className="actions">
@@ -82,7 +90,7 @@ export function ControlPanel({
             : t('control.start')}
         </Button>
         <Button
-          variant={status?.running ? 'danger' : 'secondary'}
+          variant={status?.managed ? 'danger' : 'secondary'}
           onClick={onStop}
           disabled={stopping || !status?.managed}
         >
@@ -91,7 +99,7 @@ export function ControlPanel({
         <Button
           variant="secondary"
           onClick={onOpenPreview}
-          disabled={!status?.running || noWebui}
+          disabled={statusState !== 'running' || noWebui}
           title={noWebui ? t('control.previewDisabled') : undefined}
         >
           {t('control.openPreview')}

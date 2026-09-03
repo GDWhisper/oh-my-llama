@@ -24,6 +24,7 @@ export const zh = {
 
   // 运行状态
   'status.running': '运行中',
+  'status.external': '外部服务',
   'status.loading': '加载中',
   'status.unresponsive': '无响应',
   'status.stopped': '已停止',
@@ -50,6 +51,7 @@ export const zh = {
   'control.serverAddr': '服务地址：{url}',
   'control.serverAddrStopped': '服务地址：服务未启动',
   'control.loading': '服务地址：模型加载中...',
+  'control.externalAddr': '服务地址：已被外部服务占用（{url}）',
   'control.starting': '正在启动...',
   'control.start': '启动',
   'control.stopping': '正在停止...',
@@ -312,6 +314,7 @@ export const zh = {
   'log.raw': '原生',
   'log.clear': '清空日志',
   'log.empty': '暂无日志输出…',
+  'log.loadOlder': '↑ 加载更早日志',
   'log.backToBottom': '↓ 回到底部',
 
   // 一键传参解析预览行
@@ -527,6 +530,8 @@ export const zh = {
   'settings.title': '设置',
   'settings.language': '语言',
   'settings.languageHint': '切换后立即生效，并记住你的选择。',
+  'settings.update': '更新',
+  'settings.updateHint': '检查并安装新版本。',
   'settings.close': '关闭设置',
   'settings.updateProxy': '更新代理',
   'settings.updateProxyHint':
@@ -562,6 +567,7 @@ export const zh = {
 
   // 关于
   'about.title': '关于',
+  'about.desc': 'Oh My Llama 是一款集中管理 llama-server 启动配置、参数与日志的桌面工具。',
   'about.version': '版本',
   'about.repo': '项目仓库',
 
@@ -624,6 +630,7 @@ export const en: Record<MessageKey, string> = {
   'app.share.copyFailed': 'Copy failed, please copy manually',
 
   'status.running': 'Running',
+  'status.external': 'External',
   'status.loading': 'Loading',
   'status.unresponsive': 'Unresponsive',
   'status.stopped': 'Stopped',
@@ -648,6 +655,7 @@ export const en: Record<MessageKey, string> = {
   'control.serverAddr': 'Service address: {url}',
   'control.serverAddrStopped': 'Service address: not started',
   'control.loading': 'Service address: model loading...',
+  'control.externalAddr': 'Service address: occupied by an external service ({url})',
   'control.starting': 'Starting...',
   'control.start': 'Start',
   'control.stopping': 'Stopping...',
@@ -908,6 +916,7 @@ export const en: Record<MessageKey, string> = {
   'log.raw': 'Raw',
   'log.clear': 'Clear Logs',
   'log.empty': 'No log output yet…',
+  'log.loadOlder': '↑ Load older logs',
   'log.backToBottom': '↓ Back to bottom',
 
   'preview.serverPath': 'Launcher path → {value}',
@@ -1120,6 +1129,8 @@ export const en: Record<MessageKey, string> = {
   'settings.title': 'Settings',
   'settings.language': 'Language',
   'settings.languageHint': 'Changes apply immediately and your choice is remembered.',
+  'settings.update': 'Updates',
+  'settings.updateHint': 'Check for and install new versions.',
   'settings.close': 'Close Settings',
   'settings.updateProxy': 'Update Proxy',
   'settings.updateProxyHint':
@@ -1158,6 +1169,8 @@ export const en: Record<MessageKey, string> = {
 
   // 关于
   'about.title': 'About',
+  'about.desc':
+    'Oh My Llama is a desktop tool for centrally managing llama-server launch configs, parameters, and logs.',
   'about.version': 'Version',
   'about.repo': 'Repository',
 
