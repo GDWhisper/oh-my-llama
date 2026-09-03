@@ -272,7 +272,10 @@ async fn set_close_pref(pref: Option<bool>) -> Result<AppSettings, String> {
 }
 
 // 关闭询问弹窗的用户决策：remember 时把选择固化为偏好（此后不再询问），
-// 然后按本次决策执行——最小化 = 隐藏窗口（服务继续跑），退出 = graceful_exit（先停服）。
+// 然后按本次决策执行——最小化 = 隐藏窗口（服务继续跑），退出 = 先停服再退出进程。
+// 本命令为 async（跑在 tokio worker 线程上）：停服必须直接 .await，禁止经
+// graceful_exit 的 block_on——那会在 runtime 线程上嵌套起 runtime，触发
+// tokio panic「Cannot start a runtime from within a runtime」，退出无响应。
 // 退出路径上 app.exit 会在 Ok 之前终止进程，前端对该 invoke 的响应丢失属预期。
 #[tauri::command]
 async fn resolve_close_choice(
@@ -291,7 +294,8 @@ async fn resolve_close_choice(
             let _ = win.hide();
         }
     } else {
-        graceful_exit(&app);
+        let _ = stop_server_inner(&app).await;
+        app.exit(0);
     }
     Ok(())
 }
@@ -539,6 +543,9 @@ fn show_main_window(app: &AppHandle) {
 
 // 唯一退出路径：先停受管服务再退出（与旧 tauri://close-requested 行为一致）。
 // 停服失败不阻断退出：进程都要结束了，状态刷不回前端无意义。
+// 仅限主线程/事件循环上下文调用（托盘菜单、窗口关闭事件）。async 命令跑在
+// tokio worker 上，禁止调用本函数——须直接 `stop_server_inner(&app).await`
+// 后再 app.exit，否则 block_on 嵌套 runtime 触发 tokio panic（2026-09-03 实测）。
 fn graceful_exit(app: &AppHandle) {
     let _ = tauri::async_runtime::block_on(stop_server_inner(app));
     app.exit(0);
