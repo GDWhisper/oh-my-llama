@@ -66,6 +66,7 @@ const UNRESPONSIVE_MS = 60000;
 // 状态轮询频率：窗口可见 1.5s；隐藏/托盘常驻降到 8s——本应用设计上长期驻留托盘，
 // 隐藏期间满频轮询（含 /health 探测与模型文件 stat）是恒定浪费。visibilitychange 切换
 // delay 会重建定时器；系统唤醒有 tauri://resume 即查兜底，切回窗口最多延迟一个新周期。
+// 是否轮询的门控（仅受管/运行中，空闲完全停）见下方 useInterval 调用处。
 const POLL_INTERVAL_MS = 1500;
 const POLL_INTERVAL_HIDDEN_MS = 8000;
 
@@ -467,19 +468,22 @@ export function useServer() {
     }
   }, []);
 
-  // 轮询频率随窗口可见性切换：可见 1.5s，隐藏/托盘 8s（切 delay 即重建 useInterval）。
-  const [pollDelay, setPollDelay] = useState(() =>
-    document.visibilityState === 'hidden' ? POLL_INTERVAL_HIDDEN_MS : POLL_INTERVAL_MS,
-  );
+  // 轮询门控：仅当本应用在管（managed，含模型加载中）或端口应答（running）时探测，
+  // 空闲态完全停轮询（delay=null → useInterval 不建定时器）。外部起/停服务、占用端口
+  // 属用户自身行为，OML 不为外部状态兜底探测；本应用启动撞端口时 llama-server 报错
+  // 退出、start_server 即报失败，用户有反馈。冷启动必无受管进程（退出走 graceful_exit，
+  // 崩溃有 Job Object/进程组兜底），挂载时的一次性 loadStatus 即可确认初始态。
+  // 启/停按钮成功后显式 loadStatus（见 start/stop），status 一变门控即自动启停；
+  // 外部杀受管进程时轮询尚在（managed 期间），下一周期即发现 managed=false 并停轮询。
+  // 可见 1.5s / 隐藏 8s 维持不变（visibilitychange 切 delay 即重建 useInterval）。
+  const [hidden, setHidden] = useState(() => document.visibilityState === 'hidden');
   useEffect(() => {
-    const syncPollDelay = () =>
-      setPollDelay(
-        document.visibilityState === 'hidden' ? POLL_INTERVAL_HIDDEN_MS : POLL_INTERVAL_MS,
-      );
-    document.addEventListener('visibilitychange', syncPollDelay);
-    return () => document.removeEventListener('visibilitychange', syncPollDelay);
+    const syncHidden = () => setHidden(document.visibilityState === 'hidden');
+    document.addEventListener('visibilitychange', syncHidden);
+    return () => document.removeEventListener('visibilitychange', syncHidden);
   }, []);
-  useInterval(refreshNow, pollDelay);
+  const polling = !!status?.managed || !!status?.running;
+  useInterval(refreshNow, polling ? (hidden ? POLL_INTERVAL_HIDDEN_MS : POLL_INTERVAL_MS) : null);
 
   // 系统从睡眠/休眠唤醒时立即刷新状态：睡眠期间 JS 定时器被系统挂起，
   // 仅靠 1.5s 轮询会在唤醒后延迟最多一个周期才反映「睡眠中被回收/挂死的服务」。
