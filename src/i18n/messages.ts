@@ -83,6 +83,8 @@ export const zh = {
   'config.restoreTitle': '恢复配置',
   'config.restoreBody': '将放弃当前未保存的改动，并恢复为「{name}」已保存的配置。仍要恢复吗？',
   'config.restoreConfirm': '恢复',
+  'config.searchPlaceholder': '搜索配置…',
+  'config.noMatch': '没有匹配的配置',
 
   // 命名弹窗
   'name.renameTitle': '重命名配置',
@@ -687,6 +689,8 @@ export const en: Record<MessageKey, string> = {
   'config.restoreTitle': 'Restore Config',
   'config.restoreBody': 'Discard unsaved changes and restore config "{name}" to its saved version?',
   'config.restoreConfirm': 'Restore',
+  'config.searchPlaceholder': 'Search configs…',
+  'config.noMatch': 'No matching configs',
 
   'name.renameTitle': 'Rename Config',
   'name.saveAsNewTitle': 'Save as New Config',

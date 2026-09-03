@@ -679,7 +679,7 @@ body {
   overflow-y: auto;
 }
 
-/* 空间不足时向上展开（由 ModelSelect 测量视口后加 .drop-up） */
+/* 空间不足时向上展开（由 useDropdownSearch 测量视口后加 .drop-up） */
 .select-list.drop-up {
   top: auto;
   bottom: calc(100% + 4px);
