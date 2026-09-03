@@ -4,6 +4,20 @@
 
 > 本文件为**详细改动历史**（含涉及的文件与实现机制）；GitHub Release 页面为对应版本的**总结性**说明。
 
+## [0.1.8] - 2026-09-03
+
+### 新增功能
+- **日志面板按需扩窗「加载更早日志」**：`src/components/LogPanel.tsx` 引入渲染窗口（`INITIAL_VISIBLE_LOGS = 800` / `LOAD_OLDER_STEP = 800`），默认只渲染过滤结果的尾部 800 行，仍有更早日志时顶部出现「↑ 加载更早日志」按钮按批扩窗（`src/i18n/messages.ts` 新增 `log.loadOlder` 中英双键，`src/App.css` 新增 `.term-older`）。满载 5000 行 × 每行 4 节点 ≈ 2 万 DOM 节点，此前每次批量 flush 都对全表做 reconciliation；改为窗口化后不引入虚拟滚动依赖即把开销降一个量级，流式场景（用户只关心最新输出）代价恒定。
+
+### 功能优化
+- **CPU 占用优化（前端渲染与轮询链路）**：静态审查结论与实施记录见 `docs/cpu-memory-audit-2026-09-03.md`（无内存泄露；2 处高优先级 CPU 热点 + 2 处中优先级持续开销，四项均已落地）。`src/hooks/useServer.ts`：`log://line` 增量行先写入 `logBufferRef`（ref 承载，高频写不参与渲染），由 `LOG_FLUSH_MS = 200` 定时器批量 flush 进 state，渲染频率与日志行频解耦（模型加载期 llama-server 以 `\r` 原地刷进度，逐行 `setLogs` 会让整棵 App 以行频重渲染）；行 key 由 `${ts}-${index}` 改单调递增 id（新增前端派生类型 `LogLine = ServerLogLine & { id }`，IPC 契约 `src/types.ts` 不变），消除后端有界缓冲满载 `shift()` 后全列表 key 变化导致的整列表重挂载；`setStatus` 前经 `sameStatus` 浅比较去重，服务静止时不再每 1.5s 触发全树重渲染；`handleClearLogs` 与 `log://clear` 一并丢弃未 flush 的缓冲行，保持清空时序语义。轮询频率随窗口可见性切换（可见 1.5s / 隐藏或托盘常驻 8s，`visibilitychange` 重建定时器），`src/components/MetricsPanel.tsx` 同构处理；状态轮询再加门控——仅 `managed || running` 时探测，空闲态 `useInterval` 传 `delay = null` 完全停表（外部起停服务属用户自身行为，OML 不为外部状态兜底探测；本应用启动撞端口时 `start_server` 即报失败，用户有反馈；冷启动必无受管进程，挂载时一次性 `loadStatus` 确认初始态）。
+- **后端进程探测与状态锁优化**：`src-tauri/src/lib.rs` 的 `is_process_running` 原每次调用 `System::new_all()` + `refresh_processes()` 全量枚举整机进程表（受管期间每 1.5s、启动等待期每 500ms 各一次），改为 `static PROCESS_PROBE_SYS: LazyLock<Mutex<System>>` 常驻实例 + `refresh_process(pid)` 单点增量刷新（与 `metrics.rs` 的 `SYSTEM` 分离，二者刷新语义不同、互不干扰）；`get_status` 的 `probe_health` 移出状态锁执行（该探测同步阻塞最长约 2.3s = 连接超时 800ms + 读超时 1500ms，端口被「TCP 可连但不回 HTTP」的服务占用时才会走满），消除劣化路径下 `stop_server` / `start_server` / `open_preview` 排队等锁；`owned_alive` 仍在拿锁后计算，语义不变。
+- **设置浮窗「更新」卡片整合**：`src/components/SettingsDialog.tsx` 将原先分散的版本信息、「检查更新」/「自动检查」开关与「更新代理」合并为单一「更新」卡片（`sectionIcons.proxy` 改为 `update`，新增 `settings.update` / `settings.updateHint` 文案），版本行与待更新徽标、检查按钮同排；「关于」卡片改为应用简介（新增 `about.desc`）+ 仓库入口。`src/App.css` 配套 `.settings-meta-row` 等样式，降低设置页信息密度。
+
+### Bug 修复
+- **外部服务占用端口被误标为本应用「运行中」**：后端 `get_status` 只要配置端口上有 `/health` 应答就置 `running = true`，归属差异只体现在 `managed`，而展示层判定只看 `running`——外部终端启动的 llama-server 或恰巧占用端口的其他 HTTP 服务会被渲染成自己的服务「运行中」，且此时停止按钮恰为禁用，状态与可执行操作自相矛盾。修复：展示态由四态扩为五态，判定收敛为纯函数 `src/lib/statusState.ts`（新增 `serverStatusState` / `StatusState`，供 `src/App.tsx` 头部徽章与 `src/components/ControlPanel.tsx` 控制区共用），`running && !managed` 判为「外部服务」并以蓝色信息态呈现（新增 `status.external`），地址行明确提示占用（新增 `control.externalAddr`）、「打开预览」禁用，停止按钮的红色危险态改由 `managed` 判定（仅受管含加载中时出现）。后端语义未动，仍忠实表达「端口有应答但不归本应用管」。
+- **关闭询问弹窗选「直接退出」后应用无响应**：`src-tauri/src/lib.rs` 的 `resolve_close_choice` 是 `async` 命令（跑在 tokio worker 线程上），原先调用 `graceful_exit`，而后者内部 `tauri::async_runtime::block_on` 会在 runtime 线程上嵌套创建 runtime，触发 tokio panic「Cannot start a runtime from within a runtime」——表现为点「直接退出」后既不退出也无任何报错。改为直接 `stop_server_inner(&app).await` 后再 `app.exit(0)`（`app.exit` 先于 `Ok` 返回终止进程，前端该次 invoke 响应丢失属预期）；`graceful_exit` 补注释限定其仅可用于主线程 / 事件循环上下文（托盘菜单、`on_window_event`），该约束同源适用于 v0.1.7「退出统一走 graceful_exit」的托盘路径。
+
 ## [0.1.7] - 2026-09-02
 
 ### 新增功能
@@ -68,6 +82,28 @@
 
 ### Bug 修复
 - **修复系统睡眠/休眠后状态不刷新**：外部终端/任务管理器杀掉受管进程本已由 1.5s 轮询 + 后端 `owned_alive = managed && is_process_running(pid)` 自检复位正确捕捉；唯一缺口在系统睡眠——唤醒后状态延迟反映。已通过上面的 `tauri://resume` 即时刷新闭环解决（纯前端、零新依赖、不破分层）。
+
+## [0.1.2] - 2026-08-02
+
+### 功能优化
+- **高级参数面板升级为数据驱动注册表（覆盖约 162 个官方 llama-server 参数）**：原高级参数仅含少量固定字段 + 约 150 个「已知 flag 原样透传」（粘贴进 extra_args，无结构化 UI）。现新增后端 `src-tauri/src/params.rs` 的 `PARAM_REGISTRY`（`&'static [ParamSpec]`，由 `scripts/gen_structured_params.py` 从识别表一次性生成，含类型 / 默认值 / 取值范围 / 枚举选项），`ServerConfig` 仅增 `enabled_structured_params` / `disabled_structured_params` / `structured_params` 三字段（枚举表（HashMap）置于结构体末尾以满足 TOML 序列化「表须在标量后」约束）；`build_server_args` 通用序列化启用项（bool 真值输出裸 flag、其余空值视为未设置）；前端 `get_param_registry` 拉取注册表后通用渲染 `AdvancedParamsPanel` 的 `StructuredParamRow`（按 ptype 分派 checkbox / number / select / input、可搜索过滤、支持临时禁用），未知 flag 仍原样透传。对应 `src-tauri/src/lib.rs` + `src-tauri/src/params.rs`（新增）+ `src/types.ts` + `src/lib/parseArgs.ts`（`structuredKeyOf` 复用 `preview.<key>` 后缀路由 known 解析到结构化、零新增识别字段）+ `src/hooks/useServer.ts`（拉注册表 + 四个结构化操作）+ `src/components/AdvancedParamsPanel.tsx` + `src/i18n/messages.ts`（中/英 `advanced.structured.*` 162 条 + 搜索文案）+ `src/App.tsx` / `src/components/RawParams.tsx`（接线传 registry）+ `scripts/gen_structured_params.py`（新增）。
+- **i18n 模块拆分**：`src/i18n/index.tsx` 拆为 `I18nProvider.tsx`（组件）与 `useI18n.ts`（context + hook），桶文件仅 re-export，消除 `react-refresh/only-export-components` 告警，符合 Fast Refresh 单一导出约定。对应 `src/i18n/index.tsx` + `src/i18n/I18nProvider.tsx`（新增）+ `src/i18n/useI18n.ts`（新增）+ `src/main.tsx`（改从 `./i18n/I18nProvider` 导入组件）。
+- **AGENTS.md 补充奥卡姆剃刀与可维护性平衡准则**：新增必须主动抽象的 3 条触发信号（逻辑重复 / 修改影响面大 / 业务易变），优先「未来改起来省力」而非「当下代码最少」。
+
+### Bug 修复
+- **运行中检测误报（端口已通但模型未就绪）**：原 `running` 用裸 TCP connect 探活，llama.cpp 某些构建先 bind 端口、后加载模型，导致端口刚 bind、模型未加载完成就误报「运行中」、点开预览连不上。现改用 llama.cpp 始终开启的 `GET /health` 就绪探针（`probe_health` + `HealthProbe` 枚举：Unreachable / Loading / Ready，TCP connect + 手写最小 HTTP，`200` / 非 503 = Ready、`503` = Loading、连不上 = Unreachable；纯标准库 `TcpStream` 无新依赖），`running = matches!(probe_health, Ready)`；`start_server` 改为 `wait_until_ready` 轮询 `/health` 直到 200（≤90s，不持锁）。前端 `ControlPanel` 启动按钮按 `managed` 禁用（防加载中重复拉起）、`managed && !running` 显示「模型加载中…」。对应 `src-tauri/src/lib.rs` + `src/components/ControlPanel.tsx` + `i18n/messages.ts`（新增 `control.loading`）。
+- **启动阶段原生日志不实时 / 丢失**：原重写 `start_server` 时把原生日志读取（`wait_process` 的 `spawn`）挪到阻塞等端口就绪（`wait_until_ready`，≤90s）之后，导致模型加载期输出堵在 OS 管道无人读——前端「原生」模式启动阶段看不到实时日志、且管道写满反压 llama-server 拖垮启动。现把 `wait_process` 的 `spawn` 挪回 `cmd.spawn()` 之后、`wait_until_ready` 之前，与就绪探测安全并发。对应 `src-tauri/src/lib.rs`。
+- **原生日志契约：raw = 完整日志（命令行 + 全部输出）**：确立 raw（原生）模式展示全部行——`cmd`（我们发出的命令行）+ `raw`（子进程原样输出）+ 应用结构化消息（`info` / `warn` / `error`）；brief（简要）模式仅应用结构化消息（`level` 既非 `raw` 也非 `cmd`）。后端 `pump_reader` / `channel` 只传纯文本、`consumer` 仅 append 一条 `level="raw"`（修复此前每行记两条导致的重复行）；渲染统一加 `[level]` 前缀（含 `[cmd]` / `[raw]`）。对应 `src-tauri/src/lib.rs` + `src/components/LogPanel.tsx`。
+
+## [0.1.1] - 2026-07-28
+
+### 新增功能
+- **下拉选项悬浮提示（仅截断项）**：模型选择器与配置管理下拉框中，文本过长被省略号截断的选项，鼠标 hover 时显示完整文本的悬浮提示，且**仅当该项确实被截断**时才弹出（短文本不弹窗）。新建 `src/components/TruncatedText.tsx`（纯展示、零外部依赖）：用 `scrollWidth > clientWidth + 1` 判断真实溢出，提示经 `createPortal` 挂到 `document.body` 并以 `position: fixed`（按视口坐标）渲染，避免被下拉列表的 `overflow` 裁剪；下方空间不足时自动翻到选项上方；`pointer-events: none` 不挡点击。接入 `ModelSelect.tsx`（模型名选项 + 收起态触发器）与 `ConfigManager.tsx`（配置名选项含 default + 触发器）；`App.css` 新增 `.option-tooltip` 样式，`.select-value` 补 `min-width: 0` 以支持内部截断。高级参数面板的 2 个原生 `<select>`（n_gpu_layers / flash_attn）选项均很短不会截断、且原生弹窗由 OS 渲染无法逐项提示，按奥卡姆剃刀未改造。
+
+### 功能优化
+- **「分享参数」更名「分享配置」**：配置管理卡片分享按钮文案 `config.share` 中英文案由「分享参数」/「Share Params」改为「分享配置」/「Share Config」（`src/i18n/messages.ts`），同步 README 与 `App.tsx` / `parseArgs.ts` 注释；`IconButton` 的 `label` 同时驱动 `title` 与 `aria-label`，一并更新。
+- **分享 / 复制语义区分**：分享复制当前选中配置的**已落盘快照**（不含未保存改动），复制复制框内**当前态**（含未保存改动）。`App.tsx` 的 `shareConfig` 复制来源由 live `config` 改为 `activeName === 'default' ? defaultConfig : configs[activeName]`（`defaultConfig` 纳入解构），`saved ?? config` 兜底；`RawParams.tsx` 的【复制】保持 `configToCommand(config)`（框内当前态）不变。
+- **分享成功提示带配置名**：新增 i18n `app.share.copiedNamed`（`已复制 {name} 的参数到剪切板` / `Copied {name} parameters to clipboard`），`shareConfig` 传入 `activeName === 'default' ? t('config.default') : activeName`；原 `app.share.copied`（「已复制启动参数到剪切板」）保留给【复制】按钮。
 
 ## [0.1.0] - 2026-07-22
 
@@ -200,8 +236,12 @@
 ### 说明
 - 本版本仅提供 Windows 安装包（`.exe` NSIS / `.msi`），无需预先安装 Node / Rust。
 
+[0.1.8]: https://github.com/GDWhisper/oh-my-llama/releases/tag/v0.1.8
+[0.1.7]: https://github.com/GDWhisper/oh-my-llama/releases/tag/v0.1.7
 [0.1.6]: https://github.com/GDWhisper/oh-my-llama/releases/tag/v0.1.6
 [0.1.3]: https://github.com/GDWhisper/oh-my-llama/releases/tag/v0.1.3
+[0.1.2]: https://github.com/GDWhisper/oh-my-llama/releases/tag/v0.1.2
+[0.1.1]: https://github.com/GDWhisper/oh-my-llama/releases/tag/v0.1.1
 [0.1.0]: https://github.com/GDWhisper/oh-my-llama/releases/tag/v0.1.0
 [0.0.9]: https://github.com/GDWhisper/oh-my-llama/releases/tag/v0.0.9
 [0.0.8]: https://github.com/GDWhisper/oh-my-llama/releases/tag/v0.0.8
