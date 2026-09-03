@@ -1021,11 +1021,10 @@ body {
   flex-shrink: 0;
 }
 
-/* 「更新」卡片内的版本行：标签在左，版本号、NEW 徽标与检查按钮在右 */
+/* 「更新」卡片内的版本行：版本标签、版本号、NEW 徽标与检查按钮靠左聚拢成一组 */
 .settings-meta-row {
   display: flex;
   align-items: center;
-  justify-content: space-between;
   gap: 8px;
 }
 .settings-meta {

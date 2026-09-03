@@ -1,4 +1,4 @@
-import type { ServerCandidate, ServerConfig } from '../types';
+import type { PathCandidate, ServerConfig } from '../types';
 import { modelBasename } from '../lib/advanced';
 import { useI18n } from '../i18n';
 import { PathField } from './PathField';
@@ -9,8 +9,11 @@ interface Props {
   // 检测到的 .gguf 模型文件名列表（不含绝对路径，仅用于下拉框展示）
   models: string[];
   // llama-server 路径候选（后端合并「最近使用」与「各命名配置里用过的路径」）
-  serverCandidates: ServerCandidate[];
+  serverCandidates: PathCandidate[];
   onForgetServerPath: (path: string) => void;
+  // 模型目录候选：与 llama-server 路径候选同款机制（最近使用 + 命名配置兜底 + 可遗忘）
+  modelDirCandidates: PathCandidate[];
+  onForgetModelDir: (path: string) => void;
   onChange: (config: ServerConfig) => void;
 }
 
@@ -23,6 +26,8 @@ export function BasicParamsPanel({
   models,
   serverCandidates,
   onForgetServerPath,
+  modelDirCandidates,
+  onForgetModelDir,
   onChange,
 }: Props) {
   const { t } = useI18n();
@@ -58,6 +63,8 @@ export function BasicParamsPanel({
           label={t('basic.modelDir')}
           value={config.model_dir}
           directory
+          suggestions={modelDirCandidates}
+          onRemoveSuggestion={onForgetModelDir}
           onChange={handleDirChange}
         />
         <div className="field">

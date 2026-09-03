@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { open } from '@tauri-apps/plugin-dialog';
 import { useI18n } from '../i18n';
-import type { ServerCandidate } from '../types';
+import type { PathCandidate } from '../types';
 
 interface DialogFilter {
   name: string;
@@ -16,21 +16,22 @@ interface Props {
   directory?: boolean;
   hint?: string;
   hintTone?: 'default' | 'error';
-  // 传入即变成「输入 + 候选」组合框：候选由上层给（llama-server 路径），点击回填。
-  suggestions?: ServerCandidate[];
+  // 传入即变成「输入 + 候选」组合框：候选由上层给（llama-server 路径 / 模型目录，
+  // 两者共用后端同一套路径历史机制），点击回填。
+  suggestions?: PathCandidate[];
   // 「从历史中忘掉」一条：仅对仍能被忘掉的路径显示 ×（被命名配置引用的条目不在此列）。
   onRemoveSuggestion?: (value: string) => void;
 }
 
 // Windows 路径大小写不敏感且 / 与 \ 常混用（手填 \ 、一键传参回填 /），判重必须走同一套
-// 归一化（与后端 lib.rs::server_key 同构），否则候选里会出现「看着一样其实两行」。
+// 归一化（与后端 lib.rs::path_key 同构），否则候选里会出现「看着一样其实两行」。
 function pathKey(path: string): string {
   return path.trim().replace(/\\/g, '/').toLowerCase();
 }
 
 // 按已输入内容做子串过滤，并排除与当前值指向同一文件的那条。
 // 空输入不过滤：直接给出全部候选（后端已按「最近使用优先」排好序）。
-function filterCandidates(suggestions: ServerCandidate[], query: string): ServerCandidate[] {
+function filterCandidates(suggestions: PathCandidate[], query: string): PathCandidate[] {
   const typed = pathKey(query);
   return suggestions.filter((item) => {
     const key = pathKey(item.path);

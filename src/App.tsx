@@ -116,6 +116,8 @@ export default function App() {
     registry,
     serverCandidates,
     forgetServerPath,
+    modelDirCandidates,
+    forgetModelDir,
     addStructuredKey,
     removeStructuredKey,
     setStructuredValue,
@@ -422,6 +424,8 @@ export default function App() {
             models={models}
             serverCandidates={serverCandidates}
             onForgetServerPath={forgetServerPath}
+            modelDirCandidates={modelDirCandidates}
+            onForgetModelDir={forgetModelDir}
             onChange={setConfig}
           />
           <AdvancedParamsPanel
