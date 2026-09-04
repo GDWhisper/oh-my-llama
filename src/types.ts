@@ -76,12 +76,15 @@ export interface ServerLogLine {
 // recent_model_dirs = 本机用过的模型目录（与 recent_servers 同款 MRU 机制），供模型目录输入框给候选。
 // minimize_to_tray = 窗口关闭行为：null = 未选择过（关闭时弹窗询问）；
 // true = 最小化到系统托盘；false = 直接退出。
+// show_log_times = 日志是否显示时间戳：null = 未设置（默认显示，兼容旧 settings.json）；
+// true = 显示，false = 隐藏（隐藏时时间列宽度让给日志正文）。
 export interface AppSettings {
   update_proxy: string;
   auto_check_updates: boolean;
   recent_servers: string[];
   recent_model_dirs: string[];
   minimize_to_tray: boolean | null;
+  show_log_times: boolean | null;
 }
 
 // 路径输入框的候选项，llama-server 路径与模型目录共用

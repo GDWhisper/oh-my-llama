@@ -155,7 +155,7 @@ pub struct ServerLogLine {
 }
 
 // ── 应用级设置（与服务器启动配置 ServerConfig 解耦）────────────────────
-// 当前含四项：
+// 当前含六项：
 //  - update_proxy：留空 = 更新直连（不读任何代理环境变量）；填写 = 仅走用户显式指定的代理地址。
 //  - auto_check_updates：启动时是否自动检查更新（不打扰：仅弹右上提示+版本旁 NEW 徽标，
 //    绝不静默下载/安装；安装仍需用户在弹窗里显式确认）。
@@ -164,6 +164,8 @@ pub struct ServerLogLine {
 //  - minimize_to_tray：窗口关闭行为。None = 用户尚未选择过（点关闭按钮时弹窗询问）；
 //    Some(true) = 最小化到系统托盘（服务保持运行）；Some(false) = 直接退出。
 //    仅在用户主动选择（弹窗勾选记住 / 设置界面改选）时才落为 Some，询问弹窗关闭不算。
+//  - show_log_times：日志是否显示每行时间戳。None = 旧 settings.json 缺字段，按"显示"渲染
+//    （前端 ?? true 兜底，保持原观感）；Some(true/false) = 用户在日志工具栏主动切换过。
 // 仅持久化到 APPDATA/OhMyLlama/settings.json，不污染 configs.toml，
 // 也不干预用户代理客户端的全局/规则模式。
 // 注意：本结构是「整体读-改-写」落盘的，任何写 settings.json 的命令都必须先 load_settings
@@ -180,6 +182,8 @@ pub struct AppSettings {
     pub recent_model_dirs: Vec<String>,
     #[serde(default)]
     pub minimize_to_tray: Option<bool>,
+    #[serde(default)]
+    pub show_log_times: Option<bool>,
 }
 
 fn settings_path(app_data: &std::path::Path) -> std::path::PathBuf {
@@ -270,6 +274,18 @@ async fn set_close_pref(pref: Option<bool>) -> Result<AppSettings, String> {
     let app_data = resolve_app_data()?;
     let mut settings = load_settings(&app_data);
     settings.minimize_to_tray = pref;
+    save_settings_json(&app_data, &settings)?;
+    Ok(settings)
+}
+
+// ── 日志是否显示时间戳 ────────────────────────────────────────────────
+// 日志工具条上的时钟图标开关调用：写 Some(show)（区别于"未设置"），None 仅来自缺字段的
+// 旧 settings.json（前端 ?? true 兜底显示）。返回落盘后的完整设置，与 set_close_pref 同款。
+#[tauri::command]
+async fn set_log_show_times(show: bool) -> Result<AppSettings, String> {
+    let app_data = resolve_app_data()?;
+    let mut settings = load_settings(&app_data);
+    settings.show_log_times = Some(show);
     save_settings_json(&app_data, &settings)?;
     Ok(settings)
 }
@@ -513,6 +529,7 @@ pub fn run() {
             read_settings,
             save_settings,
             set_close_pref,
+            set_log_show_times,
             resolve_close_choice,
             set_tray_labels,
             get_system_metrics,
@@ -2471,6 +2488,7 @@ enabled_advanced_params = ["ctx_size"]
             ],
             recent_model_dirs: vec!["F:/models/qwen".into(), "F:/models/llama".into()],
             minimize_to_tray: None,
+            show_log_times: None,
         };
         save_settings_json(&dir, &settings).expect("save settings");
         let loaded = load_settings(&dir);
@@ -2517,6 +2535,35 @@ enabled_advanced_params = ["ctx_size"]
         std::fs::write(settings_path(&dir), r#"{"minimize_to_tray":null}"#)
             .expect("write null pref");
         assert_eq!(load_settings(&dir).minimize_to_tray, None);
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn show_log_times_round_trip_and_legacy_default() {
+        // 旧 settings.json 没有 show_log_times 字段：必须解析为 None（前端 ?? true 兜底为显示），
+        // 不得因新增字段把已有设置整体丢掉。
+        let legacy: AppSettings =
+            serde_json::from_str(r#"{"update_proxy":"","auto_check_updates":false}"#)
+                .expect("parse legacy settings");
+        assert_eq!(legacy.show_log_times, None);
+
+        // 显式 null 也要读回 None。
+        let legacy_null: AppSettings =
+            serde_json::from_str(r#"{"show_log_times":null}"#).expect("parse null");
+        assert_eq!(legacy_null.show_log_times, None);
+
+        // 显式 true/false 落盘后原样读回（前端据此切换时间列显隐）。
+        let dir = std::env::temp_dir().join(format!("llama_logtimes_test_{}", std::process::id()));
+        let _ = std::fs::create_dir_all(dir.join("OhMyLlama"));
+        for show in [Some(true), Some(false)] {
+            let settings = AppSettings {
+                show_log_times: show,
+                ..AppSettings::default()
+            };
+            save_settings_json(&dir, &settings).expect("save settings");
+            assert_eq!(load_settings(&dir).show_log_times, show);
+        }
 
         let _ = std::fs::remove_dir_all(&dir);
     }

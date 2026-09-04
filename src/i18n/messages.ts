@@ -318,6 +318,9 @@ export const zh = {
   'log.empty': '暂无日志输出…',
   'log.loadOlder': '↑ 加载更早日志',
   'log.backToBottom': '↓ 回到底部',
+  'log.timeToggle': '时间',
+  'log.showTime': '显示时间',
+  'log.hideTime': '隐藏时间',
 
   // 一键传参解析预览行
   'preview.serverPath': '启动器路径 → {value}',
@@ -922,6 +925,9 @@ export const en: Record<MessageKey, string> = {
   'log.empty': 'No log output yet…',
   'log.loadOlder': '↑ Load older logs',
   'log.backToBottom': '↓ Back to bottom',
+  'log.timeToggle': 'Time',
+  'log.showTime': 'Show timestamps',
+  'log.hideTime': 'Hide timestamps',
 
   'preview.serverPath': 'Launcher path → {value}',
   'preview.model': 'Model path → {value}',
