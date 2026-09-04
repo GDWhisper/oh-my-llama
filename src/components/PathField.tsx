@@ -21,6 +21,9 @@ interface Props {
   suggestions?: PathCandidate[];
   // 「从历史中忘掉」一条：仅对仍能被忘掉的路径显示 ×（被命名配置引用的条目不在此列）。
   onRemoveSuggestion?: (value: string) => void;
+  // 传入则在「浏览」按钮右侧再渲染一个「打开」按钮：点击行为由上层定义
+  //（通常用系统文件管理器打开当前路径）。仅对目录类字段有意义；路径为空时按钮禁用。
+  onOpen?: () => void;
 }
 
 // Windows 路径大小写不敏感且 / 与 \ 常混用（手填 \ 、一键传参回填 /），判重必须走同一套
@@ -52,6 +55,7 @@ export function PathField({
   hintTone,
   suggestions,
   onRemoveSuggestion,
+  onOpen,
 }: Props) {
   const { t } = useI18n();
   const [showList, setShowList] = useState(false);
@@ -97,6 +101,11 @@ export function PathField({
         <button type="button" className="browse-btn" onClick={pick}>
           {t('common.browse')}
         </button>
+        {onOpen && (
+          <button type="button" className="browse-btn" disabled={!value.trim()} onClick={onOpen}>
+            {t('common.open')}
+          </button>
+        )}
         {showList && candidates.length > 0 && (
           <ul className="path-suggest">
             {candidates.map((item) => (

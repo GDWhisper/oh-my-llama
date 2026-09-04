@@ -517,6 +517,7 @@ pub fn run() {
             start_server,
             stop_server,
             open_preview,
+            open_path,
             read_logs,
             clear_logs,
             file_exists,
@@ -1193,6 +1194,24 @@ async fn open_preview(app: AppHandle) -> Result<(), String> {
     app.opener()
         .open_url(target, None::<&str>)
         .map_err(|err| format!("打开预览失败: {err}"))?;
+    Ok(())
+}
+
+// 用系统文件管理器打开指定路径（供「模型目录」字段的「打开」按钮调用）。
+// 空路径或不存在时返回错误；前端按钮在路径为空时已禁用，此处为兜底校验。
+// 复用已注册的 tauri-plugin-opener（与 open_preview 同源），不引入新依赖。
+#[tauri::command]
+async fn open_path(app: AppHandle, path: String) -> Result<(), String> {
+    let trimmed = path.trim();
+    if trimmed.is_empty() {
+        return Err("路径为空，无法打开。".into());
+    }
+    if !std::path::Path::new(trimmed).exists() {
+        return Err("路径不存在，无法打开。".into());
+    }
+    app.opener()
+        .open_path(trimmed, None::<&str>)
+        .map_err(|err| format!("打开路径失败: {err}"))?;
     Ok(())
 }
 

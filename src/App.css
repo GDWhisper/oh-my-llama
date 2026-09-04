@@ -468,6 +468,12 @@ body {
   background: #f3f4f6;
 }
 
+.browse-btn:disabled {
+  background: #f9fafb;
+  color: #9ca3af;
+  cursor: not-allowed;
+}
+
 /* 路径输入框的「最近用过」候选浮层：视觉沿用 .select-list 下拉。
    整行是路径，靠省略号截断 + title 看全串。 */
 .path-suggest {
