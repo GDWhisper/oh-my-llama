@@ -42,6 +42,7 @@ export function ModelSelect({ models, value, disabled, onSelect }: Props) {
     getLabel: (name) => name,
     onClose: () => setOpen(false),
     onSelectFirst: choose,
+    selectedKey: value,
   });
 
   const triggerLabel = !value
@@ -90,7 +91,7 @@ export function ModelSelect({ models, value, disabled, onSelect }: Props) {
           ) : (
             <ul className="model-options">
               {filtered.map((name) => (
-                <li key={name} className="select-option">
+                <li key={name} className="select-option" data-dropdown-key={name}>
                   <button
                     type="button"
                     className={`option-main${value === name ? ' selected' : ''}`}

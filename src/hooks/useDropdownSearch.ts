@@ -11,6 +11,10 @@ interface Options<T> {
   onClose: () => void;
   // 回车选中过滤后第一项
   onSelectFirst: (item: T) => void;
+  // 当前选中项的 key（字符串）。下拉展开时将其滚动定位到可视区顶部（紧贴吸顶搜索框下方），
+  // 只对视觉位置做调整，不改变数据顺序；为空表示无选中项，不滚动。
+  // 组件需要在每个选项元素上挂 data-dropdown-key={key} 以便定位。
+  selectedKey?: string | null;
 }
 
 // 可搜索下拉框的共用行为：搜索框状态与过滤、打开时清空查询并聚焦、
@@ -23,6 +27,7 @@ export function useDropdownSearch<T>({
   getLabel,
   onClose,
   onSelectFirst,
+  selectedKey,
 }: Options<T>) {
   const [query, setQuery] = useState('');
   // 下拉列表展开方向：默认向下；空间不足时翻转为向上（由 useLayoutEffect 计算）。
@@ -77,6 +82,23 @@ export function useDropdownSearch<T>({
     }
     setDropUp(up);
   }, [open, matchCount]);
+
+  // 展开时把当前选中项滚动定位到可视区顶部（视觉第一位），仅调整滚动位置，不改变数据顺序。
+  // 紧贴吸顶搜索框(.model-search, sticky top:0)下方，避免被其遮挡。
+  // 仅在搜索框清空（即刚展开、无任何过滤）时执行；打字过滤过程中不抢滚动，避免跳动。
+  useLayoutEffect(() => {
+    if (!open || !listRef.current || !selectedKey) return;
+    if (query.trim() !== '') return;
+    const list = listRef.current;
+    const target =
+      Array.from(list.querySelectorAll<HTMLElement>('[data-dropdown-key]')).find(
+        (el) => el.getAttribute('data-dropdown-key') === selectedKey,
+      ) ?? null;
+    if (!target) return;
+    const search = list.querySelector<HTMLElement>('.model-search');
+    const searchH = search ? search.offsetHeight : 0;
+    list.scrollTop = Math.max(0, target.offsetTop - searchH);
+  }, [open, query, selectedKey]);
 
   const onSearchKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
     if (event.key === 'Enter') {

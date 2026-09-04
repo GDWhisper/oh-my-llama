@@ -93,6 +93,7 @@ export function ConfigManager({
     getLabel: (entry) => entry.label,
     onClose: () => setOpen(false),
     onSelectFirst: (entry) => choose(entry.key),
+    selectedKey: activeName,
   });
 
   const currentLabel = activeName === 'default' ? t('config.default') : activeName;
@@ -193,7 +194,7 @@ export function ConfigManager({
                   ) : (
                     <ul className="model-options">
                       {filtered.map((entry) => (
-                        <li key={entry.key} className="select-option">
+                        <li key={entry.key} className="select-option" data-dropdown-key={entry.key}>
                           <button
                             type="button"
                             className={`option-main${activeName === entry.key ? ' selected' : ''}`}
