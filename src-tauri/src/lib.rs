@@ -1551,8 +1551,10 @@ fn resolve_config_path() -> Result<std::path::PathBuf, String> {
         .join("llama-config.toml"))
 }
 
+// 日志行时间戳：用本地时区而非 UTC——此前用 Utc::now() 让东八区用户看到的日志时间比
+// 墙钟慢 8 小时（15:16 实为 23:16）。chrono 的 clock 特性已启用，Local 直接可用。
 fn now() -> String {
-    chrono::Utc::now().format("%Y-%m-%d %H:%M:%S").to_string()
+    chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string()
 }
 
 fn is_port_in_use_socket(socket: SocketAddr) -> bool {
