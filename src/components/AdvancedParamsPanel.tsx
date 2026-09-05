@@ -251,6 +251,19 @@ export function AdvancedParamsPanel(props: Props) {
   const [showClearDialog, setShowClearDialog] = useState(false);
   // 「可添加的官方参数」搜索词：注册表 160+ 项无法平铺，靠搜索定位。
   const [paramQuery, setParamQuery] = useState('');
+  // ctx_size 输入草稿：清空时保持空白，而不是被受控值立刻补成 0。
+  // onChange 仍即时回写存储（空白按 0 处理，-c 0 = 使用模型默认上下文）；
+  // 外部值变化（切换配置 / 恢复默认 / 一键传参归位）时经下方 effect 回填草稿。
+  const [ctxDraft, setCtxDraft] = useState(() =>
+    config.ctx_size === 0 ? '' : String(config.ctx_size),
+  );
+  useEffect(() => {
+    // 仅当草稿数值与存储值不一致（说明是外部改动）才回填；清空（''）与
+    // 显式输入 0 的草稿数值同为 0，与存储 0 相等，不得回填，否则清空白改。
+    if (Number(ctxDraft || 0) !== config.ctx_size) {
+      setCtxDraft(config.ctx_size === 0 ? '' : String(config.ctx_size));
+    }
+  }, [config.ctx_size, ctxDraft]);
 
   const specByKey = useMemo(() => new Map(registry.map((spec) => [spec.key, spec])), [registry]);
   const enabledStructured = useMemo(
@@ -392,13 +405,18 @@ export function AdvancedParamsPanel(props: Props) {
               </div>
             </div>
             {key === 'ctx_size' && (
-              <input
-                type="number"
-                value={config.ctx_size}
-                onChange={(event) =>
-                  onChange({ ...config, ctx_size: Number(event.currentTarget.value || 0) })
-                }
-              />
+              <>
+                <input
+                  type="number"
+                  value={ctxDraft}
+                  onChange={(event) => {
+                    const raw = event.currentTarget.value;
+                    setCtxDraft(raw);
+                    onChange({ ...config, ctx_size: Number(raw || 0) });
+                  }}
+                />
+                <div className="field-hint">{t('advanced.ctxHint')}</div>
+              </>
             )}
             {key === 'n_predict' && (
               <>

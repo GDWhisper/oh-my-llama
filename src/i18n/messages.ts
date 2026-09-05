@@ -126,6 +126,7 @@ export const zh = {
   'advanced.flashHint': '当前自动映射 Flash Attention 为 {value}',
   'advanced.threadsHint': '留空或输入 auto 时由 llama-server 自动选择',
   'advanced.batchHint': '留空或输入 auto 时使用默认批处理大小',
+  'advanced.ctxHint': '留空表示 0，llama-server 将使用模型默认上下文',
   'advanced.gpuAll': '全部',
   'advanced.empty': '高级参数按需添加；未加入的参数不会写入配置，启动时由 llama-server 自动决定。',
   'advanced.clear': '清空参数',
@@ -740,6 +741,7 @@ export const en: Record<MessageKey, string> = {
   'advanced.flashHint': 'Flash Attention auto-mapped to {value}',
   'advanced.threadsHint': 'Leave empty or enter "auto" to let llama-server decide',
   'advanced.batchHint': 'Leave empty or enter "auto" to use the default batch size',
+  'advanced.ctxHint': 'Leave empty for 0: llama-server will use the model default context size',
   'advanced.gpuAll': 'All',
   'advanced.empty':
     "Add advanced parameters as needed; parameters not added are omitted from the config and left to llama-server's defaults at launch.",
