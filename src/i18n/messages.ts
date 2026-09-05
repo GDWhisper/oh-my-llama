@@ -43,6 +43,7 @@ export const zh = {
   'rawParams.restore': '复原',
   'rawParams.done': '完成',
   'rawParams.previewTitle': '解析预览（实时回写，点击【完成】后生效）',
+  'rawParams.previewDup': '检测到 {count} 处重复参数：{flags}，重复项可能互相覆盖',
 
   // 标题卡片 / 服务控制
   'control.modelFileFallback': '模型文件',
@@ -133,6 +134,8 @@ export const zh = {
   'advanced.disable': '禁用',
   'advanced.enable': '启用',
   'advanced.disabled': '已禁用',
+  'advanced.dupBadge': '重复参数',
+  'advanced.dupBadgeTip': '该参数与其他生效参数重复，可能互相覆盖',
   'advanced.clearTitle': '清空所有高级参数',
   'advanced.clearConfirm': '确认清空',
   'advanced.clearMessage':
@@ -324,6 +327,8 @@ export const zh = {
   'log.timeToggle': '时间',
   'log.showTime': '显示时间',
   'log.hideTime': '隐藏时间',
+  'log.maximize': '放大日志窗口',
+  'log.restore': '还原日志窗口',
 
   // 一键传参解析预览行
   'preview.serverPath': '启动器路径 → {value}',
@@ -661,6 +666,8 @@ export const en: Record<MessageKey, string> = {
   'rawParams.restore': 'Restore',
   'rawParams.done': 'Done',
   'rawParams.previewTitle': 'Parsed preview (live write-back, applied on Done)',
+  'rawParams.previewDup':
+    'Detected {count} duplicate parameters: {flags}; duplicates may override each other',
 
   'control.modelFileFallback': 'model file',
   'control.modelNone': 'Current model: none selected',
@@ -749,6 +756,8 @@ export const en: Record<MessageKey, string> = {
   'advanced.disable': 'Disable',
   'advanced.enable': 'Enable',
   'advanced.disabled': 'Disabled',
+  'advanced.dupBadge': 'Duplicate',
+  'advanced.dupBadgeTip': 'This parameter duplicates another active one and may override it',
   'advanced.clearTitle': 'Clear all advanced parameters',
   'advanced.clearConfirm': 'Confirm Clear',
   'advanced.clearMessage':
@@ -939,6 +948,8 @@ export const en: Record<MessageKey, string> = {
   'log.timeToggle': 'Time',
   'log.showTime': 'Show timestamps',
   'log.hideTime': 'Hide timestamps',
+  'log.maximize': 'Maximize log window',
+  'log.restore': 'Restore log window',
 
   'preview.serverPath': 'Launcher path → {value}',
   'preview.model': 'Model path → {value}',

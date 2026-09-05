@@ -218,12 +218,14 @@ body {
   gap: 12px;
 }
 
-/* 高级参数卡片：标题与「调整参数」按钮吸顶，滚动到卡片下方时仍可操作。
-   仅作用于高级参数面板（.advanced-panel），不影响其他共用 .section-header 的卡片。
+/* 高级参数与原始参数（仅编辑态）卡片的标题行吸顶：标题连同「调整参数」/「复原」「完成」
+   按钮在卡片滚到顶部时仍可见可操作。范围刻意收窄：仅 .advanced-panel 与
+   .raw-params.editing（原始参数只读态不吸顶），不影响其他共用 .section-header 的卡片。
    top 用 --config-manager-h（运行时由 App.tsx 量出配置管理卡片高度写入），使其吸顶在
-   配置管理卡片「正下方」，而非 top:0——否则两者都钉在 top:0 会重叠，本标题会被 z-index
-   更高的配置管理卡片(5)压住而看不见。配置管理卡片的吸顶逻辑完全不变。 */
-.advanced-panel .section-header {
+   配置管理卡片「正下方」，而非 top:0——否则与常驻吸顶的配置管理卡片同钉 top:0 会重叠，
+   本标题会被 z-index 更高的配置管理卡片(5)压住而看不见。配置管理卡片的吸顶逻辑完全不变。 */
+.advanced-panel .section-header,
+.raw-params.editing .section-header {
   position: sticky;
   top: var(--config-manager-h, 0);
   z-index: 4;
@@ -339,6 +341,21 @@ body {
   border-radius: 999px;
   padding: 2px 8px;
   white-space: nowrap;
+}
+
+/* 重复参数软提醒徽章：与 .disabled-badge 同一黄色系，视觉语言一致；
+   内联在 label 里紧跟参数名称，故需自对齐（inline-block + 垂直居中）。 */
+.dup-badge {
+  display: inline-block;
+  vertical-align: middle;
+  font-size: 11px;
+  font-weight: 600;
+  color: #b45309;
+  background: #fef3c7;
+  border-radius: 999px;
+  padding: 2px 8px;
+  white-space: nowrap;
+  margin-left: 6px;
 }
 
 /* 布尔型参数：复选框紧贴配置名称、与其同一行（不再独占整行）。 */
@@ -1400,6 +1417,57 @@ button:disabled {
   color: #ffffff;
 }
 
+/* 放大/还原悬浮按钮：终端视口左上角，深色控件与 .term-jump 同族（图标态，高度对齐
+   .log-time-toggle 的 26px）。z-index 需压过 raw 模式置顶命令行条 .term-pinned
+   （sticky, z-index:1），保证按钮浮在其上且可点。 */
+.term-maximize {
+  position: absolute;
+  left: 12px;
+  top: 12px;
+  z-index: 3;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 26px;
+  padding: 0;
+  border-radius: 8px;
+  border: 1px solid #26314f;
+  background: rgba(17, 26, 51, 0.92);
+  color: #cbd5e1;
+  cursor: pointer;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
+}
+
+.term-maximize:hover {
+  background: #1b2547;
+  color: #ffffff;
+}
+
+.term-maximize svg {
+  width: 14px;
+  height: 14px;
+}
+
+/* 放大态：面板脱流为固定浮层，盖住顶部标题卡（.app > .header）以外的全部区域。
+   left/right/bottom 取 20px 与 .app 的 padding 对齐；top 依赖标题卡实时底边，
+   由 LogPanel 以内联样式写入，这里不设。更深阴影把浮层从被盖住的内容上托起来。 */
+.panel.log-maximized {
+  position: fixed;
+  z-index: 100;
+  left: 20px;
+  right: 20px;
+  bottom: 20px;
+  box-shadow: 0 24px 64px rgba(15, 23, 42, 0.35);
+}
+
+/* fixed 浮层脱离 .log-side 的 flex 上下文，原「视口撑满」规则失效；等价补一条，
+   让黑色终端区吃满浮层内标题行以外的剩余高度。 */
+.panel.log-maximized .terminal-viewport {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
 /* 渲染窗口上方「加载更早日志」按钮：贴 terminal 顶部居中，风格与 term-jump 同族 */
 .term-older {
   align-self: center;
@@ -1805,6 +1873,13 @@ button:disabled {
   margin-bottom: 6px;
 }
 
+/* 重复参数软提醒：与 .disabled-badge 同一黄色系（#b45309），保持视觉一致 */
+.param-preview-title .dup-warn {
+  color: #b45309;
+  font-weight: 600;
+  margin-left: 6px;
+}
+
 .param-preview-list {
   margin: 0;
   padding-left: 18px;
@@ -1817,6 +1892,12 @@ button:disabled {
 
 .param-preview-list li.custom {
   color: #9333ea;
+}
+
+/* 重复参数行：与 li.custom 同特异性，必须排在其后才能盖过自定义行的紫色 */
+.param-preview-list li.dup {
+  color: #b45309;
+  font-weight: 500;
 }
 
 /* 高级参数卡片中的「自定义参数」条目（一键传参写入、未知 flag） */
