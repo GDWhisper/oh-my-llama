@@ -4,6 +4,22 @@
 
 > 本文件为**详细改动历史**（含涉及的文件与实现机制）；GitHub Release 页面为对应版本的**总结性**说明。
 
+## [0.2.1] - 2026-09-06
+
+### 新增功能
+- **重复参数黄字提醒（解析预览 + 高级参数卡片）**：一键传参粘贴的命令行中若同一参数出现多次（含别名，如 `-c` 与 `--ctx-size`），解析预览会以黄字列出重复 flag 并把重复行标黄——只提醒不拦截，不阻止保存、不改变套用行为。实现：`src/lib/parseArgs.ts` 新增 `flagIdentityOf`（flag→归一身份的唯一入口，已知 flag 按落点归一为 `field:<field>` / `structured:<key>`，未收录的自定义 flag 按 `extra:<flag>` 精确同名判定），`buildPlan` 经统一入口 `pushRow` 维护与预览行严格对齐的身份平行数组，汇总出 `dupCount` / `dupFlags`；`src/components/RawParams.tsx` 在预览标题旁显示黄字提醒、行级 `dup` 黄色盖过自定义紫色。高级参数卡片（`src/components/AdvancedParamsPanel.tsx`）同口径复用 `flagIdentityOf`，把生效中的基础/结构化/自定义条目按身份分组计数，同一身份被 ≥2 个生效条目占用即在该身份下所有条目名称旁挂黄字 `DupBadge`（禁用项不参与判定）；`src/i18n/messages.ts` 补 `rawParams.previewDup` / `advanced.dupBadge` 等双语键，`src/App.css` 配套 `.dup-warn` / `.dup-badge` / `.dup` 样式。
+
+- **日志窗口支持放大与 ESC 还原**：`src/components/LogPanel.tsx` 工具栏新增放大/还原悬浮按钮（`src/App.css` 新增 `.term-maximize`），放大态日志面板脱流为固定浮层，盖住顶部标题卡以外的全部区域；浮层 top 用 `useLayoutEffect` 实测标题卡底边（窗口 resize 重测），避免先以回退位置闪一帧；放大态下按 ESC 还原（对话框开着时让位给对话框的自关逻辑）；只切换样式与监听、不重建终端 DOM，贴底跟随/时间显隐等状态原样保留。`src/i18n/messages.ts` 新增 `log.maximize` / `log.restore` 双语键。
+
+- **原始参数编辑态标题与操作按钮吸顶**：`src/App.css` 的吸顶规则由仅 `.advanced-panel .section-header` 扩展为同时命中 `.raw-params.editing .section-header`——原始参数编辑态下，标题与「复原」「完成」按钮随卡片滚到顶部时仍可见可操作（只读态不吸顶，保持现状）；吸顶位置沿用既有 CSS 变量 `--config-manager-h`，钉在常驻吸顶的配置管理卡片正下方不重叠。
+
+### 功能优化
+- 无
+
+### Bug 修复
+- **模型加载期间无法中途停止服务**：`src-tauri/src/lib.rs` 的 `start_server` 原先要等就绪轮询（最长 90 秒）结束才写 `managed=true`，加载期间 `get_status` 报 `managed=false` → 前端停止按钮置灰、`stop_server_inner` 拒绝停止，用户只能干等或杀进程。修复：进程拉起即记受管态（running 保持 false，就绪后自然翻转）；`start_server` 守卫条件由 `running && managed` 改为「受管且进程仍存活」（否则加载中重复点启动会 spawn 出第二个 llama-server）；新增 `LAST_USER_STOP_PID` 原子标记区分启动等待期进程退出的两种成因——用户手动停止（静默成功收场）与进程自行崩溃（照常报「启动失败」）；前端 `useServer.ts` 轮询门控补 `starting` 态，保证启动期间 ~1.5s 内点亮停止按钮并及时感知就绪。
+- **慢加载不再误报「启动较慢」，报错透传具体原因**：`start_server` 等待超时且进程存活时，原先返回 Err 弹「启动较慢」提示，实为模型加载慢的误报；改为静默转后台监控（写入一条 info 日志说明已转后台，`get_status` 轮询接管，端口就绪自动翻转为运行中），窗口内进程退出才判启动失败。另外 `src/hooks/useServer.ts` 的启动错误提示原只认 `Error` 实例，后端以 String 返回的具体原因（端口占用/路径不存在/进程退出等）被笼统兜底文案吞掉，现在优先透传后端原文。
+
 ## [0.2.0] - 2026-09-05
 
 ### 新增功能
