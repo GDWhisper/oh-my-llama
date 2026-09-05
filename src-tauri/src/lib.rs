@@ -998,12 +998,15 @@ fn build_server_args(config: &ServerConfig) -> Vec<String> {
 async fn start_server(app: AppHandle, config: ServerConfig) -> Result<ServerStatus, String> {
     // 先取锁做前置校验，校验后即释放——避免后续耗时的就绪轮询长期占用状态锁，
     // 否则会阻塞 get_status 的 1.5s 轮询、导致 UI 卡顿。
-    let already_managed_running = {
+    // 守卫条件是「受管且进程仍存活」而非「running && managed」：模型加载期间 running
+    // 尚为 false、端口也未 bind（端口占用检查拦不住），仅凭 running 会漏掉「加载中
+    // 重复点启动」→ spawn 出第二个 llama-server 进程。
+    let already_owned_alive = {
         let state = app.state::<tauri::async_runtime::Mutex<ServerStatus>>();
         let status = state.lock().await;
-        status.running && status.managed
+        status.managed && is_process_running(status.pid)
     };
-    if already_managed_running {
+    if already_owned_alive {
         let state = app.state::<tauri::async_runtime::Mutex<ServerStatus>>();
         let status = state.lock().await;
         return Ok(status.clone());
@@ -1083,6 +1086,18 @@ async fn start_server(app: AppHandle, config: ServerConfig) -> Result<ServerStat
     let pid = child
         .process_id()
         .ok_or_else(|| "无法获取子进程 pid。".to_string())?;
+    // 进程拉起即归本应用管（下方随即建立进程守护与 wait_process 监管），立即记受管态：
+    // 模型加载可长达数十秒，若等到 wait_until_ready 之后的收尾块才写 managed，加载期间
+    // get_status 报 managed=false → 前端停止按钮置灰、stop_server_inner 拒绝停止，用户
+    // 无法中途停止。running 保持 false（端口尚未就绪），就绪后由下方收尾块与 get_status
+    // 轮询自然翻转。
+    {
+        let state = app.state::<tauri::async_runtime::Mutex<ServerStatus>>();
+        let mut status = state.lock().await;
+        status.running = false;
+        status.managed = true;
+        status.pid = Some(pid);
+    }
     // 新进程 = 新的测量窗口：清零推理性能累计（perf.rs）。
     reset_perf(&app);
     // 新进程 = 新的运行日志文件：此后所有日志行（含子进程原样输出）逐行同步落盘，
@@ -1177,6 +1192,24 @@ async fn start_server(app: AppHandle, config: ServerConfig) -> Result<ServerStat
     let ready = wait_until_ready(&config.host, config.port, pid, START_READINESS_TIMEOUT);
 
     let alive = is_process_running(Some(pid));
+    if !ready && !alive {
+        // 一次性消费标记（swap 置 0），避免陈旧记录与后续无关的启动误配。
+        if LAST_USER_STOP_PID.swap(0, std::sync::atomic::Ordering::SeqCst) == pid {
+            // 用户在启动过程中手动停止：状态已由 stop_server_inner/wait_process 复位，
+            // 此处不得再走收尾块写 host/port/url 残留；静默成功返回（前端 handleStart
+            // 的 Ok 路径无弹窗）。
+            append_log_inner(
+                &app,
+                ServerLogLine {
+                    ts: now(),
+                    level: "info".into(),
+                    text: "启动过程被手动停止，llama-server 已终止。".into(),
+                },
+            );
+            return Ok(ServerStatus::default());
+        }
+        // 非用户停止 = 进程自行退出（崩溃/参数错误），走下方原有失败路径。
+    }
     let final_status = {
         let state = app.state::<tauri::async_runtime::Mutex<ServerStatus>>();
         let mut status = state.lock().await;
@@ -1345,6 +1378,9 @@ async fn stop_server_inner(app: &AppHandle) -> Result<(), String> {
     drop(status);
 
     if let Some(pid) = pid {
+        // 记下「这次停止是用户手动发起」：若此刻正处于某次 start_server 的启动等待期，
+        // 该标记让它把随后的进程退出判为用户停止（静默收场）而非启动失败（报错）。
+        LAST_USER_STOP_PID.store(pid, std::sync::atomic::Ordering::SeqCst);
         // 先礼貌请求 llama-server 走自带的干净卸载路径：它注册了信号处理器（Windows 控制台处理器
         // / POSIX SIGINT），收到后会在退出前卸载 GPU 模型（与你手动关终端时行为一致）。
         // 平台守护仍是兜底——若它不响应，下面的强制终止（Windows 还有 launcher 崩溃时的
@@ -1802,6 +1838,12 @@ fn wait_until_ready(host: &str, port: u16, pid: u32, timeout: Duration) -> bool 
         std::thread::sleep(Duration::from_millis(500));
     }
 }
+
+/// 最近一次「用户手动停止」的 pid（0 = 无）：stop_server_inner 写入、start_server 消费。
+/// 用于区分启动等待期内进程退出的两种成因：用户中途手动停止（应静默成功，不弹
+/// 「启动失败」）与自行崩溃（照常报错）。pid 比对 + swap(0) 一次性消费，避免陈旧
+/// 记录与后续无关的启动误配。
+static LAST_USER_STOP_PID: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
 
 /// 跨调用复用的 System 实例（sysinfo 推荐常驻并增量刷新）：探测只做单进程定点刷新，
 /// 避免每次调用 new_all() 全量枚举整机进程表（受管期间每 1.5s、启动等待期每 500ms 各一次）。

@@ -519,11 +519,14 @@ export function useServer() {
     }
   }, []);
 
-  // 轮询门控：仅当本应用在管（managed，含模型加载中）或端口应答（running）时探测，
-  // 空闲态完全停轮询（delay=null → useInterval 不建定时器）。外部起/停服务、占用端口
-  // 属用户自身行为，OML 不为外部状态兜底探测；本应用启动撞端口时 llama-server 报错
-  // 退出、start_server 即报失败，用户有反馈。冷启动必无受管进程（退出走 graceful_exit，
-  // 崩溃有 Job Object/进程组兜底），挂载时的一次性 loadStatus 即可确认初始态。
+  // 轮询门控：本应用在管（managed，含模型加载中）、端口应答（running）或启动进行中
+  // （starting）时探测，空闲态完全停轮询（delay=null → useInterval 不建定时器）。
+  // starting 单列的原因：后端 spawn 后即记 managed，但进程拉起到首轮轮询感知之间有
+  // 窗口，启动期间保持轮询才能 ~1.5s 内点亮停止按钮并及时感知就绪/停止；starting
+  // 结束后由 managed/running 接管门控。外部起/停服务、占用端口属用户自身行为，OML
+  // 不为外部状态兜底探测；本应用启动撞端口时 llama-server 报错退出、start_server 即
+  // 报失败，用户有反馈。冷启动必无受管进程（退出走 graceful_exit，崩溃有 Job
+  // Object/进程组兜底），挂载时的一次性 loadStatus 即可确认初始态。
   // 启/停按钮成功后显式 loadStatus（见 start/stop），status 一变门控即自动启停；
   // 外部杀受管进程时轮询尚在（managed 期间），下一周期即发现 managed=false 并停轮询。
   // 可见 1.5s / 隐藏 8s 维持不变（visibilitychange 切 delay 即重建 useInterval）。
@@ -533,7 +536,7 @@ export function useServer() {
     document.addEventListener('visibilitychange', syncHidden);
     return () => document.removeEventListener('visibilitychange', syncHidden);
   }, []);
-  const polling = !!status?.managed || !!status?.running;
+  const polling = !!status?.managed || !!status?.running || starting;
   useInterval(refreshNow, polling ? (hidden ? POLL_INTERVAL_HIDDEN_MS : POLL_INTERVAL_MS) : null);
 
   // 系统从睡眠/休眠唤醒时立即刷新状态：睡眠期间 JS 定时器被系统挂起，
