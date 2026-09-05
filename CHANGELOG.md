@@ -4,6 +4,19 @@
 
 > 本文件为**详细改动历史**（含涉及的文件与实现机制）；GitHub Release 页面为对应版本的**总结性**说明。
 
+## [0.1.10] - 2026-09-05
+
+### 新增功能
+- **日志时间显隐开关**：`src/components/LogPanel.tsx` 工具栏新增「时间」切换按钮，可在日志行前显示/隐藏时间戳；开关状态存入设置（`src-tauri/src/lib.rs` 的 `AppSettings` 新增 `log_show_timestamp` 字段，`#[serde(default)]`，旧 `settings.json` 向后兼容；新增 `get_log_show_timestamp` / `set_log_show_timestamp` 命令注册进 `generate_handler!`），`src/types.ts` 同步 IPC 契约。关闭时后端日志正文不再含时间列，日志正文铺满整行；`src/i18n/messages.ts` 新增 `log.toggleTimestamp` / `log.showTimestamp` / `log.hideTimestamp` 中英双键。
+- **路径字段「打开」按钮（系统文件管理器直达）**：`src/components/PathField.tsx` 为 llama-server 路径与模型目录输入框在已有值时显示「打开」按钮，一键在系统文件管理器中定位该目录/文件。`src-tauri/src/lib.rs` 新增 `open_in_file_manager` 命令（Windows 走 `explorer /select,`、macOS 走 `open -R`、Linux 走 `xdg-open`，按目标存在性自动选择暴露文件还是目录），`src/components/BasicParamsPanel.tsx` 为模型目录字段接线；`src/i18n/messages.ts` 新增 `path.open` 中英双键，`src/App.css` 配套按钮样式。
+
+### 功能优化
+- **下拉展开时自动滚动到当前选中项**：共享 hook `src/hooks/useDropdownSearch.ts` 在下拉展开时把当前选中项 `scrollIntoView` 定位到可视区顶部，长列表（如模型候选）展开后无需手动寻找当前值；`src/components/ConfigManager.tsx` / `src/components/ModelSelect.tsx` 接线传递选中值。
+- **「浏览」按钮文案去掉省略号**：`src/i18n/messages.ts` 的 `path.browse` 文案由「浏览…」改为「浏览」，与「打开」按钮并列时视觉更一致。
+
+### Bug 修复
+- **日志时间戳与墙钟差 8 小时**：`src-tauri/src/lib.rs` 的日志时间戳此前按 UTC 计算（显示与本地时间差 8 小时），改用本地时区（`Local`）格式化。
+
 ## [0.1.9] - 2026-09-04
 
 ### 新增功能
