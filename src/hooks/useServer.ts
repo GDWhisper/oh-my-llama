@@ -788,7 +788,7 @@ export function useServer() {
       void refreshModelDirCandidates();
     } catch (err) {
       const message = err instanceof Error ? err.message : t('err.startFallback');
-      setError(message);
+      showToast(message);
       console.error(err);
     } finally {
       setStarting(false);
