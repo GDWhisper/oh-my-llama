@@ -125,9 +125,10 @@ export default function App() {
     toggleDisableStructuredKey,
   } = server;
 
-  // 配置管理卡片（.config-manager）吸顶在侧栏最顶端（top:0）。高级参数卡片的标题
-  // 也要吸顶，但不能与之重叠——因此把它吸顶在配置管理卡片「正下方」。这里量出配置管理
-  // 卡片的实时高度写入 CSS 变量 --config-manager-h，供 .advanced-panel .section-header
+  // 配置管理卡片（.config-manager）吸顶在侧栏最顶端（top:0）。高级参数卡片与原始参数
+  // 卡片的标题也要吸顶（原始参数仅编辑态吸顶，只读态保持现状），但不能与之重叠——因此
+  // 把它们吸顶在配置管理卡片「正下方」。这里量出配置管理卡片的实时高度写入 CSS 变量
+  // --config-manager-h，供 .advanced-panel 与 .raw-params.editing 的 .section-header
   // 的 top 使用。用 ResizeObserver 跟随其内容高度变化（如布局回流），不影响卡片本身。
   // 注意：App 有加载门控（config 为 null 时只渲染「加载中」），首次挂载时 ConfigManager
   // 尚未进入 DOM，故以 configReady 为依赖——仅在 config 就绪、ConfigManager 已挂载后才

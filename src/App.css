@@ -218,12 +218,14 @@ body {
   gap: 12px;
 }
 
-/* 高级参数卡片：标题与「调整参数」按钮吸顶，滚动到卡片下方时仍可操作。
-   仅作用于高级参数面板（.advanced-panel），不影响其他共用 .section-header 的卡片。
+/* 高级参数与原始参数（仅编辑态）卡片的标题行吸顶：标题连同「调整参数」/「复原」「完成」
+   按钮在卡片滚到顶部时仍可见可操作。范围刻意收窄：仅 .advanced-panel 与
+   .raw-params.editing（原始参数只读态不吸顶），不影响其他共用 .section-header 的卡片。
    top 用 --config-manager-h（运行时由 App.tsx 量出配置管理卡片高度写入），使其吸顶在
-   配置管理卡片「正下方」，而非 top:0——否则两者都钉在 top:0 会重叠，本标题会被 z-index
-   更高的配置管理卡片(5)压住而看不见。配置管理卡片的吸顶逻辑完全不变。 */
-.advanced-panel .section-header {
+   配置管理卡片「正下方」，而非 top:0——否则与常驻吸顶的配置管理卡片同钉 top:0 会重叠，
+   本标题会被 z-index 更高的配置管理卡片(5)压住而看不见。配置管理卡片的吸顶逻辑完全不变。 */
+.advanced-panel .section-header,
+.raw-params.editing .section-header {
   position: sticky;
   top: var(--config-manager-h, 0);
   z-index: 4;
