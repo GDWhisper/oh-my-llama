@@ -134,6 +134,8 @@ export const zh = {
   'advanced.disable': '禁用',
   'advanced.enable': '启用',
   'advanced.disabled': '已禁用',
+  'advanced.dupBadge': '重复参数',
+  'advanced.dupBadgeTip': '该参数与其他生效参数重复，可能互相覆盖',
   'advanced.clearTitle': '清空所有高级参数',
   'advanced.clearConfirm': '确认清空',
   'advanced.clearMessage':
@@ -752,6 +754,8 @@ export const en: Record<MessageKey, string> = {
   'advanced.disable': 'Disable',
   'advanced.enable': 'Enable',
   'advanced.disabled': 'Disabled',
+  'advanced.dupBadge': 'Duplicate',
+  'advanced.dupBadgeTip': 'This parameter duplicates another active one and may override it',
   'advanced.clearTitle': 'Clear all advanced parameters',
   'advanced.clearConfirm': 'Confirm Clear',
   'advanced.clearMessage':

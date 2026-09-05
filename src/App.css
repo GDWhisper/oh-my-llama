@@ -341,6 +341,21 @@ body {
   white-space: nowrap;
 }
 
+/* 重复参数软提醒徽章：与 .disabled-badge 同一黄色系，视觉语言一致；
+   内联在 label 里紧跟参数名称，故需自对齐（inline-block + 垂直居中）。 */
+.dup-badge {
+  display: inline-block;
+  vertical-align: middle;
+  font-size: 11px;
+  font-weight: 600;
+  color: #b45309;
+  background: #fef3c7;
+  border-radius: 999px;
+  padding: 2px 8px;
+  white-space: nowrap;
+  margin-left: 6px;
+}
+
 /* 布尔型参数：复选框紧贴配置名称、与其同一行（不再独占整行）。 */
 .bool-field {
   display: inline-flex;

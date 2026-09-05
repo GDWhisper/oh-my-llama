@@ -8,7 +8,7 @@ import {
   type AdvancedKey,
   type AdvancedOption,
 } from '../lib/advanced';
-import { groupExtraArgs } from '../lib/parseArgs';
+import { flagIdentityOf, groupExtraArgs } from '../lib/parseArgs';
 import { useI18n } from '../i18n';
 import type { MessageKey, Translator } from '../i18n/messages';
 import { Button } from './Button';
@@ -53,6 +53,18 @@ const MAX_SUGGESTIONS = 24;
 // 自定义参数行的归属列表：'enabled' = 启用（写入启动命令行），'disabled' = 临时禁用（保留文本不写入）。
 export type ExtraArgList = 'enabled' | 'disabled';
 
+// 重复参数软提醒徽章：挂在参数名称旁的黄字徽章，提示该参数与其他生效参数重复、
+// 可能互相覆盖。只提醒不拦截——不阻止任何操作、不改变任何行为。
+function DupBadge({ show }: { show: boolean }) {
+  const { t } = useI18n();
+  if (!show) return null;
+  return (
+    <span className="dup-badge" title={t('advanced.dupBadgeTip')}>
+      {t('advanced.dupBadge')}
+    </span>
+  );
+}
+
 // 单条「自定义参数」的可编辑行。用本地草稿承接输入、失焦时才提交，
 // 避免「受控输入 + 每次按键重新分词归一化」导致的光标跳动 / 尾随空格被吞。
 // 当外部文本变化（如切换配置、提交后归一化）时通过 effect 同步草稿。
@@ -60,6 +72,7 @@ export type ExtraArgList = 'enabled' | 'disabled';
 function ExtraArgRow({
   text,
   disabled,
+  dup,
   removable,
   onCommit,
   onRemove,
@@ -67,6 +80,8 @@ function ExtraArgRow({
 }: {
   text: string;
   disabled: boolean;
+  // 与其他生效参数身份重复：名称旁挂黄字徽章软提醒（不阻止任何操作）。
+  dup: boolean;
   removable: boolean;
   onCommit: (value: string) => void;
   onRemove: () => void;
@@ -80,7 +95,10 @@ function ExtraArgRow({
   return (
     <div className={`field extra-args${disabled ? ' disabled' : ''}`}>
       <div className="field-header">
-        <label>{t('advanced.customParam')}</label>
+        <label>
+          {t('advanced.customParam')}
+          <DupBadge show={dup} />
+        </label>
         <div className="field-actions">
           {disabled && <span className="disabled-badge">{t('advanced.disabled')}</span>}
           <Button variant="secondary" type="button" onClick={onToggle}>
@@ -121,6 +139,7 @@ function StructuredParamRow({
   fileDialogDir,
   serverDialogDir,
   disabled,
+  dup,
   removable,
   onCommit,
   onRemove,
@@ -135,6 +154,8 @@ function StructuredParamRow({
   // 目录；空串 = 不指定。
   serverDialogDir: string;
   disabled: boolean;
+  // 与其他生效参数身份重复：名称旁挂黄字徽章软提醒（不阻止任何操作）。
+  dup: boolean;
   removable: boolean;
   onCommit: (value: string) => void;
   onRemove: () => void;
@@ -188,9 +209,13 @@ function StructuredParamRow({
               checked={value === 'true'}
               onChange={(event) => onCommit(event.currentTarget.checked ? 'true' : 'false')}
             />
+            <DupBadge show={dup} />
           </label>
         ) : (
-          <label>{label}</label>
+          <label>
+            {label}
+            <DupBadge show={dup} />
+          </label>
         )}
         <div className="field-actions">
           {disabled && <span className="disabled-badge">{t('advanced.disabled')}</span>}
@@ -335,6 +360,82 @@ export function AdvancedParamsPanel(props: Props) {
     [config.disabled_structured_params],
   );
 
+  // ── 重复参数软提醒（只提醒、不拦截）────────────────────────────────────
+  // 把「生效中」条目按归一身份分组计数：同一身份被 ≥2 个生效条目占用即判重复，
+  // 该身份下所有条目都在名称旁挂黄字徽章。身份归一复用 parseArgs.flagIdentityOf
+  // （与「解析预览」同一口径）：已知 flag 按落点归一，别名互判重复（如自定义 -t 撞
+  // threads 卡片、自定义 --top-k 撞 top_k 结构化卡片）；未收录的自定义 flag 回退为
+  // extra:<flag>，精确同名才算重复。禁用项不进命令行、不参与判定——用户可能正靠
+  // 禁用来消除重复。
+  const { dupLegacy, dupStructured, dupExtra } = useMemo(() => {
+    // flag → 归一身份：已知 flag 走 flagIdentityOf，未收录的自定义 flag 回退
+    // extra:<flag>；空 flag（无从回退）返回 null，不参与判定。
+    const identityOf = (flag: string | undefined): string | null => {
+      if (!flag) return null;
+      return flagIdentityOf(flag) ?? `extra:${flag}`;
+    };
+    // 基础参数恒生效、恒参与：-m/--model、-h/--host、-p/--port、-c/--ctx-size。
+    // 长短写法是同一次发射的别名，按身份去重后各占 1 个名额。
+    const baseIds = new Set<string>();
+    for (const flag of ['-m', '--model', '-h', '--host', '-p', '--port', '-c', '--ctx-size']) {
+      const identity = flagIdentityOf(flag);
+      if (identity) baseIds.add(identity);
+    }
+    // 生效条目及其身份（key 与渲染处对应：legacy → AdvancedKey，structured → 注册表键，
+    // extra → extra_args 起始下标）。
+    const legacyItems = enabledAdvancedKeys
+      .filter((key) => !disabledAdvancedKeys[key])
+      .map((key) => ({ key, identity: identityOf(ADVANCED_FLAG[key]) }));
+    const structuredItems = config.enabled_structured_params
+      .filter((key) => !disabledStructured.has(key))
+      .map((key) => ({ key, identity: identityOf(specByKey.get(key)?.flag) }));
+    const extraItems = groupExtraArgs(config.extra_args).map((group) => ({
+      start: group.start,
+      identity: identityOf(group.flag),
+    }));
+    // 身份 → 生效条目数。传统卡片中与基础参数同身份的只有 ctx_size（其 flag 就是基础
+    // -c，同一配置字段只发射一次，卡片仅是该字段的编辑器而非独立发射源）：不重复计数，
+    // 否则默认配置下「基础 + 卡片」恒为 2，ctx_size 卡片会永久挂徽章。
+    const counts = new Map<string, number>();
+    for (const id of baseIds) counts.set(id, 1);
+    const bump = (identity: string | null) => {
+      if (identity) counts.set(identity, (counts.get(identity) ?? 0) + 1);
+    };
+    for (const { identity } of legacyItems) {
+      if (identity && !baseIds.has(identity)) bump(identity);
+    }
+    for (const { identity } of structuredItems) bump(identity);
+    for (const { identity } of extraItems) bump(identity);
+    // 重复身份：生效占用 ≥ 2。基础身份自带 1 个名额——恰让「基础 + 1 个冲突条目」
+    // 判重（如自定义 -c 撞基础 -c），而只有基础参数自身时不判重。
+    const dupIds = new Set<string>();
+    for (const [identity, count] of counts) {
+      if (count >= 2) dupIds.add(identity);
+    }
+    // 条目级 dup = 身份 ∈ 重复集合。ctx_size 卡片虽未计数，其身份命中重复集合时
+    // 同样挂徽章（此时确有自定义参数与基础 -c 冲突，卡片展示值已被覆盖）。
+    const dupLegacy = new Set<AdvancedKey>();
+    const dupStructured = new Set<string>();
+    const dupExtra = new Set<number>();
+    for (const { key, identity } of legacyItems) {
+      if (identity !== null && dupIds.has(identity)) dupLegacy.add(key);
+    }
+    for (const { key, identity } of structuredItems) {
+      if (identity !== null && dupIds.has(identity)) dupStructured.add(key);
+    }
+    for (const { start, identity } of extraItems) {
+      if (identity !== null && dupIds.has(identity)) dupExtra.add(start);
+    }
+    return { dupLegacy, dupStructured, dupExtra };
+  }, [
+    enabledAdvancedKeys,
+    disabledAdvancedKeys,
+    config.enabled_structured_params,
+    config.extra_args,
+    disabledStructured,
+    specByKey,
+  ]);
+
   // 结构化参数「浏览」的默认打开目录（仅 widget 'file-model-dir' 的参数用到）：
   // model_dir 优先；未设置时退回已选模型文件的父目录。两者皆空则 pickFile 不指定
   // defaultPath（纯字符串运算，不值得 useMemo）。
@@ -440,6 +541,8 @@ export function AdvancedParamsPanel(props: Props) {
         const isBool = key === 'mmap' || key === 'mlock';
         const isDisabled = disabledAdvancedKeys[key];
         const labeled = withFlag(t(ADVANCED_LABEL_KEYS[key]), ADVANCED_FLAG[key]);
+        // 重复参数软提醒：与其他生效条目共享同一身份时挂黄字徽章（只提醒不拦截）。
+        const dup = dupLegacy.has(key);
         return (
           <div className={`field${isDisabled ? ' disabled' : ''}`} key={key}>
             <div className="field-header">
@@ -455,9 +558,13 @@ export function AdvancedParamsPanel(props: Props) {
                         : (event) => onChange({ ...config, mlock: event.currentTarget.checked })
                     }
                   />
+                  <DupBadge show={dup} />
                 </label>
               ) : (
-                <label>{labeled}</label>
+                <label>
+                  {labeled}
+                  <DupBadge show={dup} />
+                </label>
               )}
               <div className="field-actions">
                 {isDisabled && <span className="disabled-badge">{t('advanced.disabled')}</span>}
@@ -595,6 +702,7 @@ export function AdvancedParamsPanel(props: Props) {
             fileDialogDir={fileDialogDir}
             serverDialogDir={serverDialogDir}
             disabled={disabledStructured.has(key)}
+            dup={dupStructured.has(key)}
             removable={adjustingAdvanced}
             onCommit={(value) => onStructuredValueChange(key, value)}
             onRemove={() => onRemoveStructuredKey(key)}
@@ -607,6 +715,7 @@ export function AdvancedParamsPanel(props: Props) {
           key={`enabled-${group.start}`}
           text={group.text}
           disabled={false}
+          dup={dupExtra.has(group.start)}
           removable={adjustingAdvanced}
           onCommit={(value) => onUpdateExtraArg('enabled', group.start, value)}
           onRemove={() => onRemoveExtraArg('enabled', group.start)}
@@ -618,6 +727,7 @@ export function AdvancedParamsPanel(props: Props) {
           key={`disabled-${group.start}`}
           text={group.text}
           disabled
+          dup={false}
           removable={adjustingAdvanced}
           onCommit={(value) => onUpdateExtraArg('disabled', group.start, value)}
           onRemove={() => onRemoveExtraArg('disabled', group.start)}
