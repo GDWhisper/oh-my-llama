@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { ReactNode } from 'react';
+import { open } from '@tauri-apps/plugin-dialog';
 import type { ParamSpec, ServerConfig } from '../types';
 import {
   ADVANCED_LABEL_KEYS,
@@ -99,10 +100,11 @@ function ExtraArgRow({
   );
 }
 
-// 单条「结构化高级参数」卡片：完全由注册表声明（type/choices/min/max）驱动渲染，
+// 单条「结构化高级参数」卡片：完全由注册表声明（type/choices/min/max/widget）驱动渲染，
 // 因此一套组件即可覆盖注册表里的全部官方参数——新增参数无需再写一段 UI。
 // 文本 / 数值走「草稿 + 失焦提交」，避免逐字回写导致光标跳动与整树重渲染；
 // 布尔 / 枚举语义离散，即时提交。
+// 声明 widget: 'file' 的字符串参数在输入框旁附「浏览」按钮（系统文件选择器，选中即提交）。
 function StructuredParamRow({
   spec,
   value,
@@ -131,6 +133,19 @@ function StructuredParamRow({
   const commitDraft = () => {
     if (draft !== value) {
       onCommit(draft);
+    }
+  };
+
+  // 「浏览」按钮：唤起系统原生文件选择器，选中后回填草稿并立即提交
+  //（浏览是明确的一次性选择，无需等失焦；手输路径仍走「草稿 + 失焦提交」）。
+  const pickFile = async () => {
+    const selected = await open({
+      multiple: false,
+      filters: [{ name: 'GGUF', extensions: ['gguf'] }],
+    });
+    if (typeof selected === 'string') {
+      setDraft(selected);
+      onCommit(selected);
     }
   };
 
@@ -181,7 +196,21 @@ function StructuredParamRow({
           onBlur={commitDraft}
         />
       )}
-      {spec.type === 'str' && (
+      {spec.type === 'str' && spec.widget === 'file' && (
+        <div className="field-path">
+          <input
+            value={draft}
+            spellCheck={false}
+            onChange={(event) => setDraft(event.currentTarget.value)}
+            onBlur={commitDraft}
+          />
+          {/* 行处于「临时禁用」时不给浏览：选了也不会写入命令行，免得造成已生效的错觉。 */}
+          <button type="button" className="browse-btn" disabled={disabled} onClick={pickFile}>
+            {t('common.browse')}
+          </button>
+        </div>
+      )}
+      {spec.type === 'str' && !spec.widget && (
         <input
           value={draft}
           spellCheck={false}

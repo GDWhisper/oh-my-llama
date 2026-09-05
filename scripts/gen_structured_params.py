@@ -196,6 +196,9 @@ ENUM_CHOICES = {
     "pooling": ["none", "mean", "cls"],
     "attention": ["none", "sdqa"],
 }
+# 需要在文本输入旁附「浏览」按钮（系统文件选择器）的参数 → widget: Some("file")；
+# 未列出的参数 widget: None（前端渲染纯文本输入）。只影响控件形态，不改序列化语义。
+FILE_PICKER = {"mmproj"}
 # 合理的 llama.cpp 默认值（仅当用户启用却未改时用作初值）。
 DEFAULTS = {
     "top_p": "0.95", "top_k": "40", "min_p": "0.05", "repeat_penalty": "1.1",
@@ -243,25 +246,36 @@ def rust_entry(key, flag, is_bool):
     ptype = rust_ptype(is_bool, key)
     default = rust_default(is_bool, key)
     if ptype == "Enum":
-        choices = ", ".join(f'"{c}".into()' for c in ENUM_CHOICES[key])
-        choices_str = f"Some(vec![{choices}])"
+        choices = ", ".join(f'"{c}"' for c in ENUM_CHOICES[key])
+        choices_str = f"Some(&[{choices}])"
     else:
         choices_str = "None"
-    return (
-        f'    ParamSpec {{ key: "{key}", flag: "{flag}", ptype: ParamType::{ptype}, '
-        f'default: "{default}", min: None, max: None, choices: {choices_str}, '
-        f'enabled_by_default: false }},'
+    widget = 'Some("file")' if key in FILE_PICKER else "None"
+    return "\n".join(
+        [
+            "    ParamSpec {",
+            f'        key: "{key}",',
+            f'        flag: "{flag}",',
+            f"        ptype: ParamType::{ptype},",
+            f'        default: "{default}",',
+            "        min: None,",
+            "        max: None,",
+            f"        choices: {choices_str},",
+            f"        widget: {widget},",
+            "        enabled_by_default: false,",
+            "    },",
+        ]
     )
 
 
 # ── 生成 Rust params.rs ──
-rust_header = '''use serde::{Deserialize, Serialize};
+rust_header = '''use serde::Serialize;
 
 // 结构化高级参数注册表：数据驱动，单一真源在 Rust（默认值 + 序列化规则均在此）。
 // 前端通过 get_param_registry 命令拉取同一份元数据，通用渲染控件，无需为每个参数写硬编码 UI。
 // 新增官方参数只需在此表加一行 + 在 src/i18n/messages.ts 补 advanced.structured.<key> 文案。
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum ParamType {
     Int,
@@ -271,20 +285,53 @@ pub enum ParamType {
     Enum,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+// 全部字段用 &'static str / &'static [..]：使 PARAM_REGISTRY 能写成 const
+// （const 上下文不允许 String / vec! 这类堆分配），同时零运行时开销。
+#[derive(Debug, Clone, Copy, Serialize)]
 pub struct ParamSpec {
-    pub key: String,
-    pub flag: String,
+    pub key: &'static str,
+    pub flag: &'static str,
     #[serde(rename = "type")]
     pub ptype: ParamType,
-    pub default: String,
+    pub default: &'static str,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub min: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub max: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub choices: Option<Vec<String>>,
+    pub choices: Option<&'static [&'static str]>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub widget: Option<&'static str>,
     pub enabled_by_default: bool,
+}
+
+impl ParamSpec {
+    /// 按注册表声明把「键 + 用户值」序列化成 llama-server 命令行片段。
+    /// Bool 型只在真值时输出裸 flag；其余类型输出 `--flag value`，空值视为未设置。
+    pub fn to_args(self, raw: &str) -> Vec<String> {
+        let value = raw.trim();
+        match self.ptype {
+            ParamType::Bool => {
+                if matches!(value, "true" | "1" | "on" | "yes") {
+                    vec![self.flag.to_string()]
+                } else {
+                    Vec::new()
+                }
+            }
+            _ => {
+                if value.is_empty() {
+                    Vec::new()
+                } else {
+                    vec![self.flag.to_string(), value.to_string()]
+                }
+            }
+        }
+    }
+}
+
+/// 按 key 查注册表声明；未知 key 返回 None（旧配置里的废弃参数将被安全忽略）。
+pub fn find_spec(key: &str) -> Option<&'static ParamSpec> {
+    PARAM_REGISTRY.iter().find(|spec| spec.key == key)
 }
 
 pub const PARAM_REGISTRY: &[ParamSpec] = &[
@@ -295,13 +342,14 @@ rust_footer = """
 
 // 供前端渲染用的注册表快照（含类型/默认值/候选项），与 PARAM_REGISTRY 同源。
 #[tauri::command]
-pub fn get_param_registry() -> Vec<ParamSpec> {
-    PARAM_REGISTRY.to_vec()
+pub fn get_param_registry() -> &'static [ParamSpec] {
+    PARAM_REGISTRY
 }
 """
 rust_src = rust_header + rust_entries + rust_footer
 
-with open("src-tauri/src/params.rs", "w", encoding="utf-8") as fh:
+# 仓库 .gitattributes 对本文件强制 eol=lf，而 Windows 下 Python 文本模式默认写 CRLF，需显式关掉。
+with open("src-tauri/src/params.rs", "w", encoding="utf-8", newline="\n") as fh:
     fh.write(rust_src)
 print(f"wrote src-tauri/src/params.rs ({len(PARAMS)} params)")
 

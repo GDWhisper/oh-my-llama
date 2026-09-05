@@ -42,6 +42,9 @@ export interface ParamSpec {
   min?: number;
   max?: number;
   choices?: string[];
+  // 可选控件形态提示（与 Rust ParamSpec.widget 同步）：'file' = 文本输入旁附「浏览」
+  // 按钮唤起系统文件选择器；缺省 = 纯文本输入。只影响渲染，不改参数序列化语义。
+  widget?: 'file';
   enabled_by_default: boolean;
 }
 
