@@ -41,6 +41,18 @@
   gap: 2px;
 }
 
+/* 显卡型号并入 GPU 行：弱化样式跟在占用率后。整块不拆词，行宽放不下时整体换到下一行 */
+.metrics-gpu .metrics-row {
+  flex-wrap: wrap;
+}
+
+.metrics-gpu-name {
+  font-size: 12px;
+  color: #6b7280;
+  font-weight: 400;
+  white-space: nowrap;
+}
+
 .metrics-sub {
   display: flex;
   flex-wrap: wrap;

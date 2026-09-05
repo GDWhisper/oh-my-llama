@@ -127,26 +127,25 @@ export function MetricsPanel({ perf }: { perf: PerfSnapshot | null }) {
                       {snap.gpus.length > 1 ? ` ${i + 1}` : ''}
                     </span>
                     <span className="metrics-value">{g.usage.toFixed(0)}%</span>
+                    <span className="metrics-gpu-name">{g.name}</span>
                   </div>
-                  <div className="metrics-sub">
-                    <span>{g.name}</span>
-                    {(g.vram_total_mb > 0 || g.temperature !== null) && (
+                  {(g.vram_total_mb > 0 || g.temperature !== null) && (
+                    <div className="metrics-sub">
                       <span className="metrics-sub-line">
                         {g.vram_total_mb > 0 && (
                           <>
-                            {' · '}
                             {t('metrics.vram')} {fmtMB(g.vram_used_mb)} / {fmtMB(g.vram_total_mb)}
                           </>
                         )}
+                        {g.vram_total_mb > 0 && g.temperature !== null && ' · '}
                         {g.temperature !== null && (
                           <>
-                            {' · '}
                             {t('metrics.temp')} {g.temperature.toFixed(0)}°C
                           </>
                         )}
                       </span>
-                    )}
-                  </div>
+                    </div>
+                  )}
                 </div>
               ))
             )}
@@ -208,6 +207,10 @@ export function MetricsPanel({ perf }: { perf: PerfSnapshot | null }) {
             )}
             {perf && (
               <>
+                <span className="metrics-sep">·</span>
+                <span className="metrics-value">
+                  {t('metrics.prefill')} {fmtTps(perf.last_prompt_tps)}
+                </span>
                 <span className="metrics-sep">·</span>
                 <span className="metrics-value">
                   {t('metrics.generate')} {fmtTps(perf.last_gen_tps)}
