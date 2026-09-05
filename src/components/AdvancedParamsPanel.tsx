@@ -113,12 +113,13 @@ function ExtraArgRow({
 // 因此一套组件即可覆盖注册表里的全部官方参数——新增参数无需再写一段 UI。
 // 文本 / 数值走「草稿 + 失焦提交」，避免逐字回写导致光标跳动与整树重渲染；
 // 布尔 / 枚举语义离散，即时提交。
-// 声明 widget 为 'file' / 'file-model-dir' 的字符串参数在输入框旁附「浏览」按钮
-//（系统文件选择器，选中即提交），两者仅在选择器起始位置与过滤器上有差异。
+// 声明 widget 为 'file' / 'file-model-dir' / 'file-server-dir' 的字符串参数在输入框旁附
+//「浏览」按钮（系统文件选择器，选中即提交），三者仅在选择器起始位置与过滤器上有差异。
 function StructuredParamRow({
   spec,
   value,
   fileDialogDir,
+  serverDialogDir,
   disabled,
   removable,
   onCommit,
@@ -130,6 +131,9 @@ function StructuredParamRow({
   // 「浏览」默认打开目录（仅 widget 'file-model-dir' 使用）：优先基础参数的模型目录，
   // 其次已选模型文件的父目录；空串 = 不指定。
   fileDialogDir: string;
+  // 「浏览」默认打开目录（仅 widget 'file-server-dir' 使用）：llama-server 路径的父
+  // 目录；空串 = 不指定。
+  serverDialogDir: string;
   disabled: boolean;
   removable: boolean;
   onCommit: (value: string) => void;
@@ -153,7 +157,8 @@ function StructuredParamRow({
   // 「浏览」按钮：唤起系统原生文件选择器，选中后回填草稿并立即提交
   //（浏览是明确的一次性选择，无需等失焦；手输路径仍走「草稿 + 失焦提交」）。
   // 仅 'file-model-dir' 指定起始目录与 GGUF 过滤（mmproj 投影文件即 GGUF）；
-  // 'file' 两者都省略，起始位置交给系统记忆，任意扩展名均可选。
+  // 'file-server-dir' 仅指定起始目录（llama-server 路径父目录，模板文件常随发行包
+  // 放置），不过滤（模板文件扩展名不统一）；'file' 两者都省略，起始位置交给系统记忆。
   const pickFile = async () => {
     const selected = await open({
       multiple: false,
@@ -161,6 +166,9 @@ function StructuredParamRow({
       ...(spec.widget === 'file-model-dir' && {
         defaultPath: fileDialogDir || undefined,
         filters: [{ name: 'GGUF', extensions: ['gguf'] }],
+      }),
+      ...(spec.widget === 'file-server-dir' && {
+        defaultPath: serverDialogDir || undefined,
       }),
     });
     if (typeof selected === 'string') {
@@ -216,20 +224,23 @@ function StructuredParamRow({
           onBlur={commitDraft}
         />
       )}
-      {spec.type === 'str' && (spec.widget === 'file' || spec.widget === 'file-model-dir') && (
-        <div className="field-path">
-          <input
-            value={draft}
-            spellCheck={false}
-            onChange={(event) => setDraft(event.currentTarget.value)}
-            onBlur={commitDraft}
-          />
-          {/* 行处于「临时禁用」时不给浏览：选了也不会写入命令行，免得造成已生效的错觉。 */}
-          <button type="button" className="browse-btn" disabled={disabled} onClick={pickFile}>
-            {t('common.browse')}
-          </button>
-        </div>
-      )}
+      {spec.type === 'str' &&
+        (spec.widget === 'file' ||
+          spec.widget === 'file-model-dir' ||
+          spec.widget === 'file-server-dir') && (
+          <div className="field-path">
+            <input
+              value={draft}
+              spellCheck={false}
+              onChange={(event) => setDraft(event.currentTarget.value)}
+              onBlur={commitDraft}
+            />
+            {/* 行处于「临时禁用」时不给浏览：选了也不会写入命令行，免得造成已生效的错觉。 */}
+            <button type="button" className="browse-btn" disabled={disabled} onClick={pickFile}>
+              {t('common.browse')}
+            </button>
+          </div>
+        )}
       {spec.type === 'str' && !spec.widget && (
         <input
           value={draft}
@@ -328,6 +339,10 @@ export function AdvancedParamsPanel(props: Props) {
   // model_dir 优先；未设置时退回已选模型文件的父目录。两者皆空则 pickFile 不指定
   // defaultPath（纯字符串运算，不值得 useMemo）。
   const fileDialogDir = config.model_dir.trim() || parentDirOf(config.model);
+  // widget 'file-server-dir'（聊天模板文件）的浏览起始目录：模板文件常与 llama-server
+  // 发行包放在一起，故取 llama-server 可执行文件路径的父目录；未设置（或不含分隔符）
+  // 时为空串，pickFile 不指定 defaultPath（纯字符串运算，不值得 useMemo）。
+  const serverDialogDir = parentDirOf(config.llama_server_path);
 
   // 「可添加参数」统一池：传统可选参数 + 注册表里尚未启用的结构化参数。
   // 搜索框置顶，下方按关键词过滤后同时展示两类参数，避免搜索框被传统参数挤到第二行。
@@ -578,6 +593,7 @@ export function AdvancedParamsPanel(props: Props) {
             spec={spec}
             value={config.structured_params[key] ?? spec.default}
             fileDialogDir={fileDialogDir}
+            serverDialogDir={serverDialogDir}
             disabled={disabledStructured.has(key)}
             removable={adjustingAdvanced}
             onCommit={(value) => onStructuredValueChange(key, value)}

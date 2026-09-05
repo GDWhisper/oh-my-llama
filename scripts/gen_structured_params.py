@@ -200,9 +200,11 @@ ENUM_CHOICES = {
 # 未列出的参数 widget: None（前端渲染纯文本输入）。只影响控件形态，不改序列化语义。
 # 'file-model-dir'：选择器优先从模型目录打开并按 GGUF 过滤——仅适合 mmproj（投影文件
 # 即 GGUF、通常与模型同目录），语义与模型目录耦合，新参数勿套用；
-# 'file'：通用选择器，不指定起始目录与过滤器（如聊天模板文件，扩展名 jinja/jinja2/
-# txt/md 皆有，过滤反而碍事）。
-FILE_WIDGET = {"mmproj": "file-model-dir", "chat_template_file": "file"}
+# 'file-server-dir'：选择器优先从 llama-server 可执行文件所在目录打开，无过滤器——适合
+# 聊天模板文件（常与 llama-server 发行包放在一起，且扩展名 jinja/jinja2/txt/md 皆有，
+# 过滤反而碍事）；
+# 'file'：通用选择器，不指定起始目录与过滤器（基线形态，当前无使用者）。
+FILE_WIDGET = {"mmproj": "file-model-dir", "chat_template_file": "file-server-dir"}
 # 合理的 llama.cpp 默认值（仅当用户启用却未改时用作初值）。
 DEFAULTS = {
     "top_p": "0.95", "top_k": "40", "min_p": "0.05", "repeat_penalty": "1.1",
