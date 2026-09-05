@@ -196,9 +196,13 @@ ENUM_CHOICES = {
     "pooling": ["none", "mean", "cls"],
     "attention": ["none", "sdqa"],
 }
-# 需要在文本输入旁附「浏览」按钮（系统文件选择器）的参数 → widget: Some("file")；
+# 需要在文本输入旁附「浏览」按钮（系统文件选择器）的参数 → key 到 widget 形态的映射；
 # 未列出的参数 widget: None（前端渲染纯文本输入）。只影响控件形态，不改序列化语义。
-FILE_PICKER = {"mmproj"}
+# 'file-model-dir'：选择器优先从模型目录打开并按 GGUF 过滤——仅适合 mmproj（投影文件
+# 即 GGUF、通常与模型同目录），语义与模型目录耦合，新参数勿套用；
+# 'file'：通用选择器，不指定起始目录与过滤器（如聊天模板文件，扩展名 jinja/jinja2/
+# txt/md 皆有，过滤反而碍事）。
+FILE_WIDGET = {"mmproj": "file-model-dir", "chat_template_file": "file"}
 # 合理的 llama.cpp 默认值（仅当用户启用却未改时用作初值）。
 DEFAULTS = {
     "top_p": "0.95", "top_k": "40", "min_p": "0.05", "repeat_penalty": "1.1",
@@ -250,7 +254,7 @@ def rust_entry(key, flag, is_bool):
         choices_str = f"Some(&[{choices}])"
     else:
         choices_str = "None"
-    widget = 'Some("file")' if key in FILE_PICKER else "None"
+    widget = f'Some("{FILE_WIDGET[key]}")' if key in FILE_WIDGET else "None"
     return "\n".join(
         [
             "    ParamSpec {",

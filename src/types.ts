@@ -42,9 +42,11 @@ export interface ParamSpec {
   min?: number;
   max?: number;
   choices?: string[];
-  // 可选控件形态提示（与 Rust ParamSpec.widget 同步）：'file' = 文本输入旁附「浏览」
-  // 按钮唤起系统文件选择器；缺省 = 纯文本输入。只影响渲染，不改参数序列化语义。
-  widget?: 'file';
+  // 可选控件形态提示（与 Rust ParamSpec.widget 同步）：'file-model-dir' = 文本输入旁附
+  // 「浏览」按钮，文件选择器优先从模型目录打开并按 GGUF 过滤（仅 mmproj——投影文件即
+  // GGUF，与模型文件同目录）；'file' = 通用文件选择器，不指定起始目录与过滤器；
+  // 缺省 = 纯文本输入。只影响渲染，不改参数序列化语义。
+  widget?: 'file' | 'file-model-dir';
   enabled_by_default: boolean;
 }
 

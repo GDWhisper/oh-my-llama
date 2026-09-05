@@ -303,7 +303,7 @@ pub const PARAM_REGISTRY: &[ParamSpec] = &[
         min: None,
         max: None,
         choices: None,
-        widget: Some("file"),
+        widget: Some("file-model-dir"),
         enabled_by_default: false,
     },
     ParamSpec {
@@ -1744,7 +1744,7 @@ pub const PARAM_REGISTRY: &[ParamSpec] = &[
         min: None,
         max: None,
         choices: None,
-        widget: None,
+        widget: Some("file"),
         enabled_by_default: false,
     },
     ParamSpec {
