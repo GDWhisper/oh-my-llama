@@ -31,6 +31,9 @@ use metrics::get_system_metrics;
 mod params;
 use params::{find_spec, get_param_registry};
 
+mod perf;
+use perf::{get_perf_stats, record_log_line, reset_perf};
+
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
 pub struct ServerConfig {
     pub llama_server_path: String,
@@ -506,6 +509,8 @@ pub fn run() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(tauri::async_runtime::Mutex::new(ServerStatus::default()))
         .manage(std::sync::Mutex::new(Vec::<ServerLogLine>::new()))
+        .manage(std::sync::Mutex::new(perf::PerfAccumulator::default()))
+        .manage(std::sync::Mutex::new(Option::<std::fs::File>::None))
         .invoke_handler(tauri::generate_handler![
             get_configs_state,
             save_named_config,
@@ -518,6 +523,7 @@ pub fn run() {
             stop_server,
             open_preview,
             open_path,
+            open_logs_dir,
             read_logs,
             clear_logs,
             file_exists,
@@ -534,6 +540,7 @@ pub fn run() {
             resolve_close_choice,
             set_tray_labels,
             get_system_metrics,
+            get_perf_stats,
             get_param_registry
         ])
         .setup(|app| {
@@ -1048,8 +1055,18 @@ async fn start_server(app: AppHandle, config: ServerConfig) -> Result<ServerStat
     // 表现为“原生日志不实时”。PTY 让子进程以为自己在写终端 → CRT 改为行缓冲，每遇 \n/\r 立即 flush。
     // 代价：stdout/stderr 在伪终端里合并为单一 master 流（本应用两路都记 level=raw，无语义损失）。
     let pty_system = native_pty_system();
+    // 列宽故意拉大（portable-pty 默认 80）：ConPTY 会按此宽度把长行硬折断，且折断点落在
+    // 数字内部时续行首字符会重复（实测 "333.33" 被拆成 "333." + ".33"，拼回成 "333..33"），
+    // 日志与推理性能解析双双失真。1024 列足以容纳 llama.cpp 的全部日志行；前端 .term-line
+    // 为 pre-wrap，超宽行自动软换行，不影响阅读。
+    const PTY_COLS: u16 = 1024;
     let pair = pty_system
-        .openpty(PtySize::default())
+        .openpty(PtySize {
+            rows: 24,
+            cols: PTY_COLS,
+            pixel_width: 0,
+            pixel_height: 0,
+        })
         .map_err(|err| format!("创建伪终端失败: {err}"))?;
     let mut cmd = CommandBuilder::new(&exe);
     cmd.args(&args);
@@ -1066,6 +1083,25 @@ async fn start_server(app: AppHandle, config: ServerConfig) -> Result<ServerStat
     let pid = child
         .process_id()
         .ok_or_else(|| "无法获取子进程 pid。".to_string())?;
+    // 新进程 = 新的测量窗口：清零推理性能累计（perf.rs）。
+    reset_perf(&app);
+    // 新进程 = 新的运行日志文件：此后所有日志行（含子进程原样输出）逐行同步落盘，
+    // 供开发排障拿到未被面板缓冲裁剪的完整原始输出（LOG_FILES_KEEP 滚动保留）。
+    match open_run_log_file() {
+        Ok(file) => {
+            *app.state::<LogFileState>()
+                .lock()
+                .unwrap_or_else(|e| e.into_inner()) = Some(file);
+        }
+        Err(err) => append_log_inner(
+            &app,
+            ServerLogLine {
+                ts: now(),
+                level: "warn".into(),
+                text: format!("运行日志文件创建失败（不影响服务）：{err}"),
+            },
+        ),
+    }
     // 克隆 master 读端：子进程 stdout+stderr 已合并于此，逐字节实时切行后推给前端。
     let master_reader = pair
         .master
@@ -1212,6 +1248,20 @@ async fn open_path(app: AppHandle, path: String) -> Result<(), String> {
     app.opener()
         .open_path(trimmed, None::<&str>)
         .map_err(|err| format!("打开路径失败: {err}"))?;
+    Ok(())
+}
+
+// 用系统文件管理器打开运行日志目录（落盘说明见 append_log_inner 上方）。
+// 目录不存在 = 从未成功启动过服务，明确报错而不是打开一个空目录。
+#[tauri::command]
+async fn open_logs_dir(app: AppHandle) -> Result<(), String> {
+    let dir = resolve_app_data()?.join("logs");
+    if !dir.exists() {
+        return Err("还没有运行日志：成功启动一次服务后，这里才会有日志文件。".into());
+    }
+    app.opener()
+        .open_path(dir.to_string_lossy().as_ref(), None::<&str>)
+        .map_err(|err| format!("打开日志目录失败: {err}"))?;
     Ok(())
 }
 
@@ -1447,6 +1497,8 @@ async fn wait_process(
     let app_rx = app.clone();
     let consumer = std::thread::spawn(move || {
         while let Ok(text) = rx.recv() {
+            // 命中 llama-server 的 timings 行则累计推理性能并推送快照（perf.rs）。
+            record_log_line(&app_rx, &text);
             // 原生日志：子进程输出逐行原样记一条（level=raw），不做任何级别加工，
             // 前端“原生”模式即完整日志，会原样展示这一行（含可能的着色转义/进度刷新）。
             // 只记一次，避免与结构化级别重复刷屏。
@@ -1515,12 +1567,69 @@ async fn wait_process(
             );
         }
     }
+    // 运行日志文件收尾：最后的退出日志已写入，关闭句柄（下次启动换新文件）。
+    if let Some(state) = app.try_state::<LogFileState>() {
+        *state.lock().unwrap_or_else(|e| e.into_inner()) = None;
+    }
+    // 进程已退出：推理性能累计窗口随进程终结（清零并推空快照，前端隐藏区块）。
+    reset_perf(&app);
     let state = app.state::<tauri::async_runtime::Mutex<ServerStatus>>();
     let mut status = state.lock().await;
     *status = ServerStatus::default();
 }
 
+// ── 运行日志落盘（排障用）────────────────────────────────────────────
+// 每次成功拉起 llama-server 新建一个日志文件（%APPDATA%/OhMyLlama/logs/），此后所有经过
+// append_log_inner 的行逐行追加写入并 flush——文件内容即日志面板的完整正文，未被 5000 行
+// 缓冲裁剪。文件按服务进程一次一换，滚动保留最近 LOG_FILES_KEEP 份。「清空日志」只清面板
+// 缓冲，不动文件。写盘失败静默跳过（不影响服务与面板）。
+const LOG_FILES_KEEP: usize = 20;
+
+type LogFileState = std::sync::Mutex<Option<std::fs::File>>;
+
+/// 新建本次运行的日志文件；同时把目录里超量的旧文件清掉（文件名含时间戳，按名排序即按时间）。
+fn open_run_log_file() -> Result<std::fs::File, String> {
+    let dir = resolve_app_data()?.join("logs");
+    std::fs::create_dir_all(&dir).map_err(|err| format!("创建日志目录失败: {err}"))?;
+    prune_log_files(&dir, LOG_FILES_KEEP);
+    let stamp = chrono::Local::now().format("%Y%m%d_%H%M%S");
+    let path = dir.join(format!("llama-server_{stamp}.log"));
+    std::fs::File::create(&path).map_err(|err| format!("创建日志文件失败: {err}"))
+}
+
+/// 目录内只保留最新 keep 个 .log 文件，其余删除（删除失败忽略，下次启动再清）。
+fn prune_log_files(dir: &std::path::Path, keep: usize) {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    let mut files: Vec<std::path::PathBuf> = entries
+        .filter_map(|entry| entry.ok().map(|e| e.path()))
+        .filter(|path| path.extension().map(|ext| ext == "log").unwrap_or(false))
+        .collect();
+    if files.len() <= keep {
+        return;
+    }
+    files.sort();
+    for path in &files[..files.len() - keep] {
+        let _ = std::fs::remove_file(path);
+    }
+}
+
+/// 把一行日志正文追加写入运行日志文件（无活动文件或写失败时静默跳过）。
+fn write_log_file(app: &AppHandle, text: &str) {
+    if let Some(state) = app.try_state::<LogFileState>() {
+        let mut guard = state.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(file) = guard.as_mut() {
+            let _ = file.write_all(text.as_bytes());
+            let _ = file.write_all(b"\n");
+            let _ = file.flush();
+        }
+    }
+}
+
 fn append_log_inner(app: &AppHandle, line: ServerLogLine) {
+    // 先落盘再入内存缓冲：两路内容一致，文件始终是面板正文的完整版。
+    write_log_file(app, &line.text);
     {
         let state = app.state::<std::sync::Mutex<Vec<ServerLogLine>>>();
         let mut logs = state.lock().unwrap_or_else(|e| e.into_inner());
@@ -2585,6 +2694,158 @@ enabled_advanced_params = ["ctx_size"]
             save_settings_json(&dir, &settings).expect("save settings");
             assert_eq!(load_settings(&dir).show_log_times, show);
         }
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn parse_timing_lines_from_llama_server_log() {
+        // 旧版：行首即 timings 正文，直接命中。
+        let mut acc = perf::PerfAccumulator::default();
+        assert!(acc.feed(
+            "prompt eval time =    1097.82 ms /   512 tokens (    2.14 ms per token,   466.39 tokens per second)",
+        ));
+        let snap = acc.snapshot();
+        assert_eq!(snap.last_prompt_tokens, Some(512));
+        assert!((snap.last_prompt_ms.unwrap() - 1097.82).abs() < 1e-9);
+        assert!((snap.last_prompt_tps.unwrap() - 466.39).abs() < 1e-9);
+
+        // 新版：行首带时间戳与 slot 前缀（用户实测格式），行内搜索必须命中。
+        let mut acc = perf::PerfAccumulator::default();
+        assert!(acc.feed(
+            "0.45.539.515 I slot print_timing: id  0 | task 0 |        eval time =    1227.111 ms /   119 tokens (   10.31 ms per token,    96.98 tokens per second)",
+        ));
+        let snap = acc.snapshot();
+        assert_eq!(snap.last_gen_tokens, Some(119));
+        assert!((snap.last_gen_tps.unwrap() - 96.98).abs() < 1e-9);
+        assert_eq!(snap.requests, 1);
+    }
+
+    #[test]
+    fn parse_wrapped_timing_lines_rejoined() {
+        // 伪终端按 80 列折断：timings 行拆成多条日志，数字从中间断开（用户实测格式）。
+        // feed 必须把续行拼回后再解析。
+        let mut acc = perf::PerfAccumulator::default();
+        assert!(!acc.feed(
+            "0.45.539.510 I slot print_timing: id  0 | task 0 | prompt eval time =    6198.03",
+        ));
+        assert!(acc.feed("3 ms / 22298 tokens (    0.28 ms per token,  3597.60 tokens per second)"));
+        let snap = acc.snapshot();
+        assert_eq!(snap.last_prompt_tokens, Some(22298));
+        assert!((snap.last_prompt_ms.unwrap() - 6198.033).abs() < 1e-9);
+        assert!((snap.last_prompt_tps.unwrap() - 3597.60).abs() < 1e-9);
+
+        // 同理：eval 行也可能折断在 ms 数值中间。
+        let mut acc = perf::PerfAccumulator::default();
+        assert!(!acc.feed(
+            "0.45.539.515 I slot print_timing: id  0 | task 0 |        eval time =    1227.11",
+        ));
+        assert!(acc.feed("1 ms /   119 tokens (   10.31 ms per token,    96.98 tokens per second)"));
+        let snap = acc.snapshot();
+        assert_eq!(snap.last_gen_tokens, Some(119));
+        assert!((snap.last_gen_ms.unwrap() - 1227.111).abs() < 1e-9);
+
+        // 请求处理过程中的进度行同样含 "tokens per second"，但不含 timings 起始，不得命中。
+        let mut acc = perf::PerfAccumulator::default();
+        assert!(!acc.feed(
+            "0.41.331.266 I slot print_timing: id  0 | task 0 | prompt processing, n_tokens =",
+        ));
+        assert!(!acc.feed("=  12288, progress = 0.55, t =   3.22 s / 3819.78 tokens per second"));
+        assert_eq!(acc.snapshot().requests, 0);
+
+        // 非 timings 行 / total 行一律不命中。
+        assert!(!acc.feed("total time =   18154.18 ms /   540 tokens"));
+        assert!(!acc.feed("system_info: n_threads = 8 | AVX = 1"));
+        assert!(!acc.feed(""));
+
+        // 缓存全命中等异常值（0 tokens / inf 速度）必须被过滤，不能污染累计；
+        // 且其后的正常 timings 行不得被坏行的挂起状态吞掉。
+        assert!(!acc.feed(
+            "prompt eval time =       0.00 ms /     0 tokens (    0.00 ms per token,      inf tokens per second)"
+        ));
+        assert!(acc.feed(
+            "eval time =   17398.56 ms /   506 tokens (   34.39 ms per token,    29.08 tokens per second)"
+        ));
+        let snap = acc.snapshot();
+        assert_eq!(snap.last_gen_tokens, Some(506));
+        assert_eq!(snap.last_prompt_tps, None);
+    }
+
+    #[test]
+    fn perf_accumulator_tracks_last_and_totals() {
+        let mut acc = perf::PerfAccumulator::default();
+        assert_eq!(acc.snapshot().last_prompt_tps, None);
+
+        // 两次请求：prompt 行与 eval 行分别累计。
+        assert!(acc.feed("prompt eval time = 1000.00 ms / 500 tokens (2.00 ms per token, 500.00 tokens per second)"));
+        assert!(acc.feed(
+            "eval time = 4000.00 ms / 100 tokens (40.00 ms per token, 25.00 tokens per second)"
+        ));
+        assert!(acc.feed("prompt eval time = 200.00 ms / 800 tokens (0.25 ms per token, 4000.00 tokens per second)"));
+        assert!(acc.feed(
+            "eval time = 2000.00 ms / 50 tokens (40.00 ms per token, 25.00 tokens per second)"
+        ));
+
+        let snap = acc.snapshot();
+        // 最近一次 = 第二次请求的值。
+        assert_eq!(snap.last_prompt_tokens, Some(800));
+        assert_eq!(snap.last_prompt_tps, Some(4000.0));
+        assert_eq!(snap.last_gen_tokens, Some(50));
+        assert_eq!(snap.last_gen_tps, Some(25.0));
+        // 累计 = 两次请求之和；requests 按 eval 行计。
+        assert_eq!(snap.prompt_tokens_total, 1300);
+        assert!((snap.prompt_ms_total - 1200.0).abs() < 1e-9);
+        assert_eq!(snap.gen_tokens_total, 150);
+        assert!((snap.gen_ms_total - 6000.0).abs() < 1e-9);
+        assert_eq!(snap.requests, 2);
+
+        // 平均吞吐 = Σtokens / Σ时间（非各请求 TPS 的算术平均）。
+        let avg_prompt = snap.prompt_tokens_total as f64 / (snap.prompt_ms_total / 1000.0);
+        assert!((avg_prompt - 1300.0 / 1.2).abs() < 1e-9);
+        let avg_gen = snap.gen_tokens_total as f64 / (snap.gen_ms_total / 1000.0);
+        assert!((avg_gen - 25.0).abs() < 1e-9);
+
+        acc.reset();
+        assert_eq!(acc.snapshot().last_prompt_tps, None);
+        assert_eq!(acc.snapshot().last_gen_tps, None);
+        assert_eq!(acc.snapshot().requests, 0);
+    }
+
+    #[test]
+    fn prune_log_files_keeps_latest_and_ignores_others() {
+        let dir = std::env::temp_dir().join(format!("llama_logprune_test_{}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("create temp dir");
+        // 5 个日志文件 + 1 个无关文件：保留最新 2 个 .log，无关文件不参与计数也不被删。
+        for name in [
+            "llama-server_20260905_100000.log",
+            "llama-server_20260905_110000.log",
+            "llama-server_20260905_120000.log",
+            "llama-server_20260905_130000.log",
+            "llama-server_20260905_140000.log",
+            "notes.txt",
+        ] {
+            std::fs::write(dir.join(name), b"x").expect("write fixture");
+        }
+
+        prune_log_files(&dir, 2);
+
+        let mut remaining: Vec<String> = std::fs::read_dir(&dir)
+            .expect("read dir")
+            .filter_map(|entry| {
+                entry
+                    .ok()
+                    .map(|e| e.file_name().to_string_lossy().into_owned())
+            })
+            .collect();
+        remaining.sort();
+        assert_eq!(
+            remaining,
+            vec![
+                "llama-server_20260905_130000.log".to_string(),
+                "llama-server_20260905_140000.log".to_string(),
+                "notes.txt".to_string(),
+            ]
+        );
 
         let _ = std::fs::remove_dir_all(&dir);
     }

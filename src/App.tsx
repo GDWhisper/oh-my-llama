@@ -68,6 +68,7 @@ export default function App() {
     status,
     unresponsive,
     logs,
+    perf,
     error,
     toast,
     showToast,
@@ -456,8 +457,8 @@ export default function App() {
         </section>
 
         <section className="column main log-side">
-          <MetricsPanel />
-          <LogPanel logs={logs} onClear={handleClearLogs} />
+          <MetricsPanel perf={perf} />
+          <LogPanel logs={logs} onClear={handleClearLogs} onError={showToast} />
         </section>
       </div>
 

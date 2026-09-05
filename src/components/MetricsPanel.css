@@ -61,6 +61,22 @@
   white-space: nowrap;
 }
 
+/* 推理性能区块：与系统指标之间加一条浅分隔线，视觉上区分「机器指标」与「模型指标」 */
+.metrics-perf {
+  border-top: 1px solid #e5e7eb;
+  padding-top: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.metrics-perf-meta {
+  font-size: 12px;
+  color: #9ca3af;
+  padding-left: 52px;
+  font-variant-numeric: tabular-nums;
+}
+
 .metrics-error {
   font-size: 12px;
   color: #dc2626;

@@ -10,6 +10,8 @@ type LogMode = 'brief' | 'raw';
 interface Props {
   logs: LogLine[];
   onClear: () => void;
+  // 打开日志目录等操作的后端报错回调（由 App 传入 toast 展示）。
+  onError: (message: string) => void;
 }
 
 // 距底多少像素以内仍视为“停在底部”。留一点冗余以容忍流式输出时一两行的抖动。
@@ -42,7 +44,7 @@ const findScroller = (term: HTMLElement | null): HTMLElement | null => {
   return term;
 };
 
-export function LogPanel({ logs, onClear }: Props) {
+export function LogPanel({ logs, onClear, onError }: Props) {
   const { t } = useI18n();
   const [mode, setMode] = useState<LogMode>('raw');
   // 是否显示时间戳：默认显示（与旧 settings.json 缺字段时的观感保持一致），
@@ -222,6 +224,15 @@ export function LogPanel({ logs, onClear }: Props) {
               />
             </svg>
           </button>
+          {/* 运行日志按服务进程一次一文件落在磁盘上，此按钮直达目录（排障时取完整原始日志）。 */}
+          <Button
+            variant="secondary"
+            onClick={() => {
+              invoke('open_logs_dir').catch((err) => onError(String(err)));
+            }}
+          >
+            {t('log.files')}
+          </Button>
           <Button variant="secondary" onClick={onClear}>
             {t('log.clear')}
           </Button>

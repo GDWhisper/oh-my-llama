@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { useI18n } from '../i18n';
+import type { PerfSnapshot } from '../types';
 import './MetricsPanel.css';
 
 interface GpuMetrics {
@@ -28,7 +29,19 @@ function fmtMB(mb: number): string {
   return `${Math.round(mb)} MB`;
 }
 
-export function MetricsPanel() {
+function fmtTps(tps: number | null): string {
+  if (tps == null) return '—';
+  const digits = tps >= 100 ? 0 : tps >= 10 ? 1 : 2;
+  return `${tps.toFixed(digits)} tok/s`;
+}
+
+// 平均吞吐 = Σtokens / Σ时间：后端只下发累计值，平均在此派生（吞吐的真实平均，非各请求 TPS 均值）。
+function avgTps(tokensTotal: number, msTotal: number): string {
+  if (tokensTotal <= 0 || msTotal <= 0) return '—';
+  return fmtTps(tokensTotal / (msTotal / 1000));
+}
+
+export function MetricsPanel({ perf }: { perf: PerfSnapshot | null }) {
   const { t } = useI18n();
   const [snap, setSnap] = useState<MetricsSnapshot | null>(null);
   const [err, setErr] = useState<string | null>(null);
@@ -137,6 +150,29 @@ export function MetricsPanel() {
                 </div>
               ))
             )}
+
+            {/* 推理性能：来自 llama-server 日志 timings 行（最近一次请求 + 进程生命周期累计平均）。 */}
+            {perf && (
+              <div className="metrics-perf">
+                <div className="metrics-row">
+                  <span className="metrics-label">{t('metrics.prefill')}</span>
+                  <span className="metrics-value">
+                    {t('metrics.last')} {fmtTps(perf.last_prompt_tps)} · {t('metrics.avg')}{' '}
+                    {avgTps(perf.prompt_tokens_total, perf.prompt_ms_total)}
+                  </span>
+                </div>
+                <div className="metrics-row">
+                  <span className="metrics-label">{t('metrics.generate')}</span>
+                  <span className="metrics-value">
+                    {t('metrics.last')} {fmtTps(perf.last_gen_tps)} · {t('metrics.avg')}{' '}
+                    {avgTps(perf.gen_tokens_total, perf.gen_ms_total)}
+                  </span>
+                </div>
+                <div className="metrics-perf-meta">
+                  {t('metrics.requests', { count: perf.requests })}
+                </div>
+              </div>
+            )}
           </div>
         ) : (
           // 收起态：仅展示关键数值（一行紧凑）
@@ -167,6 +203,14 @@ export function MetricsPanel() {
                         : '—',
                     )
                     .join(' / ')}
+                </span>
+              </>
+            )}
+            {perf && (
+              <>
+                <span className="metrics-sep">·</span>
+                <span className="metrics-value">
+                  {t('metrics.generate')} {fmtTps(perf.last_gen_tps)}
                 </span>
               </>
             )}

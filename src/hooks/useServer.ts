@@ -5,6 +5,7 @@ import type {
   ConfigsState,
   ParamSpec,
   PathCandidate,
+  PerfSnapshot,
   ServerConfig,
   ServerLogLine,
   ServerStatus,
@@ -112,6 +113,8 @@ export function useServer() {
   const wasReadyRef = useRef(false);
   const unreachableSinceRef = useRef<number | null>(null);
   const [logs, setLogs] = useState<LogLine[]>([]);
+  // 推理性能（后端解析 llama-server 日志的 timings 行）：null = 无数据（未启动或尚无请求完成）。
+  const [perf, setPerf] = useState<PerfSnapshot | null>(null);
   // 待 flush 的增量日志缓冲 + 单调行号源：均为 ref，高频写不参与渲染、不触发重渲染。
   const logBufferRef = useRef<LogLine[]>([]);
   const logIdSeq = useRef(0);
@@ -367,6 +370,33 @@ export function useServer() {
     return () => {
       disposed = true;
       window.clearInterval(flushTimer);
+      unlisteners.forEach((un) => un());
+    };
+  }, []);
+
+  // 推理性能：挂载时先取一次当前快照（服务可能早于本窗口就有请求），随后订阅 perf://update
+  // 增量。后端在服务进程启动/退出时清零并推空快照，这里把无数据快照归一为 null（隐藏区块）。
+  // listenGuarded 与日志 effect 同一竞态防护：StrictMode 双挂载不残留 listener。
+  useEffect(() => {
+    let disposed = false;
+    const unlisteners: (() => void)[] = [];
+    // 无数据（last_* 皆 null）→ null，让 MetricsPanel 不渲染推理区块。
+    const apply = (snap: PerfSnapshot) => {
+      setPerf(snap.last_prompt_tps != null || snap.last_gen_tps != null ? snap : null);
+    };
+    (async () => {
+      try {
+        apply(await invoke<PerfSnapshot>('get_perf_stats'));
+      } catch (err) {
+        console.error(err);
+      }
+      const unUpdate = await listenGuarded<PerfSnapshot>('perf://update', apply, () => disposed);
+      if (unUpdate) {
+        unlisteners.push(unUpdate);
+      }
+    })();
+    return () => {
+      disposed = true;
       unlisteners.forEach((un) => un());
     };
   }, []);
@@ -984,6 +1014,7 @@ export function useServer() {
     status,
     unresponsive,
     logs,
+    perf,
     error,
     toast,
     showToast,

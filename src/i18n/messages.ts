@@ -315,6 +315,7 @@ export const zh = {
   'log.modeAria': '日志模式',
   'log.brief': '简要',
   'log.raw': '原生',
+  'log.files': '日志文件',
   'log.clear': '清空日志',
   'log.empty': '暂无日志输出…',
   'log.loadOlder': '↑ 加载更早日志',
@@ -612,6 +613,11 @@ export const zh = {
   'metrics.loadError': '性能数据获取失败',
   'metrics.collapse': '收起',
   'metrics.expand': '展开',
+  'metrics.prefill': '预处理',
+  'metrics.generate': '生成',
+  'metrics.last': '最近',
+  'metrics.avg': '平均',
+  'metrics.requests': '累计 {count} 次请求',
 } as const;
 
 export type MessageKey = keyof typeof zh;
@@ -923,6 +929,7 @@ export const en: Record<MessageKey, string> = {
   'log.modeAria': 'Log mode',
   'log.brief': 'Brief',
   'log.raw': 'Raw',
+  'log.files': 'Log files',
   'log.clear': 'Clear Logs',
   'log.empty': 'No log output yet…',
   'log.loadOlder': '↑ Load older logs',
@@ -1221,4 +1228,9 @@ export const en: Record<MessageKey, string> = {
   'metrics.loadError': 'Failed to fetch performance data',
   'metrics.collapse': 'Collapse',
   'metrics.expand': 'Expand',
+  'metrics.prefill': 'Prefill',
+  'metrics.generate': 'Generation',
+  'metrics.last': 'Last',
+  'metrics.avg': 'Avg',
+  'metrics.requests': '{count} request(s) total',
 };
