@@ -181,13 +181,30 @@ export function RawParams({
       />
       {plan && plan.rows.length > 0 && (
         <div className="param-preview">
-          <div className="param-preview-title">{t('rawParams.previewTitle')}</div>
+          <div className="param-preview-title">
+            {t('rawParams.previewTitle')}
+            {/* 重复参数软提醒：黄字列出重复 flag，不阻止保存、不改变套用行为 */}
+            {plan.dupCount > 0 && (
+              <span className="dup-warn">
+                {t('rawParams.previewDup', {
+                  count: plan.dupCount,
+                  flags: plan.dupFlags.join(' '),
+                })}
+              </span>
+            )}
+          </div>
           <ul className="param-preview-list">
-            {plan.rows.map((row, index) => (
-              <li key={index} className={row.custom ? 'custom' : ''}>
-                {row.text}
-              </li>
-            ))}
+            {plan.rows.map((row, index) => {
+              // dup 与 custom 可同时存在：重复行黄色需盖过自定义行紫色（见 App.css 规则顺序）
+              const cls = [row.custom ? 'custom' : '', row.dup ? 'dup' : '']
+                .filter(Boolean)
+                .join(' ');
+              return (
+                <li key={index} className={cls}>
+                  {row.text}
+                </li>
+              );
+            })}
           </ul>
         </div>
       )}

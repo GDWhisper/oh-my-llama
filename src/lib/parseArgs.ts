@@ -459,6 +459,8 @@ export function parseLlamaArgs(input: string): ParsedArg[] {
 export interface PreviewRow {
   text: string;
   custom: boolean; // 是否走自定义参数（extra_args）
+  // 该行参数与其他行身份重复：软提醒（可能互相覆盖），不阻止保存、不改变套用行为
+  dup?: boolean;
 }
 
 export interface ApplyPlan {
@@ -474,6 +476,10 @@ export interface ApplyPlan {
   enableStructured: string[];
   // 供 UI 预览展示，确认前让用户核对
   rows: PreviewRow[];
+  // 重复参数提醒（只提醒不拦截）：被标黄的重复行数
+  dupCount: number;
+  // 涉及重复的 flag 原文（去重、按首次出现顺序），供提醒文案列出
+  dupFlags: string[];
 }
 
 // 'preview.top_p' → 'top_p'：FLAG_INFO 里 known 项的 labelKey 后缀即注册表主键，
@@ -483,6 +489,30 @@ const structuredKeyOf = (labelKey?: MessageKey): string | undefined =>
   labelKey && labelKey.startsWith(PREVIEW_PREFIX)
     ? labelKey.slice(PREVIEW_PREFIX.length)
     : undefined;
+
+// 单个 flag token → 归一身份串：flag→身份的唯一归一入口。
+// 同时服务两处消费方：本任务的「解析预览」重复判定（buildPlan 已持有解析产物，
+// 按同一语义直接从 arg 元数据归一，免逐行回查 FLAG_INFO），以及后续
+// 「高级参数卡片重复徽章」任务。语义要点：已知 flag 按落点归一——
+// -c 与 --ctx-size、--mmap 与 --no-mmap、--top-k 多次出现均视为同一身份；
+// 'ignore'（启动器内部常量，不落配置）与表中未收录的 flag 返回 null，不参与重复判定。
+export function flagIdentityOf(flag: string): string | null {
+  const info = FLAG_INFO[flag];
+  if (!info) return null;
+  switch (info.kind) {
+    case 'value':
+    case 'bool':
+    case 'model':
+      return `field:${info.field}`;
+    case 'known': {
+      // 表内 known 项均带 labelKey；缺失（防御分支）时无法归一，视为不参与。
+      const key = structuredKeyOf(info.labelKey);
+      return key ? `structured:${key}` : null;
+    }
+    default:
+      return null; // 'ignore'
+  }
+}
 
 const TRUTHY = new Set(['true', '1', 'on', 'yes']);
 
@@ -529,15 +559,38 @@ export function buildPlan(args: ParsedArg[], t: Translator, registry: ParamSpec[
   const structured: Record<string, string> = {};
   const enableStructuredSet = new Set<string>();
   const rows: PreviewRow[] = [];
+  // 与 rows 平行的身份数组：每行记录产出它的 arg 的归一身份（语义同 flagIdentityOf，
+  // 直接用解析产物计算，免回查 FLAG_INFO）与该 arg 的 flag 原文；不参与判定的行记 null。
+  // 重复判定按下标取对应身份，因此行的推送一律走 pushRow，保证两数组严格对齐。
+  const rowIds: { id: string | null; flag: string }[] = [];
   const specByKey = new Map(registry.map((spec) => [spec.key, spec]));
 
   for (const arg of args) {
     // 启动器内部常量：识别时已忽略，回写不会污染配置，直接跳过。
     if (arg.kind === 'ignore') continue;
+
+    // 归一该 arg 的身份：value/bool/model → 'field:<field>'；
+    // known → 'structured:<key>'（labelKey 缺失时按 flag 原文计）；
+    // unknown → 'extra:<flag>'（透传参数精确同名才算重复）；exe / positional → null（不参与判定）。
+    let identity: string | null = null;
+    if (arg.kind === 'value' || arg.kind === 'bool' || arg.kind === 'model') {
+      identity = `field:${arg.field}`;
+    } else if (arg.kind === 'known') {
+      const key = structuredKeyOf(arg.labelKey);
+      identity = key ? `structured:${key}` : `extra:${arg.flag}`;
+    } else if (arg.kind === 'unknown') {
+      identity = `extra:${arg.flag}`;
+    }
+    // 行推送统一入口：同步登记身份与 flag 原文，避免 rows / rowIds 错位。
+    const pushRow = (text: string, custom: boolean) => {
+      rows.push({ text, custom });
+      rowIds.push({ id: identity, flag: arg.flag });
+    };
+
     if (arg.kind === 'exe') {
       if (arg.value) {
         patch.llama_server_path = arg.value;
-        rows.push({ text: t('preview.serverPath', { value: arg.value }), custom: false });
+        pushRow(t('preview.serverPath', { value: arg.value }), false);
       }
       continue;
     }
@@ -547,7 +600,7 @@ export function buildPlan(args: ParsedArg[], t: Translator, registry: ParamSpec[
         patch.model = arg.value;
         const idx = Math.max(arg.value.lastIndexOf('/'), arg.value.lastIndexOf('\\'));
         patch.model_dir = idx > 0 ? arg.value.slice(0, idx) : '';
-        rows.push({ text: t('preview.model', { value: arg.value }), custom: false });
+        pushRow(t('preview.model', { value: arg.value }), false);
       }
       continue;
     }
@@ -558,19 +611,16 @@ export function buildPlan(args: ParsedArg[], t: Translator, registry: ParamSpec[
         case 'host':
           if (arg.value) {
             patch.host = arg.value;
-            rows.push({ text: t('preview.host', { value: arg.value }), custom: false });
+            pushRow(t('preview.host', { value: arg.value }), false);
           }
           break;
         case 'port': {
           const n = toInt(arg.value);
           if (n != null) {
             patch.port = n;
-            rows.push({ text: t('preview.port', { value: n }), custom: false });
+            pushRow(t('preview.port', { value: n }), false);
           } else {
-            rows.push({
-              text: t('preview.portInvalid', { value: arg.value ?? '' }),
-              custom: false,
-            });
+            pushRow(t('preview.portInvalid', { value: arg.value ?? '' }), false);
           }
           break;
         }
@@ -579,9 +629,9 @@ export function buildPlan(args: ParsedArg[], t: Translator, registry: ParamSpec[
           if (n != null) {
             patch.ctx_size = n;
             enableSet.add('ctx_size');
-            rows.push({ text: t('preview.ctx', { value: n }), custom: false });
+            pushRow(t('preview.ctx', { value: n }), false);
           } else {
-            rows.push({ text: t('preview.ctxInvalid', { value: arg.value ?? '' }), custom: false });
+            pushRow(t('preview.ctxInvalid', { value: arg.value ?? '' }), false);
           }
           break;
         }
@@ -591,15 +641,9 @@ export function buildPlan(args: ParsedArg[], t: Translator, registry: ParamSpec[
           if (n != null) {
             patch.n_predict = n;
             enableSet.add('n_predict');
-            rows.push({
-              text: t('preview.predict', { value: n === -1 ? 'unlimited' : n }),
-              custom: false,
-            });
+            pushRow(t('preview.predict', { value: n === -1 ? 'unlimited' : n }), false);
           } else {
-            rows.push({
-              text: t('preview.predictInvalid', { value: arg.value ?? '' }),
-              custom: false,
-            });
+            pushRow(t('preview.predictInvalid', { value: arg.value ?? '' }), false);
           }
           break;
         }
@@ -608,9 +652,9 @@ export function buildPlan(args: ParsedArg[], t: Translator, registry: ParamSpec[
           if (n != null) {
             patch.n_gpu_layers = n;
             enableSet.add('n_gpu_layers');
-            rows.push({ text: t('preview.gpu', { value: n }), custom: false });
+            pushRow(t('preview.gpu', { value: n }), false);
           } else {
-            rows.push({ text: t('preview.gpuInvalid', { value: arg.value ?? '' }), custom: false });
+            pushRow(t('preview.gpuInvalid', { value: arg.value ?? '' }), false);
           }
           break;
         }
@@ -619,12 +663,9 @@ export function buildPlan(args: ParsedArg[], t: Translator, registry: ParamSpec[
           if (n != null) {
             patch.threads = n;
             enableSet.add('threads');
-            rows.push({ text: t('preview.threads', { value: n }), custom: false });
+            pushRow(t('preview.threads', { value: n }), false);
           } else {
-            rows.push({
-              text: t('preview.threadsInvalid', { value: arg.value ?? '' }),
-              custom: false,
-            });
+            pushRow(t('preview.threadsInvalid', { value: arg.value ?? '' }), false);
           }
           break;
         }
@@ -633,12 +674,9 @@ export function buildPlan(args: ParsedArg[], t: Translator, registry: ParamSpec[
           if (n != null) {
             patch.batch_size = n;
             enableSet.add('batch_size');
-            rows.push({ text: t('preview.batch', { value: n }), custom: false });
+            pushRow(t('preview.batch', { value: n }), false);
           } else {
-            rows.push({
-              text: t('preview.batchInvalid', { value: arg.value ?? '' }),
-              custom: false,
-            });
+            pushRow(t('preview.batchInvalid', { value: arg.value ?? '' }), false);
           }
           break;
         }
@@ -647,12 +685,9 @@ export function buildPlan(args: ParsedArg[], t: Translator, registry: ParamSpec[
           if (n != null) {
             patch.temp = n;
             enableSet.add('temp');
-            rows.push({ text: t('preview.temp', { value: n }), custom: false });
+            pushRow(t('preview.temp', { value: n }), false);
           } else {
-            rows.push({
-              text: t('preview.tempInvalid', { value: arg.value ?? '' }),
-              custom: false,
-            });
+            pushRow(t('preview.tempInvalid', { value: arg.value ?? '' }), false);
           }
           break;
         }
@@ -661,7 +696,7 @@ export function buildPlan(args: ParsedArg[], t: Translator, registry: ParamSpec[
           const norm = v === 'on' ? 'on' : v === 'off' ? 'off' : 'auto';
           patch.flash_attn = norm;
           enableSet.add('flash_attn');
-          rows.push({ text: t('preview.flash', { value: norm }), custom: false });
+          pushRow(t('preview.flash', { value: norm }), false);
           break;
         }
       }
@@ -674,11 +709,11 @@ export function buildPlan(args: ParsedArg[], t: Translator, registry: ParamSpec[
       if (field === 'mmap') {
         patch.mmap = !!arg.boolValue;
         enableSet.add('mmap');
-        rows.push({ text: t('preview.mmap', { value: state }), custom: false });
+        pushRow(t('preview.mmap', { value: state }), false);
       } else if (field === 'mlock') {
         patch.mlock = !!arg.boolValue;
         enableSet.add('mlock');
-        rows.push({ text: t('preview.mlock', { value: state }), custom: false });
+        pushRow(t('preview.mlock', { value: state }), false);
       }
       continue;
     }
@@ -691,18 +726,18 @@ export function buildPlan(args: ParsedArg[], t: Translator, registry: ParamSpec[
       if (spec) {
         structured[spec.key] = structuredValueOf(spec, arg.value);
         enableStructuredSet.add(spec.key);
-        rows.push({
-          text: t((arg.labelKey ?? 'preview.custom') as MessageKey, { value: arg.value ?? '' }),
-          custom: false,
-        });
+        pushRow(
+          t((arg.labelKey ?? 'preview.custom') as MessageKey, { value: arg.value ?? '' }),
+          false,
+        );
         continue;
       }
       extraArgs.push(arg.flag);
       extraArgs.push(arg.value ?? '');
-      rows.push({
-        text: t((arg.labelKey ?? 'preview.custom') as MessageKey, { value: arg.value ?? '' }),
-        custom: true,
-      });
+      pushRow(
+        t((arg.labelKey ?? 'preview.custom') as MessageKey, { value: arg.value ?? '' }),
+        true,
+      );
       continue;
     }
 
@@ -710,18 +745,38 @@ export function buildPlan(args: ParsedArg[], t: Translator, registry: ParamSpec[
     if (arg.kind === 'unknown') {
       extraArgs.push(arg.flag);
       extraArgs.push(arg.value ?? '');
-      rows.push({
-        text: t('preview.custom', {
+      pushRow(
+        t('preview.custom', {
           value: arg.value != null ? `${arg.flag} ${arg.value}` : arg.flag,
         }),
-        custom: true,
-      });
+        true,
+      );
     } else if (arg.kind === 'positional' && arg.value) {
       extraArgs.push(arg.value);
       extraArgs.push('');
-      rows.push({ text: t('preview.positional', { value: arg.value }), custom: true });
+      pushRow(t('preview.positional', { value: arg.value }), true);
     }
   }
+
+  // 重复检测：同一身份出现 ≥2 次即重复，所有出现都标黄。只在预览上追加提醒信息，
+  // 不改变上方 last-wins 的套用行为（后写覆盖先写，与 llama-server 实际语义一致）。
+  const idCounts = new Map<string, number>();
+  for (const { id } of rowIds) {
+    if (id !== null) idCounts.set(id, (idCounts.get(id) ?? 0) + 1);
+  }
+  let dupCount = 0;
+  const dupFlags: string[] = [];
+  const dupSeen = new Set<string>();
+  rowIds.forEach(({ id, flag }, index) => {
+    if (id === null || (idCounts.get(id) ?? 0) < 2) return;
+    rows[index].dup = true;
+    dupCount += 1;
+    // flag 原文去重、按首次出现顺序；标黄行恒有非空 flag，空串判断仅为防御。
+    if (flag && !dupSeen.has(flag)) {
+      dupSeen.add(flag);
+      dupFlags.push(flag);
+    }
+  });
 
   return {
     patch,
@@ -730,6 +785,8 @@ export function buildPlan(args: ParsedArg[], t: Translator, registry: ParamSpec[
     structured,
     enableStructured: [...enableStructuredSet],
     rows,
+    dupCount,
+    dupFlags,
   };
 }
 

@@ -43,6 +43,7 @@ export const zh = {
   'rawParams.restore': '复原',
   'rawParams.done': '完成',
   'rawParams.previewTitle': '解析预览（实时回写，点击【完成】后生效）',
+  'rawParams.previewDup': '检测到 {count} 处重复参数：{flags}，重复项可能互相覆盖',
 
   // 标题卡片 / 服务控制
   'control.modelFileFallback': '模型文件',
@@ -661,6 +662,8 @@ export const en: Record<MessageKey, string> = {
   'rawParams.restore': 'Restore',
   'rawParams.done': 'Done',
   'rawParams.previewTitle': 'Parsed preview (live write-back, applied on Done)',
+  'rawParams.previewDup':
+    'Detected {count} duplicate parameters: {flags}; duplicates may override each other',
 
   'control.modelFileFallback': 'model file',
   'control.modelNone': 'Current model: none selected',

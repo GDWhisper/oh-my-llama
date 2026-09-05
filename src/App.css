@@ -1805,6 +1805,13 @@ button:disabled {
   margin-bottom: 6px;
 }
 
+/* 重复参数软提醒：与 .disabled-badge 同一黄色系（#b45309），保持视觉一致 */
+.param-preview-title .dup-warn {
+  color: #b45309;
+  font-weight: 600;
+  margin-left: 6px;
+}
+
 .param-preview-list {
   margin: 0;
   padding-left: 18px;
@@ -1817,6 +1824,12 @@ button:disabled {
 
 .param-preview-list li.custom {
   color: #9333ea;
+}
+
+/* 重复参数行：与 li.custom 同特异性，必须排在其后才能盖过自定义行的紫色 */
+.param-preview-list li.dup {
+  color: #b45309;
+  font-weight: 500;
 }
 
 /* 高级参数卡片中的「自定义参数」条目（一键传参写入、未知 flag） */
