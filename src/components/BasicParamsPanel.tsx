@@ -1,3 +1,4 @@
+import { invoke } from '@tauri-apps/api/core';
 import type { PathCandidate, ServerConfig } from '../types';
 import { modelBasename } from '../lib/advanced';
 import { useI18n } from '../i18n';
@@ -46,6 +47,14 @@ export function BasicParamsPanel({
   const handleModelSelect = (name: string) => {
     onChange({ ...config, model: name ? joinModelPath(config.model_dir, name) : '' });
   };
+  // 在系统文件管理器中打开当前模型目录（后端 open_path 命令校验存在性并调用 opener）。
+  const handleOpenModelDir = async () => {
+    try {
+      await invoke('open_path', { path: config.model_dir });
+    } catch (err) {
+      console.error('打开模型目录失败', err);
+    }
+  };
 
   return (
     <div className="panel">
@@ -66,6 +75,7 @@ export function BasicParamsPanel({
           suggestions={modelDirCandidates}
           onRemoveSuggestion={onForgetModelDir}
           onChange={handleDirChange}
+          onOpen={handleOpenModelDir}
         />
         <div className="field">
           <label>{t('basic.selectModel')}</label>

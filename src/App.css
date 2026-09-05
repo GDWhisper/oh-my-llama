@@ -261,6 +261,39 @@ body {
   color: #ffffff;
 }
 
+/* 日志工具条「显示时间」图标开关：与 .seg 同高（4px+12px+4px≈26px+2px 边距），宽度对齐，
+   关闭（不显示时间）= 透明 + 灰图标（与 seg-btn 未选中态同色），打开 = 蓝底白图标
+   （与 seg-btn.active 同款），与左侧 简要/原生 视觉上是一族控件。SVG 走 stroke
+   方便切色；size 14 适配 12px 字号。 */
+.log-time-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 26px;
+  padding: 0;
+  border: 1px solid #d1d5db;
+  border-radius: 8px;
+  background: transparent;
+  color: #374151;
+  cursor: pointer;
+}
+.log-time-toggle:hover {
+  background: #f3f4f6;
+}
+.log-time-toggle.active {
+  background: #2563eb;
+  border-color: #2563eb;
+  color: #ffffff;
+}
+.log-time-toggle.active:hover {
+  background: #1d4ed8;
+}
+.log-time-toggle svg {
+  width: 14px;
+  height: 14px;
+}
+
 .fields {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -433,6 +466,12 @@ body {
 
 .browse-btn:hover {
   background: #f3f4f6;
+}
+
+.browse-btn:disabled {
+  background: #f9fafb;
+  color: #9ca3af;
+  cursor: not-allowed;
 }
 
 /* 路径输入框的「最近用过」候选浮层：视觉沿用 .select-list 下拉。
@@ -1413,6 +1452,12 @@ button:disabled {
   color: #e5e7eb;
   white-space: pre-wrap;
   word-break: break-word;
+  /* 占满行内剩余宽度：默认 flex:0 1 auto 只会收缩不生长，日志框宽时文字仍按内容宽度
+     截断换行（右侧留出大块空白）。改成 1 1 0 + min-width:0 后，时间/级别固定前缀吃掉
+     的列宽让出来给正文，长日志铺满整行；关闭时间显示时不渲染 .term-ts 同样靠这条规则
+     把那部分宽度让给正文。 */
+  flex: 1 1 0;
+  min-width: 0;
 }
 
 /* 原生模式：置顶固定的命令行（我们发送给 llama-server 的参数）。

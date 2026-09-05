@@ -1,6 +1,8 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { LogLine } from '../hooks/useServer';
 import { useI18n } from '../i18n';
+import { invoke } from '@tauri-apps/api/core';
+import type { AppSettings } from '../types';
 import { Button } from './Button';
 
 type LogMode = 'brief' | 'raw';
@@ -43,6 +45,38 @@ const findScroller = (term: HTMLElement | null): HTMLElement | null => {
 export function LogPanel({ logs, onClear }: Props) {
   const { t } = useI18n();
   const [mode, setMode] = useState<LogMode>('raw');
+  // 是否显示时间戳：默认显示（与旧 settings.json 缺字段时的观感保持一致），
+  // 挂载时从后端 AppSettings 校准一次；None → true。toggle 走乐观更新 + 后端落盘校验。
+  const [showTimes, setShowTimes] = useState(true);
+
+  // 挂载时读一次设置，校准时间显隐。读不到或字段为 null 均按"显示"处理（向后兼容）。
+  useEffect(() => {
+    let alive = true;
+    invoke<AppSettings>('read_settings')
+      .then((s) => {
+        if (!alive) return;
+        setShowTimes(s.show_log_times ?? true);
+      })
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  // 切换时间显示：乐观更新本地态让按钮即时反馈；后端 set_log_show_times 落盘（与
+  // set_close_pref 同款读-改-写命令），失败则回滚到旧值并 console.error。
+  const toggleTimes = useCallback(() => {
+    setShowTimes((prev) => {
+      const next = !prev;
+      invoke<AppSettings>('set_log_show_times', { show: next })
+        .then((s) => setShowTimes(s.show_log_times ?? true))
+        .catch((err) => {
+          console.error(err);
+          setShowTimes(prev);
+        });
+      return next;
+    });
+  }, []);
 
   const termRef = useRef<HTMLDivElement>(null);
   // 是否处于“锁定底部”跟随状态：用 ref 镜像，避免 effect 里读到过期闭包。
@@ -166,6 +200,28 @@ export function LogPanel({ logs, onClear }: Props) {
               {t('log.raw')}
             </button>
           </div>
+          {/* 时间显隐开关：图标态（时钟 SVG）配 active/默认色与左侧 seg 同族；
+              关闭时不渲染 .term-ts，那部分列宽由 .term-text { flex: 1 1 0 } 自动撑满。
+              aria-pressed 让屏幕阅读器播报当前状态。 */}
+          <button
+            type="button"
+            className={showTimes ? 'log-time-toggle active' : 'log-time-toggle'}
+            onClick={toggleTimes}
+            aria-pressed={showTimes}
+            title={showTimes ? t('log.hideTime') : t('log.showTime')}
+            aria-label={showTimes ? t('log.hideTime') : t('log.showTime')}
+          >
+            <svg viewBox="0 0 16 16" aria-hidden="true">
+              <circle cx="8" cy="8" r="6" fill="none" stroke="currentColor" strokeWidth="1.5" />
+              <path
+                d="M8 4.5V8l2.5 1.5"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.5"
+                strokeLinecap="round"
+              />
+            </svg>
+          </button>
           <Button variant="secondary" onClick={onClear}>
             {t('log.clear')}
           </Button>
@@ -183,7 +239,7 @@ export function LogPanel({ logs, onClear }: Props) {
           )}
           {windowed.map((line) => (
             <div className={`term-line ${line.level}`} key={line.id}>
-              <span className="term-ts">{line.ts}</span>
+              {showTimes && <span className="term-ts">{line.ts}</span>}
               <span className="term-level">[{line.level}]</span>
               <span className="term-text">{line.text}</span>
             </div>

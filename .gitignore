@@ -31,9 +31,14 @@ dist-ssr
 .codex/
 .qoder/
 .codebuddy/
+.claude/
+.mcp.json
 .omp/
 .pi/
 openspec/
 .dev_docs/changes/
+
+# Local scratch (build/test debris) — never commit
+tmp/
 
 # Whole .codebuddy/ is foreign AI-tool scaffolding (not project source) — fully ignored, do not track or push.
