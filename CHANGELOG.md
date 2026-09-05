@@ -4,6 +4,21 @@
 
 > 本文件为**详细改动历史**（含涉及的文件与实现机制）；GitHub Release 页面为对应版本的**总结性**说明。
 
+## [0.2.0] - 2026-09-05
+
+### 新增功能
+- **推理性能指标展示**：新增 `src-tauri/src/perf.rs`，解析 llama-server 日志中的 timings 行（兼容时间戳/slot 前缀与 ConPTY 折断行拼接），维护预处理/生成速度的最近一次与进程生命周期平均（Σtokens/Σ时间），经新事件 `perf://update` 推送前端；服务启停即清零测量窗口。`src/components/MetricsPanel.tsx` 展开态显示预处理/生成的「最近·平均」与累计请求数，`src/types.ts` 同步 `PerfSnapshot` IPC 契约，`src/i18n/messages.ts` 补 `metrics.*` 双语键。
+- **运行日志落盘**：llama-server 运行日志逐行写入 `%APPDATA%/OhMyLlama/logs/llama-server_*.log`，滚动保留 20 份；`src-tauri/src/lib.rs` 新增 `open_logs_dir` 命令（注册进 `generate_handler!`），`src/components/LogPanel.tsx` 工具栏新增「日志文件」按钮直达目录。
+- **多模态投影（--mmproj）与聊天模板文件（--chat-template-file）支持文件选择器**：`scripts/gen_structured_params.py` 引入 `FILE_PICKER` 旁路标注，`ParamSpec` 新增 `widget` 字段（仅提示前端控件形态，序列化与 `to_args` 语义不变），重跑生成同步 `src-tauri/src/params.rs`；`src/components/AdvancedParamsPanel.tsx` 按 `spec.widget === 'file'` 数据驱动渲染「输入 + 浏览」，选中即回填提交，无逐参数硬编码。
+
+### 功能优化
+- **显卡型号并入 GPU 行，收起态预览补生成速度**：`src/components/MetricsPanel.tsx` / `MetricsPanel.css` 将显卡型号并入 GPU 一行显示，收起态摘要附预处理/生成速度。
+- **文件浏览默认目录更贴心**：聊天模板文件（`--chat-template-file`）浏览默认从 llama-server 路径所在目录打开；mmproj 浏览默认从已设置的模型目录打开（`src/components/AdvancedParamsPanel.tsx`）。
+
+### Bug 修复
+- **上下文长度输入清空后不再自动补 0**：`src/components/AdvancedParamsPanel.tsx` 数字字段清空后保持空白（原失焦即回填 `0`，打断连续输入），`src/i18n/messages.ts` 补占位提示键。
+- **启动失败提示改用 Toast**：`src/hooks/useServer.ts` 启动失败提示由弹窗改为与其他操作一致的轻量 Toast。
+
 ## [0.1.10] - 2026-09-05
 
 ### 新增功能

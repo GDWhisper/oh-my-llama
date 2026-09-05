@@ -42,6 +42,13 @@ export interface ParamSpec {
   min?: number;
   max?: number;
   choices?: string[];
+  // 可选控件形态提示（与 Rust ParamSpec.widget 同步）：'file-model-dir' = 文本输入旁附
+  // 「浏览」按钮，文件选择器优先从模型目录打开并按 GGUF 过滤（仅 mmproj——投影文件即
+  // GGUF，与模型文件同目录）；'file-server-dir' = 优先从 llama-server 路径父目录打开、
+  // 无过滤器（仅聊天模板文件——常与 llama-server 发行包放在一起）；'file' = 通用文件
+  // 选择器，不指定起始目录与过滤器（基线形态，当前无使用者）；缺省 = 纯文本输入。
+  // 只影响渲染，不改参数序列化语义。
+  widget?: 'file' | 'file-model-dir' | 'file-server-dir';
   enabled_by_default: boolean;
 }
 
@@ -67,6 +74,24 @@ export interface ServerLogLine {
   ts: string;
   level: string;
   text: string;
+}
+
+// llama-server 推理性能快照（perf://update 载荷 / get_perf_stats 返回值）。
+// 由后端解析 llama-server 日志中的 timings 行而来，无需 --metrics 等额外参数：
+// last_* = 最近一次请求；*_total = 当前服务进程生命周期内的累计（平均 = Σtokens / Σ时间，前端派生）。
+// 服务进程启动/退出时后端清零并推送空快照，前端将无数据快照归一为 null 以隐藏区块。
+export interface PerfSnapshot {
+  last_prompt_tokens: number | null;
+  last_prompt_ms: number | null;
+  last_prompt_tps: number | null;
+  last_gen_tokens: number | null;
+  last_gen_ms: number | null;
+  last_gen_tps: number | null;
+  prompt_tokens_total: number;
+  prompt_ms_total: number;
+  gen_tokens_total: number;
+  gen_ms_total: number;
+  requests: number;
 }
 
 // 应用级设置（与服务器启动配置 ServerConfig 解耦）。

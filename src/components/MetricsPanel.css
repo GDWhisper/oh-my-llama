@@ -41,6 +41,18 @@
   gap: 2px;
 }
 
+/* 显卡型号并入 GPU 行：弱化样式跟在占用率后。整块不拆词，行宽放不下时整体换到下一行 */
+.metrics-gpu .metrics-row {
+  flex-wrap: wrap;
+}
+
+.metrics-gpu-name {
+  font-size: 12px;
+  color: #6b7280;
+  font-weight: 400;
+  white-space: nowrap;
+}
+
 .metrics-sub {
   display: flex;
   flex-wrap: wrap;
@@ -59,6 +71,22 @@
 
 .metrics-sub-line {
   white-space: nowrap;
+}
+
+/* 推理性能区块：与系统指标之间加一条浅分隔线，视觉上区分「机器指标」与「模型指标」 */
+.metrics-perf {
+  border-top: 1px solid #e5e7eb;
+  padding-top: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.metrics-perf-meta {
+  font-size: 12px;
+  color: #9ca3af;
+  padding-left: 52px;
+  font-variant-numeric: tabular-nums;
 }
 
 .metrics-error {

@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { ReactNode } from 'react';
+import { open } from '@tauri-apps/plugin-dialog';
 import type { ParamSpec, ServerConfig } from '../types';
 import {
   ADVANCED_LABEL_KEYS,
@@ -34,6 +35,15 @@ function withFlag(label: string, flag: string): ReactNode {
       </span>
     </>
   );
+}
+
+// 从文件完整路径取父目录，作为文件选择器的 defaultPath 候选：正常流程下 model 是
+// joinModelPath(dir, name) 拼出的完整路径，取父目录即模型所在目录；但一键传参回填时
+// model 可能只是纯文件名（无路径分隔符），此时返回空串，由调用方回退为不指定默认目录。
+function parentDirOf(path: string): string {
+  const trimmed = path.replace(/[\\/]+$/, '');
+  const idx = Math.max(trimmed.lastIndexOf('/'), trimmed.lastIndexOf('\\'));
+  return idx === -1 ? '' : trimmed.slice(0, idx);
 }
 
 // 「可添加参数」搜索结果一次最多渲染的条目数：注册表有 160+ 项，
@@ -99,13 +109,17 @@ function ExtraArgRow({
   );
 }
 
-// 单条「结构化高级参数」卡片：完全由注册表声明（type/choices/min/max）驱动渲染，
+// 单条「结构化高级参数」卡片：完全由注册表声明（type/choices/min/max/widget）驱动渲染，
 // 因此一套组件即可覆盖注册表里的全部官方参数——新增参数无需再写一段 UI。
 // 文本 / 数值走「草稿 + 失焦提交」，避免逐字回写导致光标跳动与整树重渲染；
 // 布尔 / 枚举语义离散，即时提交。
+// 声明 widget 为 'file' / 'file-model-dir' / 'file-server-dir' 的字符串参数在输入框旁附
+//「浏览」按钮（系统文件选择器，选中即提交），三者仅在选择器起始位置与过滤器上有差异。
 function StructuredParamRow({
   spec,
   value,
+  fileDialogDir,
+  serverDialogDir,
   disabled,
   removable,
   onCommit,
@@ -114,6 +128,12 @@ function StructuredParamRow({
 }: {
   spec: ParamSpec;
   value: string;
+  // 「浏览」默认打开目录（仅 widget 'file-model-dir' 使用）：优先基础参数的模型目录，
+  // 其次已选模型文件的父目录；空串 = 不指定。
+  fileDialogDir: string;
+  // 「浏览」默认打开目录（仅 widget 'file-server-dir' 使用）：llama-server 路径的父
+  // 目录；空串 = 不指定。
+  serverDialogDir: string;
   disabled: boolean;
   removable: boolean;
   onCommit: (value: string) => void;
@@ -131,6 +151,29 @@ function StructuredParamRow({
   const commitDraft = () => {
     if (draft !== value) {
       onCommit(draft);
+    }
+  };
+
+  // 「浏览」按钮：唤起系统原生文件选择器，选中后回填草稿并立即提交
+  //（浏览是明确的一次性选择，无需等失焦；手输路径仍走「草稿 + 失焦提交」）。
+  // 仅 'file-model-dir' 指定起始目录与 GGUF 过滤（mmproj 投影文件即 GGUF）；
+  // 'file-server-dir' 仅指定起始目录（llama-server 路径父目录，模板文件常随发行包
+  // 放置），不过滤（模板文件扩展名不统一）；'file' 两者都省略，起始位置交给系统记忆。
+  const pickFile = async () => {
+    const selected = await open({
+      multiple: false,
+      // 无可用默认目录时必须传 undefined（保持系统记忆位置），不可传空串。
+      ...(spec.widget === 'file-model-dir' && {
+        defaultPath: fileDialogDir || undefined,
+        filters: [{ name: 'GGUF', extensions: ['gguf'] }],
+      }),
+      ...(spec.widget === 'file-server-dir' && {
+        defaultPath: serverDialogDir || undefined,
+      }),
+    });
+    if (typeof selected === 'string') {
+      setDraft(selected);
+      onCommit(selected);
     }
   };
 
@@ -181,7 +224,24 @@ function StructuredParamRow({
           onBlur={commitDraft}
         />
       )}
-      {spec.type === 'str' && (
+      {spec.type === 'str' &&
+        (spec.widget === 'file' ||
+          spec.widget === 'file-model-dir' ||
+          spec.widget === 'file-server-dir') && (
+          <div className="field-path">
+            <input
+              value={draft}
+              spellCheck={false}
+              onChange={(event) => setDraft(event.currentTarget.value)}
+              onBlur={commitDraft}
+            />
+            {/* 行处于「临时禁用」时不给浏览：选了也不会写入命令行，免得造成已生效的错觉。 */}
+            <button type="button" className="browse-btn" disabled={disabled} onClick={pickFile}>
+              {t('common.browse')}
+            </button>
+          </div>
+        )}
+      {spec.type === 'str' && !spec.widget && (
         <input
           value={draft}
           spellCheck={false}
@@ -251,6 +311,19 @@ export function AdvancedParamsPanel(props: Props) {
   const [showClearDialog, setShowClearDialog] = useState(false);
   // 「可添加的官方参数」搜索词：注册表 160+ 项无法平铺，靠搜索定位。
   const [paramQuery, setParamQuery] = useState('');
+  // ctx_size 输入草稿：清空时保持空白，而不是被受控值立刻补成 0。
+  // onChange 仍即时回写存储（空白按 0 处理，-c 0 = 使用模型默认上下文）；
+  // 外部值变化（切换配置 / 恢复默认 / 一键传参归位）时经下方 effect 回填草稿。
+  const [ctxDraft, setCtxDraft] = useState(() =>
+    config.ctx_size === 0 ? '' : String(config.ctx_size),
+  );
+  useEffect(() => {
+    // 仅当草稿数值与存储值不一致（说明是外部改动）才回填；清空（''）与
+    // 显式输入 0 的草稿数值同为 0，与存储 0 相等，不得回填，否则清空白改。
+    if (Number(ctxDraft || 0) !== config.ctx_size) {
+      setCtxDraft(config.ctx_size === 0 ? '' : String(config.ctx_size));
+    }
+  }, [config.ctx_size, ctxDraft]);
 
   const specByKey = useMemo(() => new Map(registry.map((spec) => [spec.key, spec])), [registry]);
   const enabledStructured = useMemo(
@@ -261,6 +334,15 @@ export function AdvancedParamsPanel(props: Props) {
     () => new Set(config.disabled_structured_params),
     [config.disabled_structured_params],
   );
+
+  // 结构化参数「浏览」的默认打开目录（仅 widget 'file-model-dir' 的参数用到）：
+  // model_dir 优先；未设置时退回已选模型文件的父目录。两者皆空则 pickFile 不指定
+  // defaultPath（纯字符串运算，不值得 useMemo）。
+  const fileDialogDir = config.model_dir.trim() || parentDirOf(config.model);
+  // widget 'file-server-dir'（聊天模板文件）的浏览起始目录：模板文件常与 llama-server
+  // 发行包放在一起，故取 llama-server 可执行文件路径的父目录；未设置（或不含分隔符）
+  // 时为空串，pickFile 不指定 defaultPath（纯字符串运算，不值得 useMemo）。
+  const serverDialogDir = parentDirOf(config.llama_server_path);
 
   // 「可添加参数」统一池：传统可选参数 + 注册表里尚未启用的结构化参数。
   // 搜索框置顶，下方按关键词过滤后同时展示两类参数，避免搜索框被传统参数挤到第二行。
@@ -392,13 +474,18 @@ export function AdvancedParamsPanel(props: Props) {
               </div>
             </div>
             {key === 'ctx_size' && (
-              <input
-                type="number"
-                value={config.ctx_size}
-                onChange={(event) =>
-                  onChange({ ...config, ctx_size: Number(event.currentTarget.value || 0) })
-                }
-              />
+              <>
+                <input
+                  type="number"
+                  value={ctxDraft}
+                  onChange={(event) => {
+                    const raw = event.currentTarget.value;
+                    setCtxDraft(raw);
+                    onChange({ ...config, ctx_size: Number(raw || 0) });
+                  }}
+                />
+                <div className="field-hint">{t('advanced.ctxHint')}</div>
+              </>
             )}
             {key === 'n_predict' && (
               <>
@@ -505,6 +592,8 @@ export function AdvancedParamsPanel(props: Props) {
             key={`structured-${key}`}
             spec={spec}
             value={config.structured_params[key] ?? spec.default}
+            fileDialogDir={fileDialogDir}
+            serverDialogDir={serverDialogDir}
             disabled={disabledStructured.has(key)}
             removable={adjustingAdvanced}
             onCommit={(value) => onStructuredValueChange(key, value)}

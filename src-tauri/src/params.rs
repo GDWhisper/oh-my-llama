@@ -29,6 +29,8 @@ pub struct ParamSpec {
     pub max: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub choices: Option<&'static [&'static str]>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub widget: Option<&'static str>,
     pub enabled_by_default: bool,
 }
 
@@ -70,6 +72,7 @@ pub const PARAM_REGISTRY: &[ParamSpec] = &[
         min: None,
         max: None,
         choices: None,
+        widget: None,
         enabled_by_default: false,
     },
     ParamSpec {
@@ -80,6 +83,7 @@ pub const PARAM_REGISTRY: &[ParamSpec] = &[
         min: None,
         max: None,
         choices: None,
+        widget: None,
         enabled_by_default: false,
     },
     ParamSpec {
@@ -90,6 +94,7 @@ pub const PARAM_REGISTRY: &[ParamSpec] = &[
         min: None,
         max: None,
         choices: None,
+        widget: None,
         enabled_by_default: false,
     },
     ParamSpec {
@@ -100,6 +105,7 @@ pub const PARAM_REGISTRY: &[ParamSpec] = &[
         min: None,
         max: None,
         choices: None,
+        widget: None,
         enabled_by_default: false,
     },
     ParamSpec {
@@ -110,6 +116,7 @@ pub const PARAM_REGISTRY: &[ParamSpec] = &[
         min: None,
         max: None,
         choices: None,
+        widget: None,
         enabled_by_default: false,
     },
     ParamSpec {
@@ -120,6 +127,7 @@ pub const PARAM_REGISTRY: &[ParamSpec] = &[
         min: None,
         max: None,
         choices: None,
+        widget: None,
         enabled_by_default: false,
     },
     ParamSpec {
@@ -130,6 +138,7 @@ pub const PARAM_REGISTRY: &[ParamSpec] = &[
         min: None,
         max: None,
         choices: None,
+        widget: None,
         enabled_by_default: false,
     },
     ParamSpec {
@@ -140,6 +149,7 @@ pub const PARAM_REGISTRY: &[ParamSpec] = &[
         min: None,
         max: None,
         choices: None,
+        widget: None,
         enabled_by_default: false,
     },
     ParamSpec {
@@ -150,6 +160,7 @@ pub const PARAM_REGISTRY: &[ParamSpec] = &[
         min: None,
         max: None,
         choices: None,
+        widget: None,
         enabled_by_default: false,
     },
     ParamSpec {
@@ -160,6 +171,7 @@ pub const PARAM_REGISTRY: &[ParamSpec] = &[
         min: None,
         max: None,
         choices: None,
+        widget: None,
         enabled_by_default: false,
     },
     ParamSpec {
@@ -170,6 +182,7 @@ pub const PARAM_REGISTRY: &[ParamSpec] = &[
         min: None,
         max: None,
         choices: None,
+        widget: None,
         enabled_by_default: false,
     },
     ParamSpec {
@@ -180,6 +193,7 @@ pub const PARAM_REGISTRY: &[ParamSpec] = &[
         min: None,
         max: None,
         choices: None,
+        widget: None,
         enabled_by_default: false,
     },
     ParamSpec {
@@ -190,6 +204,7 @@ pub const PARAM_REGISTRY: &[ParamSpec] = &[
         min: None,
         max: None,
         choices: None,
+        widget: None,
         enabled_by_default: false,
     },
     ParamSpec {
@@ -200,6 +215,7 @@ pub const PARAM_REGISTRY: &[ParamSpec] = &[
         min: None,
         max: None,
         choices: None,
+        widget: None,
         enabled_by_default: false,
     },
     ParamSpec {
@@ -210,6 +226,7 @@ pub const PARAM_REGISTRY: &[ParamSpec] = &[
         min: None,
         max: None,
         choices: None,
+        widget: None,
         enabled_by_default: false,
     },
     ParamSpec {
@@ -220,6 +237,7 @@ pub const PARAM_REGISTRY: &[ParamSpec] = &[
         min: None,
         max: None,
         choices: None,
+        widget: None,
         enabled_by_default: false,
     },
     ParamSpec {
@@ -230,6 +248,7 @@ pub const PARAM_REGISTRY: &[ParamSpec] = &[
         min: None,
         max: None,
         choices: None,
+        widget: None,
         enabled_by_default: false,
     },
     ParamSpec {
@@ -240,6 +259,7 @@ pub const PARAM_REGISTRY: &[ParamSpec] = &[
         min: None,
         max: None,
         choices: None,
+        widget: None,
         enabled_by_default: false,
     },
     ParamSpec {
@@ -250,6 +270,7 @@ pub const PARAM_REGISTRY: &[ParamSpec] = &[
         min: None,
         max: None,
         choices: None,
+        widget: None,
         enabled_by_default: false,
     },
     ParamSpec {
@@ -260,6 +281,7 @@ pub const PARAM_REGISTRY: &[ParamSpec] = &[
         min: None,
         max: None,
         choices: None,
+        widget: None,
         enabled_by_default: false,
     },
     ParamSpec {
@@ -270,6 +292,7 @@ pub const PARAM_REGISTRY: &[ParamSpec] = &[
         min: None,
         max: None,
         choices: None,
+        widget: None,
         enabled_by_default: false,
     },
     ParamSpec {
@@ -280,6 +303,7 @@ pub const PARAM_REGISTRY: &[ParamSpec] = &[
         min: None,
         max: None,
         choices: None,
+        widget: Some("file-model-dir"),
         enabled_by_default: false,
     },
     ParamSpec {
@@ -290,6 +314,7 @@ pub const PARAM_REGISTRY: &[ParamSpec] = &[
         min: None,
         max: None,
         choices: None,
+        widget: None,
         enabled_by_default: false,
     },
     ParamSpec {
@@ -300,6 +325,7 @@ pub const PARAM_REGISTRY: &[ParamSpec] = &[
         min: None,
         max: None,
         choices: None,
+        widget: None,
         enabled_by_default: false,
     },
     ParamSpec {
@@ -310,6 +336,7 @@ pub const PARAM_REGISTRY: &[ParamSpec] = &[
         min: None,
         max: None,
         choices: None,
+        widget: None,
         enabled_by_default: false,
     },
     ParamSpec {
@@ -320,6 +347,7 @@ pub const PARAM_REGISTRY: &[ParamSpec] = &[
         min: None,
         max: None,
         choices: None,
+        widget: None,
         enabled_by_default: false,
     },
     ParamSpec {
@@ -330,6 +358,7 @@ pub const PARAM_REGISTRY: &[ParamSpec] = &[
         min: None,
         max: None,
         choices: None,
+        widget: None,
         enabled_by_default: false,
     },
     ParamSpec {
@@ -340,6 +369,7 @@ pub const PARAM_REGISTRY: &[ParamSpec] = &[
         min: None,
         max: None,
         choices: None,
+        widget: None,
         enabled_by_default: false,
     },
     ParamSpec {
@@ -350,6 +380,7 @@ pub const PARAM_REGISTRY: &[ParamSpec] = &[
         min: None,
         max: None,
         choices: None,
+        widget: None,
         enabled_by_default: false,
     },
     ParamSpec {
@@ -360,6 +391,7 @@ pub const PARAM_REGISTRY: &[ParamSpec] = &[
         min: None,
         max: None,
         choices: None,
+        widget: None,
         enabled_by_default: false,
     },
     ParamSpec {
@@ -370,6 +402,7 @@ pub const PARAM_REGISTRY: &[ParamSpec] = &[
         min: None,
         max: None,
         choices: None,
+        widget: None,
         enabled_by_default: false,
     },
     ParamSpec {
@@ -380,6 +413,7 @@ pub const PARAM_REGISTRY: &[ParamSpec] = &[
         min: None,
         max: None,
         choices: Some(&["none", "layer", "row"]),
+        widget: None,
         enabled_by_default: false,
     },
     ParamSpec {
@@ -390,6 +424,7 @@ pub const PARAM_REGISTRY: &[ParamSpec] = &[
         min: None,
         max: None,
         choices: None,
+        widget: None,
         enabled_by_default: false,
     },
     ParamSpec {
@@ -400,6 +435,7 @@ pub const PARAM_REGISTRY: &[ParamSpec] = &[
         min: None,
         max: None,
         choices: None,
+        widget: None,
         enabled_by_default: false,
     },
     ParamSpec {
@@ -410,6 +446,7 @@ pub const PARAM_REGISTRY: &[ParamSpec] = &[
         min: None,
         max: None,
         choices: None,
+        widget: None,
         enabled_by_default: false,
     },
     ParamSpec {
@@ -420,6 +457,7 @@ pub const PARAM_REGISTRY: &[ParamSpec] = &[
         min: None,
         max: None,
         choices: None,
+        widget: None,
         enabled_by_default: false,
     },
     ParamSpec {
@@ -430,6 +468,7 @@ pub const PARAM_REGISTRY: &[ParamSpec] = &[
         min: None,
         max: None,
         choices: None,
+        widget: None,
         enabled_by_default: false,
     },
     ParamSpec {
@@ -440,6 +479,7 @@ pub const PARAM_REGISTRY: &[ParamSpec] = &[
         min: None,
         max: None,
         choices: None,
+        widget: None,
         enabled_by_default: false,
     },
     ParamSpec {
@@ -450,6 +490,7 @@ pub const PARAM_REGISTRY: &[ParamSpec] = &[
         min: None,
         max: None,
         choices: None,
+        widget: None,
         enabled_by_default: false,
     },
     ParamSpec {
@@ -460,6 +501,7 @@ pub const PARAM_REGISTRY: &[ParamSpec] = &[
         min: None,
         max: None,
         choices: None,
+        widget: None,
         enabled_by_default: false,
     },
     ParamSpec {
@@ -470,6 +512,7 @@ pub const PARAM_REGISTRY: &[ParamSpec] = &[
         min: None,
         max: None,
         choices: None,
+        widget: None,
         enabled_by_default: false,
     },
     ParamSpec {
@@ -480,6 +523,7 @@ pub const PARAM_REGISTRY: &[ParamSpec] = &[
         min: None,
         max: None,
         choices: None,
+        widget: None,
         enabled_by_default: false,
     },
     ParamSpec {
@@ -490,6 +534,7 @@ pub const PARAM_REGISTRY: &[ParamSpec] = &[
         min: None,
         max: None,
         choices: None,
+        widget: None,
         enabled_by_default: false,
     },
     ParamSpec {
@@ -500,6 +545,7 @@ pub const PARAM_REGISTRY: &[ParamSpec] = &[
         min: None,
         max: None,
         choices: None,
+        widget: None,
         enabled_by_default: false,
     },
     ParamSpec {
@@ -510,6 +556,7 @@ pub const PARAM_REGISTRY: &[ParamSpec] = &[
         min: None,
         max: None,
         choices: None,
+        widget: None,
         enabled_by_default: false,
     },
     ParamSpec {
@@ -520,6 +567,7 @@ pub const PARAM_REGISTRY: &[ParamSpec] = &[
         min: None,
         max: None,
         choices: None,
+        widget: None,
         enabled_by_default: false,
     },
     ParamSpec {
@@ -530,6 +578,7 @@ pub const PARAM_REGISTRY: &[ParamSpec] = &[
         min: None,
         max: None,
         choices: None,
+        widget: None,
         enabled_by_default: false,
     },
     ParamSpec {
@@ -540,6 +589,7 @@ pub const PARAM_REGISTRY: &[ParamSpec] = &[
         min: None,
         max: None,
         choices: None,
+        widget: None,
         enabled_by_default: false,
     },
     ParamSpec {
@@ -550,6 +600,7 @@ pub const PARAM_REGISTRY: &[ParamSpec] = &[
         min: None,
         max: None,
         choices: None,
+        widget: None,
         enabled_by_default: false,
     },
     ParamSpec {
@@ -560,6 +611,7 @@ pub const PARAM_REGISTRY: &[ParamSpec] = &[
         min: None,
         max: None,
         choices: None,
+        widget: None,
         enabled_by_default: false,
     },
     ParamSpec {
@@ -570,6 +622,7 @@ pub const PARAM_REGISTRY: &[ParamSpec] = &[
         min: None,
         max: None,
         choices: None,
+        widget: None,
         enabled_by_default: false,
     },
     ParamSpec {
@@ -580,6 +633,7 @@ pub const PARAM_REGISTRY: &[ParamSpec] = &[
         min: None,
         max: None,
         choices: None,
+        widget: None,
         enabled_by_default: false,
     },
     ParamSpec {
@@ -590,6 +644,7 @@ pub const PARAM_REGISTRY: &[ParamSpec] = &[
         min: None,
         max: None,
         choices: None,
+        widget: None,
         enabled_by_default: false,
     },
     ParamSpec {
@@ -600,6 +655,7 @@ pub const PARAM_REGISTRY: &[ParamSpec] = &[
         min: None,
         max: None,
         choices: None,
+        widget: None,
         enabled_by_default: false,
     },
     ParamSpec {
@@ -610,6 +666,7 @@ pub const PARAM_REGISTRY: &[ParamSpec] = &[
         min: None,
         max: None,
         choices: None,
+        widget: None,
         enabled_by_default: false,
     },
     ParamSpec {
@@ -620,6 +677,7 @@ pub const PARAM_REGISTRY: &[ParamSpec] = &[
         min: None,
         max: None,
         choices: None,
+        widget: None,
         enabled_by_default: false,
     },
     ParamSpec {
@@ -630,6 +688,7 @@ pub const PARAM_REGISTRY: &[ParamSpec] = &[
         min: None,
         max: None,
         choices: None,
+        widget: None,
         enabled_by_default: false,
     },
     ParamSpec {
@@ -640,6 +699,7 @@ pub const PARAM_REGISTRY: &[ParamSpec] = &[
         min: None,
         max: None,
         choices: None,
+        widget: None,
         enabled_by_default: false,
     },
     ParamSpec {
@@ -650,6 +710,7 @@ pub const PARAM_REGISTRY: &[ParamSpec] = &[
         min: None,
         max: None,
         choices: None,
+        widget: None,
         enabled_by_default: false,
     },
     ParamSpec {
@@ -660,6 +721,7 @@ pub const PARAM_REGISTRY: &[ParamSpec] = &[
         min: None,
         max: None,
         choices: None,
+        widget: None,
         enabled_by_default: false,
     },
     ParamSpec {
@@ -670,6 +732,7 @@ pub const PARAM_REGISTRY: &[ParamSpec] = &[
         min: None,
         max: None,
         choices: None,
+        widget: None,
         enabled_by_default: false,
     },
     ParamSpec {
@@ -680,6 +743,7 @@ pub const PARAM_REGISTRY: &[ParamSpec] = &[
         min: None,
         max: None,
         choices: None,
+        widget: None,
         enabled_by_default: false,
     },
     ParamSpec {
@@ -690,6 +754,7 @@ pub const PARAM_REGISTRY: &[ParamSpec] = &[
         min: None,
         max: None,
         choices: None,
+        widget: None,
         enabled_by_default: false,
     },
     ParamSpec {
@@ -700,6 +765,7 @@ pub const PARAM_REGISTRY: &[ParamSpec] = &[
         min: None,
         max: None,
         choices: None,
+        widget: None,
         enabled_by_default: false,
     },
     ParamSpec {
@@ -710,6 +776,7 @@ pub const PARAM_REGISTRY: &[ParamSpec] = &[
         min: None,
         max: None,
         choices: None,
+        widget: None,
         enabled_by_default: false,
     },
     ParamSpec {
@@ -720,6 +787,7 @@ pub const PARAM_REGISTRY: &[ParamSpec] = &[
         min: None,
         max: None,
         choices: None,
+        widget: None,
         enabled_by_default: false,
     },
     ParamSpec {
@@ -730,6 +798,7 @@ pub const PARAM_REGISTRY: &[ParamSpec] = &[
         min: None,
         max: None,
         choices: None,
+        widget: None,
         enabled_by_default: false,
     },
     ParamSpec {
@@ -740,6 +809,7 @@ pub const PARAM_REGISTRY: &[ParamSpec] = &[
         min: None,
         max: None,
         choices: None,
+        widget: None,
         enabled_by_default: false,
     },
     ParamSpec {
@@ -750,6 +820,7 @@ pub const PARAM_REGISTRY: &[ParamSpec] = &[
         min: None,
         max: None,
         choices: None,
+        widget: None,
         enabled_by_default: false,
     },
     ParamSpec {
@@ -760,6 +831,7 @@ pub const PARAM_REGISTRY: &[ParamSpec] = &[
         min: None,
         max: None,
         choices: None,
+        widget: None,
         enabled_by_default: false,
     },
     ParamSpec {
@@ -770,6 +842,7 @@ pub const PARAM_REGISTRY: &[ParamSpec] = &[
         min: None,
         max: None,
         choices: None,
+        widget: None,
         enabled_by_default: false,
     },
     ParamSpec {
@@ -780,6 +853,7 @@ pub const PARAM_REGISTRY: &[ParamSpec] = &[
         min: None,
         max: None,
         choices: None,
+        widget: None,
         enabled_by_default: false,
     },
     ParamSpec {
@@ -790,6 +864,7 @@ pub const PARAM_REGISTRY: &[ParamSpec] = &[
         min: None,
         max: None,
         choices: None,
+        widget: None,
         enabled_by_default: false,
     },
     ParamSpec {
@@ -800,6 +875,7 @@ pub const PARAM_REGISTRY: &[ParamSpec] = &[
         min: None,
         max: None,
         choices: None,
+        widget: None,
         enabled_by_default: false,
     },
     ParamSpec {
@@ -810,6 +886,7 @@ pub const PARAM_REGISTRY: &[ParamSpec] = &[
         min: None,
         max: None,
         choices: None,
+        widget: None,
         enabled_by_default: false,
     },
     ParamSpec {
@@ -820,6 +897,7 @@ pub const PARAM_REGISTRY: &[ParamSpec] = &[
         min: None,
         max: None,
         choices: None,
+        widget: None,
         enabled_by_default: false,
     },
     ParamSpec {
@@ -830,6 +908,7 @@ pub const PARAM_REGISTRY: &[ParamSpec] = &[
         min: None,
         max: None,
         choices: None,
+        widget: None,
         enabled_by_default: false,
     },
     ParamSpec {
@@ -840,6 +919,7 @@ pub const PARAM_REGISTRY: &[ParamSpec] = &[
         min: None,
         max: None,
         choices: None,
+        widget: None,
         enabled_by_default: false,
     },
     ParamSpec {
@@ -850,6 +930,7 @@ pub const PARAM_REGISTRY: &[ParamSpec] = &[
         min: None,
         max: None,
         choices: None,
+        widget: None,
         enabled_by_default: false,
     },
     ParamSpec {
@@ -860,6 +941,7 @@ pub const PARAM_REGISTRY: &[ParamSpec] = &[
         min: None,
         max: None,
         choices: None,
+        widget: None,
         enabled_by_default: false,
     },
     ParamSpec {
@@ -870,6 +952,7 @@ pub const PARAM_REGISTRY: &[ParamSpec] = &[
         min: None,
         max: None,
         choices: None,
+        widget: None,
         enabled_by_default: false,
     },
     ParamSpec {
@@ -880,6 +963,7 @@ pub const PARAM_REGISTRY: &[ParamSpec] = &[
         min: None,
         max: None,
         choices: None,
+        widget: None,
         enabled_by_default: false,
     },
     ParamSpec {
@@ -890,6 +974,7 @@ pub const PARAM_REGISTRY: &[ParamSpec] = &[
         min: None,
         max: None,
         choices: None,
+        widget: None,
         enabled_by_default: false,
     },
     ParamSpec {
@@ -900,6 +985,7 @@ pub const PARAM_REGISTRY: &[ParamSpec] = &[
         min: None,
         max: None,
         choices: None,
+        widget: None,
         enabled_by_default: false,
     },
     ParamSpec {
@@ -910,6 +996,7 @@ pub const PARAM_REGISTRY: &[ParamSpec] = &[
         min: None,
         max: None,
         choices: None,
+        widget: None,
         enabled_by_default: false,
     },
     ParamSpec {
@@ -920,6 +1007,7 @@ pub const PARAM_REGISTRY: &[ParamSpec] = &[
         min: None,
         max: None,
         choices: None,
+        widget: None,
         enabled_by_default: false,
     },
     ParamSpec {
@@ -930,6 +1018,7 @@ pub const PARAM_REGISTRY: &[ParamSpec] = &[
         min: None,
         max: None,
         choices: None,
+        widget: None,
         enabled_by_default: false,
     },
     ParamSpec {
@@ -940,6 +1029,7 @@ pub const PARAM_REGISTRY: &[ParamSpec] = &[
         min: None,
         max: None,
         choices: None,
+        widget: None,
         enabled_by_default: false,
     },
     ParamSpec {
@@ -950,6 +1040,7 @@ pub const PARAM_REGISTRY: &[ParamSpec] = &[
         min: None,
         max: None,
         choices: None,
+        widget: None,
         enabled_by_default: false,
     },
     ParamSpec {
@@ -960,6 +1051,7 @@ pub const PARAM_REGISTRY: &[ParamSpec] = &[
         min: None,
         max: None,
         choices: None,
+        widget: None,
         enabled_by_default: false,
     },
     ParamSpec {
@@ -970,6 +1062,7 @@ pub const PARAM_REGISTRY: &[ParamSpec] = &[
         min: None,
         max: None,
         choices: None,
+        widget: None,
         enabled_by_default: false,
     },
     ParamSpec {
@@ -980,6 +1073,7 @@ pub const PARAM_REGISTRY: &[ParamSpec] = &[
         min: None,
         max: None,
         choices: None,
+        widget: None,
         enabled_by_default: false,
     },
     ParamSpec {
@@ -990,6 +1084,7 @@ pub const PARAM_REGISTRY: &[ParamSpec] = &[
         min: None,
         max: None,
         choices: None,
+        widget: None,
         enabled_by_default: false,
     },
     ParamSpec {
@@ -1000,6 +1095,7 @@ pub const PARAM_REGISTRY: &[ParamSpec] = &[
         min: None,
         max: None,
         choices: None,
+        widget: None,
         enabled_by_default: false,
     },
     ParamSpec {
@@ -1010,6 +1106,7 @@ pub const PARAM_REGISTRY: &[ParamSpec] = &[
         min: None,
         max: None,
         choices: None,
+        widget: None,
         enabled_by_default: false,
     },
     ParamSpec {
@@ -1020,6 +1117,7 @@ pub const PARAM_REGISTRY: &[ParamSpec] = &[
         min: None,
         max: None,
         choices: Some(&["none", "mean", "cls"]),
+        widget: None,
         enabled_by_default: false,
     },
     ParamSpec {
@@ -1030,6 +1128,7 @@ pub const PARAM_REGISTRY: &[ParamSpec] = &[
         min: None,
         max: None,
         choices: Some(&["none", "sdqa"]),
+        widget: None,
         enabled_by_default: false,
     },
     ParamSpec {
@@ -1040,6 +1139,7 @@ pub const PARAM_REGISTRY: &[ParamSpec] = &[
         min: None,
         max: None,
         choices: None,
+        widget: None,
         enabled_by_default: false,
     },
     ParamSpec {
@@ -1050,6 +1150,7 @@ pub const PARAM_REGISTRY: &[ParamSpec] = &[
         min: None,
         max: None,
         choices: None,
+        widget: None,
         enabled_by_default: false,
     },
     ParamSpec {
@@ -1060,6 +1161,7 @@ pub const PARAM_REGISTRY: &[ParamSpec] = &[
         min: None,
         max: None,
         choices: None,
+        widget: None,
         enabled_by_default: false,
     },
     ParamSpec {
@@ -1070,6 +1172,7 @@ pub const PARAM_REGISTRY: &[ParamSpec] = &[
         min: None,
         max: None,
         choices: None,
+        widget: None,
         enabled_by_default: false,
     },
     ParamSpec {
@@ -1080,6 +1183,7 @@ pub const PARAM_REGISTRY: &[ParamSpec] = &[
         min: None,
         max: None,
         choices: None,
+        widget: None,
         enabled_by_default: false,
     },
     ParamSpec {
@@ -1090,6 +1194,7 @@ pub const PARAM_REGISTRY: &[ParamSpec] = &[
         min: None,
         max: None,
         choices: None,
+        widget: None,
         enabled_by_default: false,
     },
     ParamSpec {
@@ -1100,6 +1205,7 @@ pub const PARAM_REGISTRY: &[ParamSpec] = &[
         min: None,
         max: None,
         choices: None,
+        widget: None,
         enabled_by_default: false,
     },
     ParamSpec {
@@ -1110,6 +1216,7 @@ pub const PARAM_REGISTRY: &[ParamSpec] = &[
         min: None,
         max: None,
         choices: None,
+        widget: None,
         enabled_by_default: false,
     },
     ParamSpec {
@@ -1120,6 +1227,7 @@ pub const PARAM_REGISTRY: &[ParamSpec] = &[
         min: None,
         max: None,
         choices: None,
+        widget: None,
         enabled_by_default: false,
     },
     ParamSpec {
@@ -1130,6 +1238,7 @@ pub const PARAM_REGISTRY: &[ParamSpec] = &[
         min: None,
         max: None,
         choices: None,
+        widget: None,
         enabled_by_default: false,
     },
     ParamSpec {
@@ -1140,6 +1249,7 @@ pub const PARAM_REGISTRY: &[ParamSpec] = &[
         min: None,
         max: None,
         choices: None,
+        widget: None,
         enabled_by_default: false,
     },
     ParamSpec {
@@ -1150,6 +1260,7 @@ pub const PARAM_REGISTRY: &[ParamSpec] = &[
         min: None,
         max: None,
         choices: None,
+        widget: None,
         enabled_by_default: false,
     },
     ParamSpec {
@@ -1160,6 +1271,7 @@ pub const PARAM_REGISTRY: &[ParamSpec] = &[
         min: None,
         max: None,
         choices: None,
+        widget: None,
         enabled_by_default: false,
     },
     ParamSpec {
@@ -1170,6 +1282,7 @@ pub const PARAM_REGISTRY: &[ParamSpec] = &[
         min: None,
         max: None,
         choices: None,
+        widget: None,
         enabled_by_default: false,
     },
     ParamSpec {
@@ -1180,6 +1293,7 @@ pub const PARAM_REGISTRY: &[ParamSpec] = &[
         min: None,
         max: None,
         choices: None,
+        widget: None,
         enabled_by_default: false,
     },
     ParamSpec {
@@ -1190,6 +1304,7 @@ pub const PARAM_REGISTRY: &[ParamSpec] = &[
         min: None,
         max: None,
         choices: None,
+        widget: None,
         enabled_by_default: false,
     },
     ParamSpec {
@@ -1200,6 +1315,7 @@ pub const PARAM_REGISTRY: &[ParamSpec] = &[
         min: None,
         max: None,
         choices: None,
+        widget: None,
         enabled_by_default: false,
     },
     ParamSpec {
@@ -1210,6 +1326,7 @@ pub const PARAM_REGISTRY: &[ParamSpec] = &[
         min: None,
         max: None,
         choices: None,
+        widget: None,
         enabled_by_default: false,
     },
     ParamSpec {
@@ -1220,6 +1337,7 @@ pub const PARAM_REGISTRY: &[ParamSpec] = &[
         min: None,
         max: None,
         choices: None,
+        widget: None,
         enabled_by_default: false,
     },
     ParamSpec {
@@ -1230,6 +1348,7 @@ pub const PARAM_REGISTRY: &[ParamSpec] = &[
         min: None,
         max: None,
         choices: None,
+        widget: None,
         enabled_by_default: false,
     },
     ParamSpec {
@@ -1240,6 +1359,7 @@ pub const PARAM_REGISTRY: &[ParamSpec] = &[
         min: None,
         max: None,
         choices: None,
+        widget: None,
         enabled_by_default: false,
     },
     ParamSpec {
@@ -1250,6 +1370,7 @@ pub const PARAM_REGISTRY: &[ParamSpec] = &[
         min: None,
         max: None,
         choices: None,
+        widget: None,
         enabled_by_default: false,
     },
     ParamSpec {
@@ -1260,6 +1381,7 @@ pub const PARAM_REGISTRY: &[ParamSpec] = &[
         min: None,
         max: None,
         choices: None,
+        widget: None,
         enabled_by_default: false,
     },
     ParamSpec {
@@ -1270,6 +1392,7 @@ pub const PARAM_REGISTRY: &[ParamSpec] = &[
         min: None,
         max: None,
         choices: None,
+        widget: None,
         enabled_by_default: false,
     },
     ParamSpec {
@@ -1280,6 +1403,7 @@ pub const PARAM_REGISTRY: &[ParamSpec] = &[
         min: None,
         max: None,
         choices: None,
+        widget: None,
         enabled_by_default: false,
     },
     ParamSpec {
@@ -1290,6 +1414,7 @@ pub const PARAM_REGISTRY: &[ParamSpec] = &[
         min: None,
         max: None,
         choices: None,
+        widget: None,
         enabled_by_default: false,
     },
     ParamSpec {
@@ -1300,6 +1425,7 @@ pub const PARAM_REGISTRY: &[ParamSpec] = &[
         min: None,
         max: None,
         choices: None,
+        widget: None,
         enabled_by_default: false,
     },
     ParamSpec {
@@ -1310,6 +1436,7 @@ pub const PARAM_REGISTRY: &[ParamSpec] = &[
         min: None,
         max: None,
         choices: None,
+        widget: None,
         enabled_by_default: false,
     },
     ParamSpec {
@@ -1320,6 +1447,7 @@ pub const PARAM_REGISTRY: &[ParamSpec] = &[
         min: None,
         max: None,
         choices: None,
+        widget: None,
         enabled_by_default: false,
     },
     ParamSpec {
@@ -1330,6 +1458,7 @@ pub const PARAM_REGISTRY: &[ParamSpec] = &[
         min: None,
         max: None,
         choices: None,
+        widget: None,
         enabled_by_default: false,
     },
     ParamSpec {
@@ -1340,6 +1469,7 @@ pub const PARAM_REGISTRY: &[ParamSpec] = &[
         min: None,
         max: None,
         choices: None,
+        widget: None,
         enabled_by_default: false,
     },
     ParamSpec {
@@ -1350,6 +1480,7 @@ pub const PARAM_REGISTRY: &[ParamSpec] = &[
         min: None,
         max: None,
         choices: None,
+        widget: None,
         enabled_by_default: false,
     },
     ParamSpec {
@@ -1360,6 +1491,7 @@ pub const PARAM_REGISTRY: &[ParamSpec] = &[
         min: None,
         max: None,
         choices: None,
+        widget: None,
         enabled_by_default: false,
     },
     ParamSpec {
@@ -1370,6 +1502,7 @@ pub const PARAM_REGISTRY: &[ParamSpec] = &[
         min: None,
         max: None,
         choices: None,
+        widget: None,
         enabled_by_default: false,
     },
     ParamSpec {
@@ -1380,6 +1513,7 @@ pub const PARAM_REGISTRY: &[ParamSpec] = &[
         min: None,
         max: None,
         choices: None,
+        widget: None,
         enabled_by_default: false,
     },
     ParamSpec {
@@ -1390,6 +1524,7 @@ pub const PARAM_REGISTRY: &[ParamSpec] = &[
         min: None,
         max: None,
         choices: None,
+        widget: None,
         enabled_by_default: false,
     },
     ParamSpec {
@@ -1400,6 +1535,7 @@ pub const PARAM_REGISTRY: &[ParamSpec] = &[
         min: None,
         max: None,
         choices: None,
+        widget: None,
         enabled_by_default: false,
     },
     ParamSpec {
@@ -1410,6 +1546,7 @@ pub const PARAM_REGISTRY: &[ParamSpec] = &[
         min: None,
         max: None,
         choices: None,
+        widget: None,
         enabled_by_default: false,
     },
     ParamSpec {
@@ -1420,6 +1557,7 @@ pub const PARAM_REGISTRY: &[ParamSpec] = &[
         min: None,
         max: None,
         choices: None,
+        widget: None,
         enabled_by_default: false,
     },
     ParamSpec {
@@ -1430,6 +1568,7 @@ pub const PARAM_REGISTRY: &[ParamSpec] = &[
         min: None,
         max: None,
         choices: None,
+        widget: None,
         enabled_by_default: false,
     },
     ParamSpec {
@@ -1440,6 +1579,7 @@ pub const PARAM_REGISTRY: &[ParamSpec] = &[
         min: None,
         max: None,
         choices: None,
+        widget: None,
         enabled_by_default: false,
     },
     ParamSpec {
@@ -1450,6 +1590,7 @@ pub const PARAM_REGISTRY: &[ParamSpec] = &[
         min: None,
         max: None,
         choices: None,
+        widget: None,
         enabled_by_default: false,
     },
     ParamSpec {
@@ -1460,6 +1601,7 @@ pub const PARAM_REGISTRY: &[ParamSpec] = &[
         min: None,
         max: None,
         choices: None,
+        widget: None,
         enabled_by_default: false,
     },
     ParamSpec {
@@ -1470,6 +1612,7 @@ pub const PARAM_REGISTRY: &[ParamSpec] = &[
         min: None,
         max: None,
         choices: None,
+        widget: None,
         enabled_by_default: false,
     },
     ParamSpec {
@@ -1480,6 +1623,7 @@ pub const PARAM_REGISTRY: &[ParamSpec] = &[
         min: None,
         max: None,
         choices: None,
+        widget: None,
         enabled_by_default: false,
     },
     ParamSpec {
@@ -1490,6 +1634,7 @@ pub const PARAM_REGISTRY: &[ParamSpec] = &[
         min: None,
         max: None,
         choices: None,
+        widget: None,
         enabled_by_default: false,
     },
     ParamSpec {
@@ -1500,6 +1645,7 @@ pub const PARAM_REGISTRY: &[ParamSpec] = &[
         min: None,
         max: None,
         choices: None,
+        widget: None,
         enabled_by_default: false,
     },
     ParamSpec {
@@ -1510,6 +1656,7 @@ pub const PARAM_REGISTRY: &[ParamSpec] = &[
         min: None,
         max: None,
         choices: None,
+        widget: None,
         enabled_by_default: false,
     },
     ParamSpec {
@@ -1520,6 +1667,7 @@ pub const PARAM_REGISTRY: &[ParamSpec] = &[
         min: None,
         max: None,
         choices: None,
+        widget: None,
         enabled_by_default: false,
     },
     ParamSpec {
@@ -1530,6 +1678,7 @@ pub const PARAM_REGISTRY: &[ParamSpec] = &[
         min: None,
         max: None,
         choices: None,
+        widget: None,
         enabled_by_default: false,
     },
     ParamSpec {
@@ -1540,6 +1689,7 @@ pub const PARAM_REGISTRY: &[ParamSpec] = &[
         min: None,
         max: None,
         choices: None,
+        widget: None,
         enabled_by_default: false,
     },
     ParamSpec {
@@ -1550,6 +1700,7 @@ pub const PARAM_REGISTRY: &[ParamSpec] = &[
         min: None,
         max: None,
         choices: None,
+        widget: None,
         enabled_by_default: false,
     },
     ParamSpec {
@@ -1560,6 +1711,7 @@ pub const PARAM_REGISTRY: &[ParamSpec] = &[
         min: None,
         max: None,
         choices: None,
+        widget: None,
         enabled_by_default: false,
     },
     ParamSpec {
@@ -1570,6 +1722,7 @@ pub const PARAM_REGISTRY: &[ParamSpec] = &[
         min: None,
         max: None,
         choices: None,
+        widget: None,
         enabled_by_default: false,
     },
     ParamSpec {
@@ -1580,6 +1733,7 @@ pub const PARAM_REGISTRY: &[ParamSpec] = &[
         min: None,
         max: None,
         choices: None,
+        widget: None,
         enabled_by_default: false,
     },
     ParamSpec {
@@ -1590,6 +1744,7 @@ pub const PARAM_REGISTRY: &[ParamSpec] = &[
         min: None,
         max: None,
         choices: None,
+        widget: Some("file-server-dir"),
         enabled_by_default: false,
     },
     ParamSpec {
@@ -1600,6 +1755,7 @@ pub const PARAM_REGISTRY: &[ParamSpec] = &[
         min: None,
         max: None,
         choices: None,
+        widget: None,
         enabled_by_default: false,
     },
     ParamSpec {
@@ -1610,6 +1766,7 @@ pub const PARAM_REGISTRY: &[ParamSpec] = &[
         min: None,
         max: None,
         choices: None,
+        widget: None,
         enabled_by_default: false,
     },
     ParamSpec {
@@ -1620,6 +1777,7 @@ pub const PARAM_REGISTRY: &[ParamSpec] = &[
         min: None,
         max: None,
         choices: None,
+        widget: None,
         enabled_by_default: false,
     },
     ParamSpec {
@@ -1630,6 +1788,7 @@ pub const PARAM_REGISTRY: &[ParamSpec] = &[
         min: None,
         max: None,
         choices: None,
+        widget: None,
         enabled_by_default: false,
     },
     ParamSpec {
@@ -1640,6 +1799,7 @@ pub const PARAM_REGISTRY: &[ParamSpec] = &[
         min: None,
         max: None,
         choices: None,
+        widget: None,
         enabled_by_default: false,
     },
     ParamSpec {
@@ -1650,6 +1810,7 @@ pub const PARAM_REGISTRY: &[ParamSpec] = &[
         min: None,
         max: None,
         choices: None,
+        widget: None,
         enabled_by_default: false,
     },
     ParamSpec {
@@ -1660,6 +1821,7 @@ pub const PARAM_REGISTRY: &[ParamSpec] = &[
         min: None,
         max: None,
         choices: None,
+        widget: None,
         enabled_by_default: false,
     },
     ParamSpec {
@@ -1670,6 +1832,7 @@ pub const PARAM_REGISTRY: &[ParamSpec] = &[
         min: None,
         max: None,
         choices: None,
+        widget: None,
         enabled_by_default: false,
     },
     ParamSpec {
@@ -1680,6 +1843,7 @@ pub const PARAM_REGISTRY: &[ParamSpec] = &[
         min: None,
         max: None,
         choices: None,
+        widget: None,
         enabled_by_default: false,
     },
 ];
