@@ -327,6 +327,8 @@ export const zh = {
   'log.timeToggle': '时间',
   'log.showTime': '显示时间',
   'log.hideTime': '隐藏时间',
+  'log.maximize': '放大日志窗口',
+  'log.restore': '还原日志窗口',
 
   // 一键传参解析预览行
   'preview.serverPath': '启动器路径 → {value}',
@@ -946,6 +948,8 @@ export const en: Record<MessageKey, string> = {
   'log.timeToggle': 'Time',
   'log.showTime': 'Show timestamps',
   'log.hideTime': 'Hide timestamps',
+  'log.maximize': 'Maximize log window',
+  'log.restore': 'Restore log window',
 
   'preview.serverPath': 'Launcher path → {value}',
   'preview.model': 'Model path → {value}',

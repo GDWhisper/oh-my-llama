@@ -1417,6 +1417,57 @@ button:disabled {
   color: #ffffff;
 }
 
+/* 放大/还原悬浮按钮：终端视口左上角，深色控件与 .term-jump 同族（图标态，高度对齐
+   .log-time-toggle 的 26px）。z-index 需压过 raw 模式置顶命令行条 .term-pinned
+   （sticky, z-index:1），保证按钮浮在其上且可点。 */
+.term-maximize {
+  position: absolute;
+  left: 12px;
+  top: 12px;
+  z-index: 3;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 26px;
+  padding: 0;
+  border-radius: 8px;
+  border: 1px solid #26314f;
+  background: rgba(17, 26, 51, 0.92);
+  color: #cbd5e1;
+  cursor: pointer;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
+}
+
+.term-maximize:hover {
+  background: #1b2547;
+  color: #ffffff;
+}
+
+.term-maximize svg {
+  width: 14px;
+  height: 14px;
+}
+
+/* 放大态：面板脱流为固定浮层，盖住顶部标题卡（.app > .header）以外的全部区域。
+   left/right/bottom 取 20px 与 .app 的 padding 对齐；top 依赖标题卡实时底边，
+   由 LogPanel 以内联样式写入，这里不设。更深阴影把浮层从被盖住的内容上托起来。 */
+.panel.log-maximized {
+  position: fixed;
+  z-index: 100;
+  left: 20px;
+  right: 20px;
+  bottom: 20px;
+  box-shadow: 0 24px 64px rgba(15, 23, 42, 0.35);
+}
+
+/* fixed 浮层脱离 .log-side 的 flex 上下文，原「视口撑满」规则失效；等价补一条，
+   让黑色终端区吃满浮层内标题行以外的剩余高度。 */
+.panel.log-maximized .terminal-viewport {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
 /* 渲染窗口上方「加载更早日志」按钮：贴 terminal 顶部居中，风格与 term-jump 同族 */
 .term-older {
   align-self: center;

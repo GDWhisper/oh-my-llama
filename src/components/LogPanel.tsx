@@ -51,6 +51,13 @@ export function LogPanel({ logs, onClear, onError }: Props) {
   // 挂载时从后端 AppSettings 校准一次；None → true。toggle 走乐观更新 + 后端落盘校验。
   const [showTimes, setShowTimes] = useState(true);
 
+  // 放大态：面板脱流为固定浮层，盖住顶部标题卡以外的全部区域。只切换样式与监听，
+  // 不重建 terminal DOM，贴底跟随/时间显隐/简要原生等状态在放大前后原样保留。
+  const [maximized, setMaximized] = useState(false);
+  // 浮层 top = 标题卡底边 + 16px（.app 的 grid gap），进入放大态与窗口 resize 时重测；
+  // 查不到 header（理论异常）保持 20px 回退 = 全覆盖，不崩。
+  const [maxTop, setMaxTop] = useState(20);
+
   // 挂载时读一次设置，校准时间显隐。读不到或字段为 null 均按"显示"处理（向后兼容）。
   useEffect(() => {
     let alive = true;
@@ -163,6 +170,32 @@ export function LogPanel({ logs, onClear, onError }: Props) {
     };
   }, []);
 
+  // 放大态测量浮层 top：用 useLayoutEffect 在绘制前完成，避免浮层先以回退位置闪一帧；
+  // 窗口 resize 时重测以贴合标题卡实时底边。退出放大/卸载时随 effect 清理移除监听。
+  useLayoutEffect(() => {
+    if (!maximized) return;
+    const measure = () => {
+      const header = document.querySelector('.app > .header');
+      if (header) setMaxTop(header.getBoundingClientRect().bottom + 16);
+    };
+    measure();
+    window.addEventListener('resize', measure);
+    return () => window.removeEventListener('resize', measure);
+  }, [maximized]);
+
+  // 放大态下按 ESC 退出。守卫：各对话框（ConfirmDialog 等）渲染在 .modal-overlay 里且
+  // 各自监听 ESC 自关——对话框开着时本次 ESC 让给对话框处理，避免一次按键双重退出。
+  useEffect(() => {
+    if (!maximized) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape' && !document.querySelector('.modal-overlay')) {
+        setMaximized(false);
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [maximized]);
+
   const jumpToBottom = () => {
     const scroller = findScroller(termRef.current);
     if (!scroller) return;
@@ -182,7 +215,10 @@ export function LogPanel({ logs, onClear, onError }: Props) {
   const loadOlder = () => setVisibleCount((count) => count + LOAD_OLDER_STEP);
 
   return (
-    <div className="panel">
+    <div
+      className={maximized ? 'panel log-maximized' : 'panel'}
+      style={maximized ? { top: maxTop } : undefined}
+    >
       <div className="section-header">
         <h2>{t('log.title')}</h2>
         <div className="log-toolbar">
@@ -256,6 +292,40 @@ export function LogPanel({ logs, onClear, onError }: Props) {
             </div>
           ))}
         </div>
+        {/* 放大/还原悬浮按钮：固定于视口左上角，深色控件与 .term-jump 同族；z-index 需
+            压过 raw 模式置顶命令行条（.term-pinned, z-index:1）才能浮在其上且可点。
+            title 与 aria-label 均走 t()，随放大态在两个文案间切换。 */}
+        <button
+          type="button"
+          className="term-maximize"
+          onClick={() => setMaximized((prev) => !prev)}
+          title={maximized ? t('log.restore') : t('log.maximize')}
+          aria-label={maximized ? t('log.restore') : t('log.maximize')}
+        >
+          <svg viewBox="0 0 16 16" aria-hidden="true">
+            {maximized ? (
+              // 还原：四角箭头向内收
+              <path
+                d="M2 2l4 4M3.5 6H6V3.5M14 2l-4 4M10 3.5V6h2.5M2 14l4-4M3.5 10H6v2.5M14 14l-4-4M10 12.5V10h2.5"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.5"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            ) : (
+              // 放大：四角箭头向外张开
+              <path
+                d="M2 5.5V2h3.5M2 2l4 4M10.5 2H14v3.5M14 2l-4 4M2 10.5V14h3.5M2 14l4-4M14 10.5V14h-3.5M14 14l-4-4"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.5"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            )}
+          </svg>
+        </button>
         {showJump && (
           <button type="button" className="term-jump" onClick={jumpToBottom}>
             {t('log.backToBottom')}
