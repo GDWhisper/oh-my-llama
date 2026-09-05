@@ -1235,11 +1235,18 @@ async fn start_server(app: AppHandle, config: ServerConfig) -> Result<ServerStat
     if ready {
         Ok(final_status)
     } else if alive {
-        // 仍在后台加载：返回提示，但状态已记受管，端口就绪后 get_status 会自动翻转为运行中。
-        Err(
-            "启动较慢：服务在限定时间内尚未就绪，仍在后台加载模型，请稍候（状态将自动更新）。"
-                .into(),
-        )
+        // 慢加载不是失败：状态已记受管（running=false、managed=true、pid），此处静默返回
+        // Ok 后由 get_status 的 1.5s 轮询接管监控——端口就绪自动翻转为运行中，期间停止
+        // 按钮可用。等待上限只是结束阻塞、把监控交回轮询，不代表启动失败。
+        append_log_inner(
+            &app,
+            ServerLogLine {
+                ts: now(),
+                level: "info".into(),
+                text: "模型加载耗时较长（超过 90 秒），已转入后台监控，就绪后状态自动更新。".into(),
+            },
+        );
+        Ok(final_status)
     } else {
         Err("启动失败：llama-server 进程已退出，请检查模型路径与启动参数（详见日志）。".into())
     }
@@ -1813,11 +1820,13 @@ fn parse_http_status_code(resp: &[u8]) -> Option<u16> {
     it.next()?.parse::<u16>().ok()
 }
 
-// 启动后等待服务真正就绪（GET /health 返回 200）的最长时间：模型加载可能耗时数秒到数分钟，
-// 超时仍未就绪则判定启动过慢/失败，交由用户检查日志。非持锁等待。
+// start_server 阻塞等待启动明确结果（就绪 / 进程退出）的上限：模型加载可能耗时数秒到数分钟。
+// 超时且进程存活 → 静默转后台监控（get_status 轮询接管，就绪自动翻转 running）；窗口内
+// 进程退出仍判启动失败。非持锁等待。
 const START_READINESS_TIMEOUT: Duration = Duration::from_secs(90);
 
-// 轮询就绪直到 GET /health 返回 200；期间若进程已退出则立即判定失败，超时则返回 false。
+// 轮询就绪直到 GET /health 返回 200；期间若进程已退出则立即返回 false，超时同样返回 false，
+// 是否判定失败由调用方结合进程存活判定（存活=转后台监控，退出=启动失败或用户手动停止）。
 // 阻塞式（std::thread::sleep）：仅在 start_server 这一个一次性命令任务内调用，
 // 不持状态锁，不会阻塞 get_status 的 1.5s 轮询；多工作线程运行时也不影响其它命令。
 fn wait_until_ready(host: &str, port: u16, pid: u32, timeout: Duration) -> bool {

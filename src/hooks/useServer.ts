@@ -790,7 +790,11 @@ export function useServer() {
       void refreshServerCandidates();
       void refreshModelDirCandidates();
     } catch (err) {
-      const message = err instanceof Error ? err.message : t('err.startFallback');
+      // 后端命令以 String 返回 Err（Tauri 拒绝值不是 Error 实例）：优先透传后端给出的
+      // 具体原因（端口占用/路径不存在/进程退出等）；Error 实例兜次之；最后落 i18n 兜底。
+      // 代价：后端报错为中文原文，英文界面下 toast 显示中文——优于一律笼统「启动失败」。
+      const message =
+        typeof err === 'string' ? err : err instanceof Error ? err.message : t('err.startFallback');
       showToast(message);
       console.error(err);
     } finally {
