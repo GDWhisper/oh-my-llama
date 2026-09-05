@@ -37,6 +37,15 @@ function withFlag(label: string, flag: string): ReactNode {
   );
 }
 
+// 从文件完整路径取父目录，作为文件选择器的 defaultPath 候选：正常流程下 model 是
+// joinModelPath(dir, name) 拼出的完整路径，取父目录即模型所在目录；但一键传参回填时
+// model 可能只是纯文件名（无路径分隔符），此时返回空串，由调用方回退为不指定默认目录。
+function parentDirOf(path: string): string {
+  const trimmed = path.replace(/[\\/]+$/, '');
+  const idx = Math.max(trimmed.lastIndexOf('/'), trimmed.lastIndexOf('\\'));
+  return idx === -1 ? '' : trimmed.slice(0, idx);
+}
+
 // 「可添加参数」搜索结果一次最多渲染的条目数：注册表有 160+ 项，
 // 全量铺开会淹没面板，超出部分提示用户继续输入缩小范围。
 const MAX_SUGGESTIONS = 24;
@@ -108,6 +117,7 @@ function ExtraArgRow({
 function StructuredParamRow({
   spec,
   value,
+  fileDialogDir,
   disabled,
   removable,
   onCommit,
@@ -116,6 +126,8 @@ function StructuredParamRow({
 }: {
   spec: ParamSpec;
   value: string;
+  // 「浏览」默认打开目录：优先基础参数的模型目录，其次已选模型文件的父目录；空串 = 不指定。
+  fileDialogDir: string;
   disabled: boolean;
   removable: boolean;
   onCommit: (value: string) => void;
@@ -141,6 +153,8 @@ function StructuredParamRow({
   const pickFile = async () => {
     const selected = await open({
       multiple: false,
+      // 无可用默认目录时必须传 undefined（保持系统记忆位置），不可传空串。
+      defaultPath: fileDialogDir || undefined,
       filters: [{ name: 'GGUF', extensions: ['gguf'] }],
     });
     if (typeof selected === 'string') {
@@ -303,6 +317,10 @@ export function AdvancedParamsPanel(props: Props) {
     () => new Set(config.disabled_structured_params),
     [config.disabled_structured_params],
   );
+
+  // 结构化参数「浏览」的默认打开目录：model_dir 优先；未设置时退回已选模型文件的
+  // 父目录。两者皆空则 pickFile 不指定 defaultPath（纯字符串运算，不值得 useMemo）。
+  const fileDialogDir = config.model_dir.trim() || parentDirOf(config.model);
 
   // 「可添加参数」统一池：传统可选参数 + 注册表里尚未启用的结构化参数。
   // 搜索框置顶，下方按关键词过滤后同时展示两类参数，避免搜索框被传统参数挤到第二行。
@@ -552,6 +570,7 @@ export function AdvancedParamsPanel(props: Props) {
             key={`structured-${key}`}
             spec={spec}
             value={config.structured_params[key] ?? spec.default}
+            fileDialogDir={fileDialogDir}
             disabled={disabledStructured.has(key)}
             removable={adjustingAdvanced}
             onCommit={(value) => onStructuredValueChange(key, value)}
