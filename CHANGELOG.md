@@ -4,6 +4,19 @@
 
 > 本文件为**详细改动历史**（含涉及的文件与实现机制）；GitHub Release 页面为对应版本的**总结性**说明。
 
+## [0.2.2] - 2026-09-07
+
+### 新增功能
+- 无
+
+### 功能优化
+- 无
+
+### Bug 修复
+- **停止服务后不再把自己的服务误报为外部服务**：`src-tauri/src/lib.rs` 的 `stop_server_inner` 原先在发出终止请求的同时就复位受管态（`managed=false` / `pid=None`），而 llama-server 真正让出端口还要走完「礼貌等待 1.5s + 强制终止 + 套接字回收」（Windows 下 `CTRL_C_EVENT` 对非进程组 leader 无效，必然走满这段）；期间 `get_status` 看到「端口仍应答 + 归属不明」会记一条「检测到外部服务在该地址监听」、前端渲染出「外部服务」徽章。新增停止宽限期：`stop` 时记下目标 `host:port`，`get_status` 在窗口期内保持沉默（不写结论性日志、不把 `running` 翻成 `true`），新进程接管或端口释放即结束窗口，超时回归常态、真实外部服务仍如实提示。纯后端内部状态，`ServerStatus` / `src/types.ts` 契约不变。
+- **日志面板放大按钮默认隐藏**：`src/App.css` 的 `.term-maximize` 改为默认 `opacity:0 + pointer-events:none`，仅在鼠标 hover 终端视口（`terminal-viewport`）或键盘 `focus-visible` 时显示，并加 `opacity` 过渡避免突兀闪现；修复空日志状态下放大按钮与「暂无日志输出…」占位文案重叠的问题，平时不挡字、功能保留。
+- **更新下载窗准备阶段不再假装进度**：`src/components/UpdateDialog.tsx` 原先在 `tauri-plugin-updater` 的 `Started` 事件到来前（`total` 未知、`received` 为 0）仍硬填 40% 宽度进度条并配「正在下载…」标题，与下方「0 B」自相矛盾。新增 `update.preparing`（zh/en），`total` 未知时标题改为「正在准备下载…」；`src/App.css` 新增 `.progress-bar--indeterminate` 以横向平移动效替代固定 40% 宽度；底部文案在 `received` 为 0 时显示省略号，不再显示 `0 B`。
+
 ## [0.2.1] - 2026-09-06
 
 ### 新增功能
