@@ -1432,7 +1432,9 @@ button:disabled {
 
 /* 放大/还原悬浮按钮：终端视口左上角，深色控件与 .term-jump 同族（图标态，高度对齐
    .log-time-toggle 的 26px）。z-index 需压过 raw 模式置顶命令行条 .term-pinned
-   （sticky, z-index:1），保证按钮浮在其上且可点。 */
+   （sticky, z-index:1），保证按钮浮在其上且可点。
+   默认隐藏，hover 到终端视口（terminal-viewport）或键盘 focus 时才显示，
+   避免空状态占位文案「暂无日志输出…」与首行日志被按钮常年遮挡。 */
 .term-maximize {
   position: absolute;
   left: 12px;
@@ -1450,6 +1452,19 @@ button:disabled {
   color: #cbd5e1;
   cursor: pointer;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
+  opacity: 0;
+  pointer-events: none;
+  transition:
+    opacity 0.18s ease,
+    color 120ms ease,
+    background-color 120ms ease,
+    border-color 120ms ease;
+}
+
+.terminal-viewport:hover .term-maximize,
+.term-maximize:focus-visible {
+  opacity: 1;
+  pointer-events: auto;
 }
 
 .term-maximize:hover {
