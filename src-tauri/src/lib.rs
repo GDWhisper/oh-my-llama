@@ -853,32 +853,42 @@ async fn get_status(app: AppHandle, config: ServerConfig) -> Result<ServerStatus
     //  - owned_alive：本应用拉起的进程是否仍存活（决定 managed / Stop 是否可用）。
     // 探测与拿锁之间状态可能被 start/stop 修改，owned_alive 基于拿锁后的最新值计算。
     let owned_alive = status.managed && is_process_running(status.pid);
+    // 停止宽限期：本应用刚刚才停止该地址上的服务，进程/OS 还没把端口让出去。
+    // 此刻 owned_alive 必然为 false（受管态已被 stop_server_inner 复位），但不能据此断言
+    // 是外部服务——那正是自己那条尚未咽气的连接。
+    let grace = !owned_alive && in_stop_grace(&config.host, config.port);
 
     if listening {
-        // 端口确有服务在监听 → 运行中。
-        // managed 取决于是否仍由本应用掌控（pid 存活）；外部（或脱离掌控）的服务 managed=false。
-        if !status.running {
-            let note = if owned_alive {
-                "llama-server 已就绪"
-            } else {
-                "检测到外部服务在该地址监听"
-            };
-            append_log_inner(
-                &app,
-                ServerLogLine {
-                    ts: now(),
-                    level: "info".into(),
-                    text: format!("{} ({}:{})", note, config.host, config.port),
-                },
-            );
+        if !grace {
+            // 端口确有服务在监听 → 运行中。
+            // managed 取决于是否仍由本应用掌控（pid 存活）；外部（或脱离掌控）的服务 managed=false。
+            if !status.running {
+                let note = if owned_alive {
+                    "llama-server 已就绪"
+                } else {
+                    "检测到外部服务在该地址监听"
+                };
+                append_log_inner(
+                    &app,
+                    ServerLogLine {
+                        ts: now(),
+                        level: "info".into(),
+                        text: format!("{} ({}:{})", note, config.host, config.port),
+                    },
+                );
+            }
+            status.running = true;
+            status.managed = owned_alive;
+            if !owned_alive {
+                status.pid = None;
+            }
         }
-        status.running = true;
-        status.managed = owned_alive;
-        if !owned_alive {
-            status.pid = None;
-        }
+        // 宽限期内保持 status 现状（stop_server_inner 已复位的「未运行」）：不写日志，
+        // 也不把 running 翻成 true——否则 managed=false + running=true 会让前端渲染出
+        // 「外部服务」徽章。端口真正释放后下一次轮询自然收敛。
     } else {
-        // 端口无服务。
+        // 端口无服务：若正处在宽限期，说明这次停止已生效，窗口到此为止。
+        clear_stop_grace();
         if status.running {
             append_log_inner(
                 &app,
@@ -1381,6 +1391,8 @@ async fn stop_server_inner(app: &AppHandle) -> Result<(), String> {
         );
     }
     let pid = status.pid;
+    // 先记账再清状态：窗口依据的是停止目标地址，而下一行的复位会把 host/port 一并清空。
+    begin_stop_grace(&status.host, status.port);
     *status = ServerStatus::default();
     drop(status);
 
@@ -1853,6 +1865,69 @@ fn wait_until_ready(host: &str, port: u16, pid: u32, timeout: Duration) -> bool 
 /// 「启动失败」）与自行崩溃（照常报错）。pid 比对 + swap(0) 一次性消费，避免陈旧
 /// 记录与后续无关的启动误配。
 static LAST_USER_STOP_PID: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+
+/// 一次「用户已请求停止、但服务还没真正让出端口」的宽限窗口。
+///
+/// 为什么需要它（bug 根因）：stop_server_inner 在发出终止请求的同一时刻就把受管状态抹掉
+/// （managed=false / pid=None），而 llama-server 真正消失还要走完「礼貌请求 + 1.5s 等待 +
+/// 强制终止 + 内核拆除监听套接字」（Windows 下 CTRL_C_EVENT 对非进程组 leader 无效，几乎必然
+/// 走满这段）。这段窗口里任何一次 get_status 都会看到「端口仍在应答 + 我不认识它」，于是把
+/// 本应用自己的服务错记成「外部服务」——表现就是点一次停止必多一条那样的日志。
+///
+/// 故在此记下停止目标地址与时刻：get_status 在窗口期内对该地址的应答保持沉默——不写结论性
+/// 日志，也不翻转 running（否则前端会把 managed=false 的运行态渲染成「外部服务」徽章）。
+/// 纯后端内部状态，不影响 IPC 契约（ServerStatus / src/types.ts 均不变）。
+struct StopGrace {
+    host: String,
+    port: u16,
+    at: std::time::Instant,
+}
+
+/// 宽限期时长：覆盖 stop 全链路（1.5s 礼貌等待 + 强制终止 + 套接字回收）并留足余量。
+/// 超时后判定回归常态——若那时端口仍在应答，说明确实是外部/残留服务，理应如实提示。
+const STOP_GRACE_PERIOD: Duration = Duration::from_secs(10);
+
+static STOP_GRACE: LazyLock<std::sync::Mutex<Option<StopGrace>>> =
+    LazyLock::new(|| std::sync::Mutex::new(None));
+
+/// 窗口是否仍有效（抽成纯函数便于单测；不触碰全局静态）：地址相同且未过期。
+fn stop_grace_hit(
+    window: Option<&StopGrace>,
+    host: &str,
+    port: u16,
+    now: std::time::Instant,
+) -> bool {
+    match window {
+        Some(g) => {
+            g.host == host
+                && g.port == port
+                && now.saturating_duration_since(g.at) <= STOP_GRACE_PERIOD
+        }
+        None => false,
+    }
+}
+
+/// 记下一次用户发起的停止（同一时刻只会有一个待停止目标，故直接覆盖旧窗口）。
+fn begin_stop_grace(host: &str, port: u16) {
+    let mut slot = STOP_GRACE.lock().unwrap_or_else(|e| e.into_inner());
+    *slot = Some(StopGrace {
+        host: host.to_string(),
+        port,
+        at: std::time::Instant::now(),
+    });
+}
+
+/// 该地址是否正处于停止宽限期内。
+fn in_stop_grace(host: &str, port: u16) -> bool {
+    let slot = STOP_GRACE.lock().unwrap_or_else(|e| e.into_inner());
+    stop_grace_hit(slot.as_ref(), host, port, std::time::Instant::now())
+}
+
+/// 结束窗口（新进程接手 / 端口已确认释放）：外部服务判定回归常态。
+fn clear_stop_grace() {
+    let mut slot = STOP_GRACE.lock().unwrap_or_else(|e| e.into_inner());
+    *slot = None;
+}
 
 /// 跨调用复用的 System 实例（sysinfo 推荐常驻并增量刷新）：探测只做单进程定点刷新，
 /// 避免每次调用 new_all() 全量枚举整机进程表（受管期间每 1.5s、启动等待期每 500ms 各一次）。
@@ -2899,5 +2974,55 @@ enabled_advanced_params = ["ctx_size"]
         );
 
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // 停止宽限期：窗口只覆盖「本次停止的那个地址」，过期即失效。
+    // 判定抽成纯函数（stop_grace_hit）在此覆盖；全局静态只做一次 begin/in/clear 往返，
+    // 以免与并行用例争用同一状态。
+    #[test]
+    fn stop_grace_only_covers_stopped_address_until_expiry() {
+        let now = std::time::Instant::now();
+        let window = StopGrace {
+            host: "0.0.0.0".into(),
+            port: 8080,
+            at: now,
+        };
+        // 同一地址：命中。
+        assert!(stop_grace_hit(Some(&window), "0.0.0.0", 8080, now));
+        // 换端口 / 换 host：不命中（只认这次真正停止的那个监听器）。
+        assert!(!stop_grace_hit(Some(&window), "0.0.0.0", 8081, now));
+        assert!(!stop_grace_hit(Some(&window), "127.0.0.1", 8080, now));
+
+        // 窗口未满：仍命中；超过 STOP_GRACE_PERIOD：失效（此后端口若还在应答，应如实按外部服务处理）。
+        let elapsed = Duration::from_secs(STOP_GRACE_PERIOD.as_secs() / 2);
+        assert!(stop_grace_hit(
+            Some(&window),
+            "0.0.0.0",
+            8080,
+            now + elapsed
+        ));
+        let expired_at = now
+            .checked_sub(Duration::from_secs(STOP_GRACE_PERIOD.as_secs() + 1))
+            .unwrap_or(now);
+        let expired = StopGrace {
+            host: "0.0.0.0".into(),
+            port: 8080,
+            at: expired_at,
+        };
+        assert!(!stop_grace_hit(Some(&expired), "0.0.0.0", 8080, now));
+        // 无窗口：不命中。
+        assert!(!stop_grace_hit(None, "0.0.0.0", 8080, now));
+    }
+
+    // stop_server 记账 → get_status 查得到 → 端口确认释放/新进程接管后清掉。
+    #[test]
+    fn stop_grace_window_is_opened_and_cleared() {
+        clear_stop_grace();
+        begin_stop_grace("0.0.0.0", 8080);
+        assert!(in_stop_grace("0.0.0.0", 8080));
+        assert!(!in_stop_grace("0.0.0.0", 8081));
+
+        clear_stop_grace();
+        assert!(!in_stop_grace("0.0.0.0", 8080));
     }
 }
