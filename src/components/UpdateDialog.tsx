@@ -130,32 +130,37 @@ export function UpdateDialog({
           </div>
         )}
 
-        {status.kind === 'downloading' && (
-          <div className="modal-body">
-            <div className="modal-title">{t('update.downloading')}</div>
-            <div className="progress">
-              <div
-                className="progress-bar"
-                style={{
-                  width:
-                    status.total && status.total > 0
-                      ? `${Math.min(100, (status.received / status.total) * 100).toFixed(1)}%`
-                      : '40%',
-                }}
-              />
-            </div>
-            <div className="progress-label">
-              {status.total && status.total > 0
-                ? `${fmtBytes(status.received)} / ${fmtBytes(status.total)}`
-                : fmtBytes(status.received)}
-            </div>
-            <div className="modal-actions">
-              <Button variant="secondary" type="button" onClick={onCancel}>
-                {t('common.cancel')}
-              </Button>
-            </div>
-          </div>
-        )}
+        {status.kind === 'downloading' &&
+          (() => {
+            // `total` 还没拿到（tauri-plugin-updater 的 Started 事件未触发）时，
+            // 不能假装一个固定百分比进度；改用 indeterminate 进度条 + 阶段文案。
+            const hasTotal = status.total !== undefined && status.total > 0;
+            const barClass = hasTotal ? 'progress-bar' : 'progress-bar progress-bar--indeterminate';
+            const barStyle = hasTotal
+              ? { width: `${Math.min(100, (status.received / status.total!) * 100).toFixed(1)}%` }
+              : undefined;
+            const label = hasTotal
+              ? `${fmtBytes(status.received)} / ${fmtBytes(status.total!)}`
+              : status.received > 0
+                ? fmtBytes(status.received)
+                : '…';
+            return (
+              <div className="modal-body">
+                <div className="modal-title">
+                  {hasTotal ? t('update.downloading') : t('update.preparing')}
+                </div>
+                <div className="progress">
+                  <div className={barClass} style={barStyle} />
+                </div>
+                <div className="progress-label">{label}</div>
+                <div className="modal-actions">
+                  <Button variant="secondary" type="button" onClick={onCancel}>
+                    {t('common.cancel')}
+                  </Button>
+                </div>
+              </div>
+            );
+          })()}
 
         {status.kind === 'ready' && (
           <div className="modal-body">

@@ -1252,6 +1252,19 @@ body {
   border-radius: 999px;
   transition: width 0.2s ease;
 }
+/* 准备下载：还不知道总大小——用横向平移的窄蓝条表示「在动」，不假装具体百分比。 */
+.progress-bar--indeterminate {
+  width: 40%;
+  animation: progress-indeterminate 1.4s ease-in-out infinite;
+}
+@keyframes progress-indeterminate {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(250%);
+  }
+}
 .progress-label {
   font-size: 12px;
   color: #6b7280;
