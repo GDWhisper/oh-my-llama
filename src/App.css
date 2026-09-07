@@ -1989,8 +1989,8 @@ button:disabled {
   flex-direction: column;
   gap: 16px;
   overflow: auto;
-  /* 与左栏一致：滚动条预留，避免内容抖动 */
-  scrollbar-gutter: stable;
+  /* 不设 scrollbar-gutter: stable：右侧日志在终端面板内部滚动，右栏容器本身无溢出；
+     若常驻预留槽位会导致系统性能与日志卡片右边缘向内缩进约 8px，无法与标题卡片对齐。 */
   scrollbar-width: thin;
   scrollbar-color: #cdd3df transparent;
 }
