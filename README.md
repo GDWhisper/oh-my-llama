@@ -63,7 +63,7 @@ C:\Users\<用户名>\AppData\Roaming
 | 前端 | React 19 + TypeScript + Vite |
 | 后端 | Rust |
 | 配置格式 | TOML |
-| 进程管理 | 原生进程管理（含 Job Object 兜底） |
+| 进程管理 | portable-pty + Windows Job Object（跨平台进程守护） |
 
 ---
 
@@ -75,9 +75,9 @@ C:\Users\<用户名>\AppData\Roaming
 
 **环境要求：**
 
-- Node.js >= 18
-- Rust >= 1.75（通过 [rustup](https://rustup.rs/) 安装）
-- Tauri CLI：`cargo install tauri-cli`
+- Node.js 22（Vite 7 不支持 Node 18；与 CI 一致）
+- Rust stable（通过 [rustup](https://rustup.rs/) 安装）
+- Tauri CLI：`npm run tauri`（项目 devDependency，无需全局 `cargo install tauri-cli`）
 
 ### 本地开发
 

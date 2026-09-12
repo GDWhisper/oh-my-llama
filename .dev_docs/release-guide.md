@@ -12,7 +12,7 @@
 2. **排除项**：提交时**必须排除** `.claude/`、`.mcp.json`（外来 AI 工具脚手架，不属于本项目）。用显式 `git add <文件列表>`，不要 `git add -A`。
 3. **Git TLS**：本仓库已设 `git config http.sslBackend openssl`（仓库级），推送走 openssl 握手，避免 Windows schannel 失败。
 4. **gh 代理坑**：本机 `HTTPS_PROXY=http://127.0.0.1:7897` 通常未运行，导致 `gh` 直连报 `EOF`。所有 `gh` 命令前先 `unset HTTPS_PROXY HTTP_PROXY https_proxy http_proxy`（gh 自身走 Go TLS，不依赖 schannel，但会读取代理环境变量）。
-5. **门禁必须常绿**：前端 `npm run check:frontend`（tsc + eslint + prettier）；Rust 改动跑 `cargo check` / `cargo clippy -D warnings` / `cargo fmt --check`。详见 `agents.md` 第七节护栏。
+5. **门禁必须常绿**：提交前跑 `npm run check`（tsc + eslint + prettier + cargo fmt --check + clippy -D warnings）；改了 Rust 逻辑再跑 `cargo test --lib --manifest-path src-tauri/Cargo.toml`（CI 不跑 cargo test）。详见 `AGENTS.md`「常用命令」与「边界与禁区」。
 
 ---
 
