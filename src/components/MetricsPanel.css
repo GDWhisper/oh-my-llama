@@ -5,27 +5,31 @@
 }
 
 .metrics-grid {
+  --metrics-cols: 72px 96px 42px minmax(0, 1fr);
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 5px;
   font-size: 13px;
   font-variant-numeric: tabular-nums;
 }
 
+/* 统一四列：标签 | 条(定宽) | 百分比(定宽) | 详情(伸缩)。
+   条与百分比必须用 px 定宽——子行 font-size 更小，em 会把列算窄导致不对齐。
+   标签列 72px：英文 MEMORY / GENERATION 大写约 50–80px，40px 会折行。 */
 .metrics-row {
-  display: flex;
-  align-items: baseline;
+  display: grid;
+  grid-template-columns: var(--metrics-cols);
   gap: 10px;
+  align-items: center;
 }
 
 .metrics-label {
   color: var(--ink-3);
-  min-width: 48px;
-  flex-shrink: 0;
   font-size: 11px;
   font-weight: 700;
-  letter-spacing: 0.08em;
+  letter-spacing: 0.06em;
   text-transform: uppercase;
+  line-height: 1.2;
 }
 
 /* 数值用 UI 等宽数字：单位与百分比同宽，避免 serif 混排参差 */
@@ -39,7 +43,47 @@
   line-height: 1.3;
 }
 
+.metrics-pct {
+  text-align: right;
+}
+
+/* 详情列：弱化、可截断，长型号不挤歪条与百分比 */
+.metrics-detail {
+  font-size: 12px;
+  color: var(--ink-3);
+  font-weight: 400;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+
+/* 占用条：硬边仪表，中高负载依次换 accent / stop */
+.meter {
+  width: 100%;
+  height: 6px;
+  background: var(--line);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+
+.meter-fill {
+  height: 100%;
+  background: var(--ink-2);
+  border-radius: var(--radius);
+  transition: width 280ms ease;
+}
+
+.meter-fill.level-high {
+  background: var(--accent);
+}
+
+.meter-fill.level-critical {
+  background: var(--stop);
+}
+
 .metrics-muted {
+  grid-column: 2 / -1;
   color: var(--ink-3);
   font-weight: 400;
   font-style: italic;
@@ -48,54 +92,57 @@
 .metrics-gpu {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 4px;
 }
 
-/* 显卡型号并入 GPU 行：弱化样式跟在占用率后。整块不拆词，行宽放不下时整体换到下一行 */
-.metrics-gpu .metrics-row {
-  flex-wrap: wrap;
-}
-
-.metrics-gpu-name {
-  font-size: 12px;
-  color: var(--ink-3);
-  font-weight: 400;
-  white-space: nowrap;
-}
-
+/* 显存/温度子行：与主行同栅格，条与百分比左缘/右缘对齐 */
 .metrics-sub {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
+  display: grid;
+  grid-template-columns: var(--metrics-cols, 72px 96px 42px minmax(0, 1fr));
+  gap: 10px;
+  align-items: center;
   font-size: 12px;
   color: var(--ink-3);
-  padding-left: 52px;
   font-variant-numeric: tabular-nums;
-  line-height: 1.6;
 }
 
-/* 子项整块不拆词：换行只发生在项边界，避免 GPU 型号（如「RTX 5070 Ti」）在空格处被拆行 */
-.metrics-sub > span {
+.metrics-sub .meter {
+  height: 5px;
+}
+
+/* 百分比仍走 .metrics-value：与主行同字号字重，避免子行 12px 继承压扁 */
+.metrics-sub .metrics-value {
+  font-size: 14px;
+  font-weight: 650;
+  color: var(--ink);
+}
+
+.metrics-sub-detail {
+  grid-column: 4;
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
 }
 
-.metrics-sub-line {
-  white-space: nowrap;
-}
-
-/* 推理性能区块：与系统指标之间加一条浅分隔线，视觉上区分「机器指标」与「模型指标」 */
+/* 推理性能：无占用条，数值从条列起铺满 */
 .metrics-perf {
   border-top: 1px solid var(--line);
-  padding-top: 6px;
+  padding-top: 8px;
+  margin-top: 3px;
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 5px;
+}
+
+.metrics-perf .metrics-row {
+  grid-template-columns: 40px minmax(0, 1fr);
 }
 
 .metrics-perf-meta {
   font-size: 12px;
   color: var(--ink-3);
-  padding-left: 52px;
+  padding-left: 82px;
   font-variant-numeric: tabular-nums;
 }
 
