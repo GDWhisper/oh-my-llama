@@ -23,6 +23,12 @@ export const zh = {
   'app.share.copiedNamed': '已复制 {name} 的参数到剪切板',
   'app.share.copyFailed': '复制失败，请手动复制',
 
+  // 自定义标题栏（decorations: false）
+  'titlebar.minimize': '最小化',
+  'titlebar.maximize': '最大化',
+  'titlebar.restore': '还原',
+  'titlebar.close': '关闭',
+
   // 运行状态
   'status.running': '运行中',
   'status.external': '外部服务',
@@ -648,6 +654,11 @@ export const en: Record<MessageKey, string> = {
   'app.share.copied': 'Launch parameters copied to clipboard',
   'app.share.copiedNamed': 'Copied {name} parameters to clipboard',
   'app.share.copyFailed': 'Copy failed, please copy manually',
+
+  'titlebar.minimize': 'Minimize',
+  'titlebar.maximize': 'Maximize',
+  'titlebar.restore': 'Restore',
+  'titlebar.close': 'Close',
 
   'status.running': 'Running',
   'status.external': 'External',

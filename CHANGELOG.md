@@ -4,6 +4,20 @@
 
 > 本文件为**详细改动历史**（含涉及的文件与实现机制）；GitHub Release 页面为对应版本的**总结性**说明。
 
+## [0.2.3] - 2026-09-14
+
+### 新增功能
+- **自定义标题栏与暖纸米色主题**：`src-tauri/tauri.conf.json` 窗口 `decorations: false`，新增 `src/components/TitleBar.tsx`（品牌区 OML 标 + 最小化/最大化还原/关闭），`src-tauri/capabilities/default.json` 补 `core:window:allow-minimize` / `toggle-maximize` / `maximize` / `unmaximize` / `close` / `start-dragging`；`src/App.css` 整体切换为暖纸仪表台 token（米黄底 `#faf5e6`、赤陶 accent `#c45c26`、木纹棕标题栏、卡片表面与描边全套变量），`src/App.tsx` 外层包 `TitleBar` + `app-shell`，日志终端仍保持深色。`src/i18n/messages.ts` 新增 `titlebar.minimize` / `titlebar.maximize` / `titlebar.restore` / `titlebar.close` 双语键。
+- **系统性能面板占用条**：`src/components/MetricsPanel.tsx` 新增 `Meter` 组件，CPU / 内存 / GPU 利用率与显存占用改为横向占用条 + 百分比，≥70% 高亮、≥90% 用停止色；内存与显存明细（已用/总量、温度）下移为次要行。收起态仍显示紧凑百分比摘要。
+
+### 功能优化
+- **主窗口默认宽度 1120**：`src-tauri/tauri.conf.json` 的 `width` 由 1100 调整为 1120，配合性能面板栅格对齐。
+- **性能面板与右栏卡片栅格对齐**：`src/components/MetricsPanel.css` 行布局改为 label / meter / 百分比 / 明细固定列，与右侧日志卡片边缘对齐。
+
+### Bug 修复
+- **右栏卡片右边缘向内缩进约 8px**：`src/App.css` 的 `.log-side` 移除 `scrollbar-gutter: stable`（右栏容器本身无溢出，日志在终端面板内部滚动；常驻预留槽导致系统性能与日志卡片无法与标题卡片对齐）。
+- **标题栏拖拽误触发与加载期无窗控**：`src/components/TitleBar.tsx` 拖拽改为 Pointer 事件 + 位移阈值武装（未最大化/从其它窗口点入均不因单击立刻拖走或还原），用 Pointer Capture 保证划出标题栏仍可完成拖拽；`src/App.tsx` 配置加载中（`!config`）仍渲染 `TitleBar`，避免 `decorations:false` 下加载期无系统窗控。
+
 ## [0.2.2] - 2026-09-07
 
 ### 新增功能

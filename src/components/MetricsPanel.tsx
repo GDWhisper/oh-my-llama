@@ -41,6 +41,26 @@ function avgTps(tokensTotal: number, msTotal: number): string {
   return fmtTps(tokensTotal / (msTotal / 1000));
 }
 
+/** 占用条与百分比共用：0–100，非法值归 0；≥70 高亮 accent，≥90 用 stop */
+function clampPct(value: number): number {
+  if (!Number.isFinite(value)) return 0;
+  return Math.max(0, Math.min(100, value));
+}
+
+function Meter({ value }: { value: number }) {
+  const pct = clampPct(value);
+  const level = pct >= 90 ? ' level-critical' : pct >= 70 ? ' level-high' : '';
+  return (
+    <div className="meter" aria-hidden>
+      <div className={`meter-fill${level}`} style={{ width: `${pct}%` }} />
+    </div>
+  );
+}
+
+function fmtPct(value: number): string {
+  return `${clampPct(value).toFixed(0)}%`;
+}
+
 export function MetricsPanel({ perf }: { perf: PerfSnapshot | null }) {
   const { t } = useI18n();
   const [snap, setSnap] = useState<MetricsSnapshot | null>(null);
@@ -100,15 +120,17 @@ export function MetricsPanel({ perf }: { perf: PerfSnapshot | null }) {
             {/* CPU */}
             <div className="metrics-row">
               <span className="metrics-label">{t('metrics.cpu')}</span>
-              <span className="metrics-value">{snap.cpu_usage.toFixed(0)}%</span>
+              <Meter value={snap.cpu_usage} />
+              <span className="metrics-value metrics-pct">{fmtPct(snap.cpu_usage)}</span>
             </div>
 
             {/* 内存 */}
             <div className="metrics-row">
               <span className="metrics-label">{t('metrics.memory')}</span>
-              <span className="metrics-value">
-                {fmtMB(snap.mem_used_mb)} / {fmtMB(snap.mem_total_mb)} ({snap.mem_usage.toFixed(0)}
-                %)
+              <Meter value={snap.mem_usage} />
+              <span className="metrics-value metrics-pct">{fmtPct(snap.mem_usage)}</span>
+              <span className="metrics-detail">
+                {fmtMB(snap.mem_used_mb)} / {fmtMB(snap.mem_total_mb)}
               </span>
             </div>
 
@@ -116,38 +138,49 @@ export function MetricsPanel({ perf }: { perf: PerfSnapshot | null }) {
             {snap.gpus.length === 0 ? (
               <div className="metrics-row">
                 <span className="metrics-label">{t('metrics.gpu')}</span>
-                <span className="metrics-value metrics-muted">{t('metrics.gpuNone')}</span>
+                <span className="metrics-muted">{t('metrics.gpuNone')}</span>
               </div>
             ) : (
-              snap.gpus.map((g, i) => (
-                <div className="metrics-gpu" key={i}>
-                  <div className="metrics-row">
-                    <span className="metrics-label">
-                      {t('metrics.gpu')}
-                      {snap.gpus.length > 1 ? ` ${i + 1}` : ''}
-                    </span>
-                    <span className="metrics-value">{g.usage.toFixed(0)}%</span>
-                    <span className="metrics-gpu-name">{g.name}</span>
-                  </div>
-                  {(g.vram_total_mb > 0 || g.temperature !== null) && (
-                    <div className="metrics-sub">
-                      <span className="metrics-sub-line">
-                        {g.vram_total_mb > 0 && (
-                          <>
-                            {t('metrics.vram')} {fmtMB(g.vram_used_mb)} / {fmtMB(g.vram_total_mb)}
-                          </>
-                        )}
-                        {g.vram_total_mb > 0 && g.temperature !== null && ' · '}
-                        {g.temperature !== null && (
-                          <>
-                            {t('metrics.temp')} {g.temperature.toFixed(0)}°C
-                          </>
-                        )}
+              snap.gpus.map((g, i) => {
+                const hasVram = g.vram_total_mb > 0;
+                const vramPct = hasVram ? (g.vram_used_mb / g.vram_total_mb) * 100 : 0;
+                const subBits: string[] = [];
+                if (hasVram) {
+                  subBits.push(`${fmtMB(g.vram_used_mb)} / ${fmtMB(g.vram_total_mb)}`);
+                }
+                if (g.temperature !== null) {
+                  subBits.push(`${t('metrics.temp')} ${g.temperature.toFixed(0)}°C`);
+                }
+                return (
+                  <div className="metrics-gpu" key={`${g.name}-${i}`}>
+                    <div className="metrics-row">
+                      <span className="metrics-label">
+                        {t('metrics.gpu')}
+                        {snap.gpus.length > 1 ? ` ${i + 1}` : ''}
+                      </span>
+                      <Meter value={g.usage} />
+                      <span className="metrics-value metrics-pct">{fmtPct(g.usage)}</span>
+                      <span className="metrics-detail" title={g.name}>
+                        {g.name}
                       </span>
                     </div>
-                  )}
-                </div>
-              ))
+                    {subBits.length > 0 && (
+                      <div className="metrics-sub">
+                        {hasVram ? (
+                          <>
+                            <span className="metrics-label">{t('metrics.vram')}</span>
+                            <Meter value={vramPct} />
+                            <span className="metrics-value metrics-pct">{fmtPct(vramPct)}</span>
+                          </>
+                        ) : (
+                          <span className="metrics-label" />
+                        )}
+                        <span className="metrics-sub-detail">{subBits.join(' · ')}</span>
+                      </div>
+                    )}
+                  </div>
+                );
+              })
             )}
 
             {/* 推理性能：来自 llama-server 日志 timings 行（最近一次请求 + 进程生命周期累计平均）。 */}
@@ -177,18 +210,16 @@ export function MetricsPanel({ perf }: { perf: PerfSnapshot | null }) {
           // 收起态：仅展示关键数值（一行紧凑）
           <div className="metrics-compact">
             <span className="metrics-value">
-              {t('metrics.cpu')} {snap.cpu_usage.toFixed(0)}%
+              {t('metrics.cpu')} {fmtPct(snap.cpu_usage)}
             </span>
             <span className="metrics-sep">·</span>
             <span className="metrics-value">
-              {t('metrics.memory')} {snap.mem_usage.toFixed(0)}%
+              {t('metrics.memory')} {fmtPct(snap.mem_usage)}
             </span>
             <span className="metrics-sep">·</span>
             <span className="metrics-value">
               {t('metrics.gpu')}{' '}
-              {snap.gpus.length === 0
-                ? '—'
-                : snap.gpus.map((g) => g.usage.toFixed(0) + '%').join(' / ')}
+              {snap.gpus.length === 0 ? '—' : snap.gpus.map((g) => fmtPct(g.usage)).join(' / ')}
             </span>
             {snap.gpus.length > 0 && (
               <>
@@ -197,9 +228,7 @@ export function MetricsPanel({ perf }: { perf: PerfSnapshot | null }) {
                   {t('metrics.vram')}{' '}
                   {snap.gpus
                     .map((g) =>
-                      g.vram_total_mb > 0
-                        ? ((g.vram_used_mb / g.vram_total_mb) * 100).toFixed(0) + '%'
-                        : '—',
+                      g.vram_total_mb > 0 ? fmtPct((g.vram_used_mb / g.vram_total_mb) * 100) : '—',
                     )
                     .join(' / ')}
                 </span>
