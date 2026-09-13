@@ -159,6 +159,11 @@ body {
   color: #fff8ee;
 }
 
+.titlebar-btn:focus-visible {
+  outline: 2px solid #fff8ee;
+  outline-offset: -2px;
+}
+
 .titlebar-btn:active {
   background: #7a4e24;
   color: #fff8ee;

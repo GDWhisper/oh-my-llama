@@ -338,11 +338,15 @@ export default function App() {
   };
 
   // 加载门前拦截：配置从后端拉取完成前不渲染表单，避免任何默认值落到前端硬编码。
+  // decorations:false 下必须仍挂 TitleBar，否则加载期窗口无任何系统边框与窗控。
   if (!config) {
     return (
       <main className="app">
-        <div style={{ padding: '48px', textAlign: 'center', color: '#888' }}>
-          {t('app.loading')}
+        <TitleBar />
+        <div className="app-shell">
+          <div style={{ padding: '48px', textAlign: 'center', color: 'var(--ink-3)' }}>
+            {t('app.loading')}
+          </div>
         </div>
       </main>
     );

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import type { MouseEvent as ReactMouseEvent } from 'react';
+import type { MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent } from 'react';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { useI18n } from '../i18n';
 
@@ -10,7 +10,10 @@ const DRAG_THRESHOLD_PX = 6;
  * 自定义标题栏：与主界面同一套暖纸 token。
  * 不用 data-tauri-drag-region：其 mousedown 即 startDragging，
  * 在最大化窗口上会被系统当成拖拽而立刻还原（单击空白变小）。
- * 改为：未最大化直接拖；最大化时超过位移阈值才 startDragging。
+ * 一律先武装位移，超过阈值才 startDragging：
+ * - 最大化：单击不动不还原
+ * - 未聚焦时从其它窗口点进来：该次 mousedown 只做激活，位移为 0，不拖走窗口
+ * 用 Pointer Capture：贴近条下沿按下后划出标题栏仍能完成拖拽（不用 mouseleave 解除武装）。
  * 双击空白自行 toggleMaximize（避免与原生区域叠两次）。
  * 关闭仍走后端 CloseRequested（托盘/退出分流不变）。
  */
@@ -51,20 +54,27 @@ export function TitleBar() {
   const isControl = (target: EventTarget | null): boolean =>
     target instanceof Element && !!target.closest('.titlebar-btn');
 
-  const onDragMouseDown = (e: ReactMouseEvent<HTMLDivElement>) => {
-    if (e.button !== 0 || e.detail !== 1) return;
+  const onDragPointerDown = (e: ReactPointerEvent<HTMLDivElement>) => {
+    // PointerEvent.detail 在 pointerdown 上常为 0（不是 Mouse 的 1），不能用 detail 过滤
+    if (e.button !== 0) return;
     if (isControl(e.target)) return;
-    if (maximized) {
-      // 先武装位移监听，不立刻 startDragging，避免单击即还原
-      dragArmed.current = { x: e.screenX, y: e.screenY };
-      return;
+    dragArmed.current = { x: e.screenX, y: e.screenY };
+    // 捕获后 pointermove/up 仍指向标题栏，划出 36px 条也不会中断拖拽判定
+    try {
+      e.currentTarget.setPointerCapture(e.pointerId);
+    } catch {
+      // 捕获失败则退回元素内事件，仍可用
     }
-    void win.startDragging();
   };
 
-  const onDragMouseMove = (e: ReactMouseEvent<HTMLDivElement>) => {
+  const onDragPointerMove = (e: ReactPointerEvent<HTMLDivElement>) => {
     const armed = dragArmed.current;
     if (!armed) return;
+    // 按键已松开时忽略，避免捕获异常导致“无按键仍在武装”
+    if ((e.buttons & 1) === 0) {
+      dragArmed.current = null;
+      return;
+    }
     if (
       Math.abs(e.screenX - armed.x) < DRAG_THRESHOLD_PX &&
       Math.abs(e.screenY - armed.y) < DRAG_THRESHOLD_PX
@@ -75,11 +85,17 @@ export function TitleBar() {
     void win.startDragging();
   };
 
-  const onDragMouseUp = () => {
+  const onDragPointerUp = (e: ReactPointerEvent<HTMLDivElement>) => {
     dragArmed.current = null;
+    try {
+      e.currentTarget.releasePointerCapture(e.pointerId);
+    } catch {
+      // 未捕获时忽略
+    }
   };
 
   const onDragDoubleClick = (e: ReactMouseEvent<HTMLDivElement>) => {
+    if (e.button !== 0) return;
     if (isControl(e.target)) return;
     void win.toggleMaximize();
   };
@@ -87,10 +103,10 @@ export function TitleBar() {
   return (
     <div
       className="titlebar"
-      onMouseDown={onDragMouseDown}
-      onMouseMove={onDragMouseMove}
-      onMouseUp={onDragMouseUp}
-      onMouseLeave={onDragMouseUp}
+      onPointerDown={onDragPointerDown}
+      onPointerMove={onDragPointerMove}
+      onPointerUp={onDragPointerUp}
+      onPointerCancel={onDragPointerUp}
       onDoubleClick={onDragDoubleClick}
     >
       <div className="titlebar-brand">
