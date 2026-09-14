@@ -6,8 +6,9 @@ import { useI18n } from '../i18n';
 import { REPO_URL } from '../lib/repo';
 import { LangSwitch } from './LangSwitch';
 import { Button } from './Button';
-import type { AppSettings } from '../types';
+import type { AppSettings, UiTheme } from '../types';
 import type { PendingUpdate } from '../hooks/useUpdater';
+import { applyUiTheme, normalizeUiTheme } from '../lib/uiTheme';
 
 // 各分组标题前的装饰小图标：stroke 风格与弹窗关闭按钮一致，仅辅助扫读，不参与语义。
 const sectionIcons = {
@@ -16,6 +17,14 @@ const sectionIcons = {
       <circle cx="8" cy="8" r="6.2" />
       <ellipse cx="8" cy="8" rx="2.9" ry="6.2" />
       <path d="M2.4 5.6h11.2M2.4 10.4h11.2" />
+    </svg>
+  ),
+  theme: (
+    <svg width="14" height="14" viewBox="0 0 16 16" aria-hidden="true">
+      <path d="M8 1.8a6.2 6.2 0 1 0 0 12.4c.9 0 1.4-.7 1.4-1.4 0-.4-.2-.8-.5-1.1-.3-.3-.4-.6-.4-1 0-.8.6-1.4 1.4-1.4H12A2.2 2.2 0 0 0 14.2 7 6.2 6.2 0 0 0 8 1.8Z" />
+      <circle cx="5.2" cy="7" r="0.9" fill="currentColor" stroke="none" />
+      <circle cx="7.2" cy="4.6" r="0.9" fill="currentColor" stroke="none" />
+      <circle cx="10.2" cy="4.8" r="0.9" fill="currentColor" stroke="none" />
     </svg>
   ),
   update: (
@@ -50,7 +59,7 @@ interface Props {
   onOpenUpdate: () => void;
 }
 
-// 设置浮窗：居中弹层，承载语言、更新（版本 / 自动检查 / 代理）、关闭窗口行为与关于四组设置。
+// 设置浮窗：居中弹层，承载语言、界面风格、更新（版本 / 自动检查 / 代理）、关闭窗口行为与关于五组设置。
 // 复用公共 modal 遮罩与样式。
 export function SettingsDialog({
   open,
@@ -68,6 +77,8 @@ export function SettingsDialog({
   const [proxyError, setProxyError] = useState('');
   // 窗口关闭行为三态：null = 每次询问（未选择过的默认），true = 最小化到托盘，false = 直接退出。
   const [closePref, setClosePref] = useState<boolean | null>(null);
+  // 界面风格：null = 未设置（按羊皮纸渲染），'default' | 'parchment' = 用户选过。
+  const [uiTheme, setUiTheme] = useState<UiTheme | null>(null);
 
   useEffect(() => {
     if (!open) return;
@@ -102,11 +113,13 @@ export function SettingsDialog({
         setProxy(s.update_proxy ?? '');
         setAutoCheck(Boolean(s.auto_check_updates));
         setClosePref(s.minimize_to_tray ?? null);
+        setUiTheme(normalizeUiTheme(s.ui_theme));
       })
       .catch(() => {
         setProxy('');
         setAutoCheck(false);
         setClosePref(null);
+        setUiTheme('parchment');
       });
   }, [open]);
 
@@ -115,6 +128,19 @@ export function SettingsDialog({
     setClosePref(pref);
     invoke<AppSettings>('set_close_pref', { pref })
       .then((s) => setClosePref(s.minimize_to_tray ?? null))
+      .catch(() => {});
+  };
+
+  // 切换界面风格：先写 DOM 让整页 token 立刻换，再落盘；失败时以后端返回值校准。
+  const saveUiTheme = (theme: UiTheme) => {
+    setUiTheme(theme);
+    applyUiTheme(theme);
+    invoke<AppSettings>('set_ui_theme', { theme })
+      .then((s) => {
+        const next = normalizeUiTheme(s.ui_theme);
+        setUiTheme(next);
+        applyUiTheme(next);
+      })
       .catch(() => {});
   };
 
@@ -176,6 +202,36 @@ export function SettingsDialog({
               <span className="settings-hint">{t('settings.languageHint')}</span>
             </div>
             <LangSwitch variant="list" />
+          </div>
+
+          <div className="settings-section">
+            <div className="settings-section-head">
+              <span className="settings-label">
+                {sectionIcons.theme}
+                {t('settings.theme')}
+              </span>
+              <span className="settings-hint">{t('settings.themeHint')}</span>
+            </div>
+            <label className="settings-option-row">
+              <input
+                type="radio"
+                name="ui-theme"
+                className="settings-checkbox"
+                checked={uiTheme === 'default'}
+                onChange={() => saveUiTheme('default')}
+              />
+              <span className="settings-check-label">{t('settings.themeDefault')}</span>
+            </label>
+            <label className="settings-option-row">
+              <input
+                type="radio"
+                name="ui-theme"
+                className="settings-checkbox"
+                checked={uiTheme === 'parchment'}
+                onChange={() => saveUiTheme('parchment')}
+              />
+              <span className="settings-check-label">{t('settings.themeParchment')}</span>
+            </label>
           </div>
 
           <div className="settings-section">

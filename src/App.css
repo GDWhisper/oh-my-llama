@@ -1,5 +1,7 @@
-/* 暖纸仪表台 design tokens（D 布局结构 + 三色暖纸色板） */
-:root {
+/* 风格切换：html[data-theme=default|parchment]。
+   默认（未设置 / parchment）= 暖纸仪表台；default = 暖纸落地前的冷灰蓝现代风。 */
+:root,
+[data-theme='parchment'] {
   --bg: #faf5e6;
   --surface: #fdfaf3;
   --surface-2: #f9f0c8;
@@ -40,6 +42,81 @@
   --serif: Georgia, 'Times New Roman', 'Songti SC', serif;
   --mono: 'Cascadia Code', 'Cascadia Mono', Consolas, 'SF Mono', ui-monospace, monospace;
   --ui: 'Segoe UI Variable Text', 'Segoe UI', 'Microsoft YaHei', system-ui, sans-serif;
+  /* 结构差异 token：标题卡/弹窗硬描边 vs 软描边，标题栏木纹 vs 现代深灰 */
+  --header-border: var(--ink);
+  --card-shadow: none;
+  --modal-shadow: 0 10px 40px rgba(26, 26, 26, 0.18);
+  --titlebar-bg: #8b5a2b;
+  --titlebar-line: #7a4e24;
+  --titlebar-ink: #f0e6d4;
+  --titlebar-ink-hover: #fff8ee;
+  --titlebar-hover: #9a6838;
+  --titlebar-active: #7a4e24;
+
+  font-family: var(--ui);
+  font-size: 14px;
+  line-height: 22px;
+  font-weight: 400;
+  color: var(--ink);
+  background-color: var(--bg);
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  -webkit-text-size-adjust: 100%;
+}
+
+/* 默认风格：暖纸主题落地前的冷灰蓝现代风（保留原色板与圆角） */
+[data-theme='default'] {
+  --bg: #f3f4f6;
+  --surface: #ffffff;
+  --surface-2: #f9fafb;
+  --control: #ffffff;
+  --line: #e5e7eb;
+  --line-soft: #eef0f3;
+  --ink: #111827;
+  --ink-2: #374151;
+  --ink-3: #6b7280;
+  --accent: #2563eb;
+  --accent-ink: #1d4ed8;
+  --accent-soft: rgba(37, 99, 235, 0.1);
+  --accent-ring: rgba(37, 99, 235, 0.22);
+  --accent-disabled: #93c5fd;
+  --ok: #16a34a;
+  --ok-ink: #065f46;
+  --ok-soft: #d1fae5;
+  --stop: #dc2626;
+  --stop-ink: #991b1b;
+  --stop-soft: #fee2e2;
+  --warn-ink: #b45309;
+  --warn-soft: #fef3c7;
+  --custom: #6366f1;
+  --custom-soft: rgba(99, 102, 241, 0.08);
+  --custom-ring: rgba(99, 102, 241, 0.22);
+  --code-bg: #0b1020;
+  --code-bar: #111a33;
+  --code-line: #26314f;
+  --code-hover: #1b2547;
+  --code: #34d399;
+  --code-info: #38bdf8;
+  --code-warn: #fbbf24;
+  --code-error: #f87171;
+  --code-muted: #64748b;
+  --code-text-soft: #cbd5e1;
+  --radius: 8px;
+  --radius-pill: 999px;
+  --serif: Inter, Avenir, Helvetica, Arial, sans-serif;
+  --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace;
+  --ui: Inter, Avenir, Helvetica, Arial, sans-serif;
+  --header-border: var(--line);
+  --card-shadow: 0 1px 2px rgba(15, 23, 42, 0.05);
+  --modal-shadow: 0 10px 40px rgba(15, 23, 42, 0.12);
+  --titlebar-bg: #ffffff;
+  --titlebar-line: #e5e7eb;
+  --titlebar-ink: #111827;
+  --titlebar-ink-hover: #111827;
+  --titlebar-hover: #f3f4f6;
+  --titlebar-active: #e5e7eb;
 
   font-family: var(--ui);
   font-size: 14px;
@@ -79,14 +156,14 @@ body {
   padding: 0;
 }
 
-/* 自定义标题栏：木纹棕顶条 */
+/* 自定义标题栏：色板随主题切换（羊皮纸=木纹棕，默认=白底现代风） */
 .titlebar {
   display: flex;
   align-items: center;
   height: 36px;
   padding: 0 0 0 12px;
-  background: #8b5a2b;
-  border-bottom: 1px solid #7a4e24;
+  background: var(--titlebar-bg);
+  border-bottom: 1px solid var(--titlebar-line);
   user-select: none;
   cursor: default;
   flex-shrink: 0;
@@ -102,26 +179,18 @@ body {
   height: 100%;
 }
 
+/* 标题栏 logo：public/oml-logo.svg（由 app-icon.svg 同步），25px = 母版 25 格 1:1 */
 .titlebar-mark {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 20px;
-  height: 20px;
-  border-radius: var(--radius);
-  background: var(--ink);
-  color: var(--bg);
-  font-family: var(--mono);
-  font-size: 8px;
-  font-weight: 700;
-  letter-spacing: 0.02em;
+  display: block;
+  width: 25px;
+  height: 25px;
   flex-shrink: 0;
 }
 
 .titlebar-title {
   font-size: 12.5px;
   font-weight: 600;
-  color: #f0e6d4;
+  color: var(--titlebar-ink);
   letter-spacing: -0.01em;
   white-space: nowrap;
   overflow: hidden;
@@ -143,7 +212,7 @@ body {
   border: none;
   border-radius: 0;
   background: transparent;
-  color: #f0e6d4;
+  color: var(--titlebar-ink);
   cursor: pointer;
   display: inline-flex;
   align-items: center;
@@ -155,18 +224,18 @@ body {
 }
 
 .titlebar-btn:hover {
-  background: #9a6838;
-  color: #fff8ee;
+  background: var(--titlebar-hover);
+  color: var(--titlebar-ink-hover);
 }
 
 .titlebar-btn:focus-visible {
-  outline: 2px solid #fff8ee;
+  outline: 2px solid var(--titlebar-ink);
   outline-offset: -2px;
 }
 
 .titlebar-btn:active {
-  background: #7a4e24;
-  color: #fff8ee;
+  background: var(--titlebar-active);
+  color: var(--titlebar-ink-hover);
 }
 
 .titlebar-btn-close:hover {
@@ -196,8 +265,8 @@ body {
   padding: 14px 18px;
   border-radius: var(--radius);
   background: var(--surface);
-  border: 1px solid var(--ink);
-  box-shadow: none;
+  border: 1px solid var(--header-border);
+  box-shadow: var(--card-shadow);
 }
 
 .header-top {
@@ -271,7 +340,7 @@ body {
   border-radius: var(--radius);
   background: var(--surface);
   border: 1px solid var(--line);
-  box-shadow: none;
+  box-shadow: var(--card-shadow);
 }
 
 .panel h2 {
@@ -1045,8 +1114,8 @@ body {
   border-radius: var(--radius);
   padding: 20px 22px;
   width: min(360px, 90vw);
-  box-shadow: 0 10px 40px rgba(26, 26, 26, 0.18);
-  border: 1px solid var(--ink);
+  box-shadow: var(--modal-shadow);
+  border: 1px solid var(--header-border);
   display: flex;
   flex-direction: column;
   gap: 12px;

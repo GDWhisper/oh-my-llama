@@ -103,6 +103,8 @@ export interface PerfSnapshot {
 // true = 最小化到系统托盘；false = 直接退出。
 // show_log_times = 日志是否显示时间戳：null = 未设置（默认显示，兼容旧 settings.json）；
 // true = 显示，false = 隐藏（隐藏时时间列宽度让给日志正文）。
+// ui_theme = 界面风格：null = 未设置（按羊皮纸 parchment 渲染）；
+// 'default' | 'parchment' = 用户在设置里选择过。
 export interface AppSettings {
   update_proxy: string;
   auto_check_updates: boolean;
@@ -110,7 +112,10 @@ export interface AppSettings {
   recent_model_dirs: string[];
   minimize_to_tray: boolean | null;
   show_log_times: boolean | null;
+  ui_theme: string | null;
 }
+
+export type UiTheme = 'default' | 'parchment';
 
 // 路径输入框的候选项，llama-server 路径与模型目录共用
 // （list_recent_servers / remove_recent_server / list_recent_model_dirs / remove_recent_model_dir 的载荷）。
