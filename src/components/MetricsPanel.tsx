@@ -10,6 +10,7 @@ interface GpuMetrics {
   vram_total_mb: number;
   vram_used_mb: number;
   temperature: number | null;
+  power_usage_w: number | null;
 }
 
 interface MetricsSnapshot {
@@ -151,6 +152,9 @@ export function MetricsPanel({ perf }: { perf: PerfSnapshot | null }) {
                 if (g.temperature !== null) {
                   subBits.push(`${t('metrics.temp')} ${g.temperature.toFixed(0)}°C`);
                 }
+                if (g.power_usage_w !== null) {
+                  subBits.push(`${t('metrics.power')} ${g.power_usage_w.toFixed(0)} W`);
+                }
                 return (
                   <div className="metrics-gpu" key={`${g.name}-${i}`}>
                     <div className="metrics-row">
@@ -229,6 +233,19 @@ export function MetricsPanel({ perf }: { perf: PerfSnapshot | null }) {
                   {snap.gpus
                     .map((g) =>
                       g.vram_total_mb > 0 ? fmtPct((g.vram_used_mb / g.vram_total_mb) * 100) : '—',
+                    )
+                    .join(' / ')}
+                </span>
+              </>
+            )}
+            {snap.gpus.some((g) => g.power_usage_w !== null) && (
+              <>
+                <span className="metrics-sep">·</span>
+                <span className="metrics-value">
+                  {t('metrics.power')}{' '}
+                  {snap.gpus
+                    .map((g) =>
+                      g.power_usage_w !== null ? `${g.power_usage_w.toFixed(0)} W` : '—',
                     )
                     .join(' / ')}
                 </span>
