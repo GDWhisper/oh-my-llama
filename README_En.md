@@ -2,7 +2,7 @@
 
 [中文](README.md) | **English**
 
-> Make launching and managing `llama-server` parameters effortless.
+> Make launching and managing [llama-server](https://github.com/ggml-org/llama.cpp) parameters effortless.
 
 Oh My Llama is a desktop tool for centrally managing `llama-server` launch configurations, parameters, and logs. It supports multi-configuration switching, one-click command-line parsing, one-click parameter sharing, and real-time process control — so you can say goodbye to the pain of hand-assembling command lines.
 
