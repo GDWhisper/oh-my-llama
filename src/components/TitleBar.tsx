@@ -16,6 +16,9 @@ const DRAG_THRESHOLD_PX = 6;
  * 用 Pointer Capture：贴近条下沿按下后划出标题栏仍能完成拖拽（不用 mouseleave 解除武装）。
  * 双击空白自行 toggleMaximize（避免与原生区域叠两次）。
  * 关闭仍走后端 CloseRequested（托盘/退出分流不变）。
+ *
+ * Logo：唯一真相源 src-tauri/app-icon.svg，由 scripts/gen_app_icons.py
+ * 同步到 public/oml-logo.svg。显示尺寸 25px = 母版 25 格 1:1，笔画不缩放、不发虚。
  */
 export function TitleBar() {
   const { t } = useI18n();
@@ -110,9 +113,14 @@ export function TitleBar() {
       onDoubleClick={onDragDoubleClick}
     >
       <div className="titlebar-brand">
-        <span className="titlebar-mark" aria-hidden="true">
-          OML
-        </span>
+        <img
+          className="titlebar-mark"
+          src="/oml-logo.svg"
+          alt=""
+          width={25}
+          height={25}
+          draggable={false}
+        />
         <span className="titlebar-title">Oh My Llama</span>
       </div>
       <div className="titlebar-controls">

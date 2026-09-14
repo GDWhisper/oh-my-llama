@@ -34,6 +34,9 @@ use params::{find_spec, get_param_registry};
 mod perf;
 use perf::{get_perf_stats, record_log_line, reset_perf};
 
+// 各 DPI 档位下 shell 实际请求的图标尺寸（原始 RGBA），由 scripts/gen_app_icons.py 生成
+mod icon_assets;
+
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
 pub struct ServerConfig {
     pub llama_server_path: String,
@@ -596,6 +599,9 @@ pub fn run() {
                     }
                 })
                 .build(app)?;
+
+            // 覆盖 icon.ico 首帧那份兜底图：按当前 DPI 换成精确尺寸，避免 shell 双线性缩放
+            apply_dpi_icons(app.handle());
             Ok(())
         })
         .on_window_event(|window, event| {
@@ -623,6 +629,11 @@ pub fn run() {
                     }
                 }
             }
+            // 改缩放 / 把窗口拖到另一块 DPI 不同的显示器后，任务栏与托盘要的像素尺寸
+            // 都变了 —— 重新取对应档位的精确尺寸图，否则又会退化成双线性缩放。
+            if let tauri::WindowEvent::ScaleFactorChanged { .. } = event {
+                apply_dpi_icons(window.app_handle());
+            }
         })
         .run(tauri::generate_context!())
         .expect("error while running oh my llama");
@@ -632,6 +643,41 @@ pub fn run() {
 const TRAY_ID: &str = "main-tray";
 const TRAY_ID_SHOW: &str = "tray-show";
 const TRAY_ID_QUIT: &str = "tray-quit";
+
+// ── 任务栏 / 托盘图标：按 DPI 喂「精确尺寸」的图 ────────────────────────
+// tao 只把 `default_window_icon()`（= icon.ico 首帧）设成 `ICON_SMALL`，从不设
+// `ICON_BIG`（Tauri 也没接 tao 的 `set_taskbar_icon`）。于是 shell 必须把它手里那张
+// 位图**双线性**缩放到自己要的尺寸 —— 任务栏按钮 = 24 × DPI 缩放，托盘 = 16 × DPI 缩放。
+// 像素风字形只要不是 1:1 就会被抹灰：本机 150% DPI（任务栏要 36px）实测
+// 「32px 源 → 36px」与真实任务栏截图平均通道差 **0.78**（完全复现「发虚」），
+// 笔画从纯白掉到 ~57% 灰，与标题栏那个矢量 logo 的锐利观感明显对不上。
+// 所以这里给 shell 一张尺寸**正好等于它要的**图，1:1 落色。
+// 尺寸表与 RGBA 均由 scripts/gen_app_icons.py 生成（见 icon_assets.rs）。
+const TASKBAR_ICON_BASE: f64 = 24.0; // 任务栏按钮逻辑尺寸
+const TRAY_ICON_BASE: f64 = 16.0; // = SM_CXSMICON，托盘图标逻辑尺寸
+
+/// 取 `base × scale` 对应的精确尺寸图标；未收录时退回最接近的一张（会多一次缩放）。
+fn dpi_icon(scale: f64, base: f64) -> tauri::image::Image<'static> {
+    let want = (base * scale).round().max(1.0) as u32;
+    let (bytes, size) = icon_assets::nearest(want);
+    if !icon_assets::is_exact(want) {
+        eprintln!("[icon] 未收录 {want}px 图标，退回 {size}px（shell 会再缩放一次）");
+    }
+    tauri::image::Image::new(bytes, size, size)
+}
+
+/// 把窗口图标与托盘图标换成当前 DPI 对应的精确尺寸版本。
+/// 托盘尚未建立时只处理窗口那一半（`tray_by_id` 返回 `None`）。
+fn apply_dpi_icons(app: &AppHandle) {
+    let Some(win) = app.get_webview_window("main") else {
+        return;
+    };
+    let scale = win.scale_factor().unwrap_or(1.0);
+    let _ = win.set_icon(dpi_icon(scale, TASKBAR_ICON_BASE));
+    if let Some(tray) = app.tray_by_id(TRAY_ID) {
+        let _ = tray.set_icon(Some(dpi_icon(scale, TRAY_ICON_BASE)));
+    }
+}
 
 fn show_main_window(app: &AppHandle) {
     if let Some(win) = app.get_webview_window("main") {
