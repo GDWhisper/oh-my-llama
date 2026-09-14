@@ -62,6 +62,14 @@ function fmtPct(value: number): string {
   return `${clampPct(value).toFixed(0)}%`;
 }
 
+/** 「NVIDIA GeForce RTX 5070 Ti」→「RTX 5070 Ti」；完整型号仍走 title。 */
+function shortGpuName(name: string): string {
+  return name
+    .replace(/^NVIDIA\s+GeForce\s+/i, '')
+    .replace(/^NVIDIA\s+/i, '')
+    .trim();
+}
+
 export function MetricsPanel({ perf }: { perf: PerfSnapshot | null }) {
   const { t } = useI18n();
   const [snap, setSnap] = useState<MetricsSnapshot | null>(null);
@@ -149,11 +157,13 @@ export function MetricsPanel({ perf }: { perf: PerfSnapshot | null }) {
                 if (hasVram) {
                   subBits.push(`${fmtMB(g.vram_used_mb)} / ${fmtMB(g.vram_total_mb)}`);
                 }
-                if (g.temperature !== null) {
-                  subBits.push(`${t('metrics.temp')} ${g.temperature.toFixed(0)}°C`);
-                }
                 if (g.power_usage_w !== null) {
                   subBits.push(`${t('metrics.power')} ${g.power_usage_w.toFixed(0)} W`);
+                }
+                // 温度是 GPU 核心温（NVML TemperatureSensor::Gpu），与利用率同主行展示。
+                const detailBits: string[] = [shortGpuName(g.name)];
+                if (g.temperature !== null) {
+                  detailBits.push(`${t('metrics.temp')} ${g.temperature.toFixed(0)}°C`);
                 }
                 return (
                   <div className="metrics-gpu" key={`${g.name}-${i}`}>
@@ -165,7 +175,7 @@ export function MetricsPanel({ perf }: { perf: PerfSnapshot | null }) {
                       <Meter value={g.usage} />
                       <span className="metrics-value metrics-pct">{fmtPct(g.usage)}</span>
                       <span className="metrics-detail" title={g.name}>
-                        {g.name}
+                        {detailBits.join(' · ')}
                       </span>
                     </div>
                     {subBits.length > 0 && (
