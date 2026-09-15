@@ -16,6 +16,7 @@
 
 ### Bug 修复
 - **任务栏 / 系统托盘图标发虚**：新增 `scripts/gen_app_icons.py` 从矢量母版 `assets/logo-original/app-icon.svg` 按各目标尺寸（含此前缺失的 16 / 20 / 24 / 25 / 40 / 48）精确渲染 PNG，`public/llama.png` 与 `public/oml-logo.svg` 品牌图、`src-tauri/app-icon.png` 及 `src-tauri/icons/*` 全套平台图标重新生成，按 DPI 喂精确尺寸修掉任务栏 / 托盘处的发虚；纯资源替换，未改动任何 Rust / TS 逻辑。
+- **缩略图预览头部图标发虚**：`src-tauri/src/lib.rs` 新增 `icon_big` 模块，把任务栏按钮（读 `ICON_BIG`，24×scale）、hover 任务栏弹出的缩略图预览头部（读 `ICON_SMALL`，16×scale = `SM_CXSMICON`）与系统托盘（16×scale）拆分为三个图标槽分别按 DPI 喂精确尺寸，修掉预览头部 24px 图标被 shell 双线性缩糊的问题；`src-tauri/Cargo.toml` 为 windows-sys 补 `Win32_UI_WindowsAndMessaging` 与 `Win32_Graphics_Gdi`，`scripts/gen_app_icons.py` 文档补「两个消费者读不同槽」的实测结论，`src-tauri/src/icon_assets.rs` 随之重生成。
 
 ## [0.2.3] - 2026-09-14
 
