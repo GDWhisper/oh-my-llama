@@ -663,7 +663,8 @@ const TRAY_ID_QUIT: &str = "tray-quit";
 // tao 只把 `default_window_icon()` 设成 `ICON_SMALL`、从不设 `ICON_BIG`（Tauri 也没接
 // tao 的 `set_taskbar_icon`），所以 BIG 那一半走 Win32 直调。
 // 尺寸表与 RGBA 均由 scripts/gen_app_icons.py 生成（见 icon_assets.rs）。
-const TASKBAR_ICON_BASE: f64 = 24.0; // 任务栏按钮逻辑尺寸 → ICON_BIG
+#[cfg(windows)]
+const TASKBAR_ICON_BASE: f64 = 24.0; // 任务栏按钮逻辑尺寸 → ICON_BIG（仅 Windows 的 icon_big 槽使用）
 const SMALL_ICON_BASE: f64 = 16.0; // = SM_CXSMICON：缩略图预览头部 / 标题栏 → ICON_SMALL
 const TRAY_ICON_BASE: f64 = 16.0; // 托盘图标逻辑尺寸（同为 SM_CXSMICON）
 
