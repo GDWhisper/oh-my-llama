@@ -49,5 +49,9 @@ portable-pty = "0.8"
 # feature 门控（已按 0.59 源码核对）：
 #   - CreateJobObjectW          → Win32_Security
 #   - JOBOBJECT_EXTENDED_LIMIT_INFORMATION → Win32_System_Threading
+#   - SendMessageW / WM_SETICON / ICON_BIG / CreateIconIndirect / DestroyIcon
+#                               → Win32_UI_WindowsAndMessaging（任务栏按钮的 ICON_BIG）
+#   - CreateDIBSection / CreateBitmap / DeleteObject / CreateCompatibleDC / DeleteDC
+#                               → Win32_Graphics_Gdi（造 HICON 用）
 # 0.59 已锁定且本地缓存，离线可编译。
-windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_System_JobObjects", "Win32_System_Threading", "Win32_Security", "Win32_System_Console"] }
+windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_System_JobObjects", "Win32_System_Threading", "Win32_Security", "Win32_System_Console", "Win32_UI_WindowsAndMessaging", "Win32_Graphics_Gdi"] }

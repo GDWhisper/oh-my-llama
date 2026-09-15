@@ -13,17 +13,20 @@
   取 `entries()[0]` 当 `default_window_icon()`，而 tao 只把它设成 `ICON_SMALL`、不设
   `ICON_BIG`（Tauri 也没接 tao 的 `set_taskbar_icon`）。
 - **真正的锐化靠运行时「精确尺寸」图标**（本脚本额外产出 `src-tauri/icons/raw/*.rgba`
-  + 生成 `src-tauri/src/icon_assets.rs`，由 lib.rs 在 setup 里按 DPI 调用
-  `Window::set_icon` 与 `TrayIconBuilder::icon`）。原因：shell 把 `ICON_SMALL` 位图
-  **双线性**缩放到自己想要的尺寸，而像素风字形只要不是 1:1 就会被抹灰。
-  实测（本机 150% DPI，任务栏要 36px）：
+  + 生成 `src-tauri/src/icon_assets.rs`，由 lib.rs 在 setup / DPI 变化时按 DPI 调用）。
+  原因：shell 把拿到的位图**双线性**缩放到自己想要的尺寸，而像素风字形只要不是 1:1
+  就会被抹灰。实测（本机 150% DPI，任务栏要 36px）：
     32px 源 → 36px 双线性 = 与真实任务栏截图平均通道差 **0.78**（即 100% 复现「发虚」）；
     48px 源 → 36px 双线性 = 4.28，笔画虽转白但粗细不匀；
     只有 36px 源 1:1 才与标题栏 SVG（37.5px 矢量）同等锐利。
-  shell 请求的尺寸：任务栏按钮 = 24 × scale，托盘 = SM_CXSMICON = 16 × scale
-  （100%/125%/150%/175%/200% → 24/30/36/42/48 与 16/20/24/28/32）。
+  **两个消费者读的不是同一个槽**（本机实测，别只喂一个）：
+    - 任务栏按钮 = 24 × scale → `ICON_BIG`（缺了才回落 `ICON_SMALL`）
+    - 任务栏缩略图预览（hover 弹出）头部 = `SM_CXSMICON` = 16 × scale → `ICON_SMALL`
+    - 托盘 = 16 × scale → `TrayIconBuilder::icon`
+  （100%/125%/150%/175%/200% → BIG 24/30/36/42/48、SMALL 与托盘 16/20/24/28/32）
   历史教训（别再走）：16px 在最前 → 任务栏放大 1.5 倍糊成方块（「任务栏变形」）；
-  32px 在最前 → 仍是放大，笔画被双线性抹成 ~57% 灰。
+  32px 在最前 → 仍是放大，笔画被双线性抹成 ~57% 灰；
+  只喂 `ICON_SMALL` → 按钮锐了但预览头部发虚（24px 是 36px 缩放来的）。
 - ICO 使用经典 BMP 多帧（BGRA + AND mask），确保 winres/embed-resource 能嵌入全部尺寸
 - 同步 public/oml-logo.svg 供标题栏 25px 1:1
 
@@ -220,7 +223,10 @@ def write_rust_assets() -> None:
 //! 所以这里把各 DPI 档位下 shell 实际请求的尺寸各存一份原始 RGBA，运行时按 DPI 取
 //! **精确尺寸**那张，1:1 落色 —— 与标题栏的矢量 SVG 同等锐利。
 //!
-//! 尺寸 = 逻辑尺寸 × DPI 缩放：任务栏按钮 24 × scale，托盘 16 × scale。
+//! 尺寸 = 逻辑尺寸 × DPI 缩放，且**任务栏按钮与缩略图预览头部读的不是同一个图标槽**：
+//!   - 任务栏按钮     24 × scale → ICON_BIG（缺了才回落 ICON_SMALL）
+//!   - 缩略图预览头部 16 × scale → ICON_SMALL（= SM_CXSMICON，标题栏同源）
+//!   - 托盘           16 × scale → 托盘图标（同为 SM_CXSMICON）
 
 /// 已收录的尺寸 → 原始 RGBA（行优先、自上而下、无文件头）。
 static ASSETS: &[(u32, &[u8])] = &[

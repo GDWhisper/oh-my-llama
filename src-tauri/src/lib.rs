@@ -644,26 +644,131 @@ const TRAY_ID: &str = "main-tray";
 const TRAY_ID_SHOW: &str = "tray-show";
 const TRAY_ID_QUIT: &str = "tray-quit";
 
-// ── 任务栏 / 托盘图标：按 DPI 喂「精确尺寸」的图 ────────────────────────
-// tao 只把 `default_window_icon()`（= icon.ico 首帧）设成 `ICON_SMALL`，从不设
-// `ICON_BIG`（Tauri 也没接 tao 的 `set_taskbar_icon`）。于是 shell 必须把它手里那张
-// 位图**双线性**缩放到自己要的尺寸 —— 任务栏按钮 = 24 × DPI 缩放，托盘 = 16 × DPI 缩放。
-// 像素风字形只要不是 1:1 就会被抹灰：本机 150% DPI（任务栏要 36px）实测
-// 「32px 源 → 36px」与真实任务栏截图平均通道差 **0.78**（完全复现「发虚」），
-// 笔画从纯白掉到 ~57% 灰，与标题栏那个矢量 logo 的锐利观感明显对不上。
-// 所以这里给 shell 一张尺寸**正好等于它要的**图，1:1 落色。
+// ── 任务栏 / 缩略图预览 / 托盘图标：按 DPI 喂「精确尺寸」的图 ──────────────
+//
+// shell 拿到的是一张**位图**，当它要的尺寸与位图尺寸不等时就会做一次**双线性**缩放，
+// 而像素风字形只要不是 1:1 就被抹灰（实测 32px 源 → 36px 任务栏：笔画掉到 ~57% 灰，
+// 与真实任务栏截图平均通道差 0.78，即完全复现「发虚」）。所以运行时按当前 DPI 挑一张
+// 尺寸**正好等于 shell 所求**的图，1:1 落色。
+//
+// 关键：这些消费者读的**不是同一个图标槽**（本机 150% DPI 实测，见下）——
+//   - 任务栏按钮（36px）优先读 `ICON_BIG`，缺了才回落 `ICON_SMALL`：
+//     把 `ICON_SMALL` 清零、只留 `ICON_BIG` = 36px，按钮依旧锐利。
+//   - 任务栏缩略图预览（hover 弹出）头部那张（24px = `SM_CXSMICON`）读 `ICON_SMALL`：
+//     把 `ICON_SMALL` 换成 24px 纯色，预览头部就变成那块纯色。
+// 所以两个槽必须**分别**喂：`ICON_BIG` ← 24 × scale（任务栏按钮），
+// `ICON_SMALL` ← 16 × scale（预览头部与窗口标题栏，即 `SM_CXSMICON`）。
+// 只喂一个槽时另一个消费者必然被缩放 —— 这正是「按钮锐了、预览头部发虚」的成因。
+//
+// tao 只把 `default_window_icon()` 设成 `ICON_SMALL`、从不设 `ICON_BIG`（Tauri 也没接
+// tao 的 `set_taskbar_icon`），所以 BIG 那一半走 Win32 直调。
 // 尺寸表与 RGBA 均由 scripts/gen_app_icons.py 生成（见 icon_assets.rs）。
-const TASKBAR_ICON_BASE: f64 = 24.0; // 任务栏按钮逻辑尺寸
-const TRAY_ICON_BASE: f64 = 16.0; // = SM_CXSMICON，托盘图标逻辑尺寸
+const TASKBAR_ICON_BASE: f64 = 24.0; // 任务栏按钮逻辑尺寸 → ICON_BIG
+const SMALL_ICON_BASE: f64 = 16.0; // = SM_CXSMICON：缩略图预览头部 / 标题栏 → ICON_SMALL
+const TRAY_ICON_BASE: f64 = 16.0; // 托盘图标逻辑尺寸（同为 SM_CXSMICON）
 
 /// 取 `base × scale` 对应的精确尺寸图标；未收录时退回最接近的一张（会多一次缩放）。
 fn dpi_icon(scale: f64, base: f64) -> tauri::image::Image<'static> {
+    let (bytes, size) = dpi_rgba(scale, base);
+    tauri::image::Image::new(bytes, size, size)
+}
+
+/// 同 `dpi_icon`，但返回原始 RGBA 与边长（Win32 侧造 HICON 要用）。
+fn dpi_rgba(scale: f64, base: f64) -> (&'static [u8], u32) {
     let want = (base * scale).round().max(1.0) as u32;
     let (bytes, size) = icon_assets::nearest(want);
     if !icon_assets::is_exact(want) {
         eprintln!("[icon] 未收录 {want}px 图标，退回 {size}px（shell 会再缩放一次）");
     }
-    tauri::image::Image::new(bytes, size, size)
+    (bytes, size)
+}
+
+// ICON_BIG 那一半：Tauri/tao 都没有入口，只能自己造 HICON + WM_SETICON。
+#[cfg(windows)]
+mod icon_big {
+    use windows_sys::Win32::Foundation::{HWND, TRUE};
+    use windows_sys::Win32::Graphics::Gdi::{
+        CreateBitmap, CreateCompatibleDC, CreateDIBSection, DeleteDC, DeleteObject, BITMAPINFO,
+        BITMAPINFOHEADER, DIB_RGB_COLORS, HBITMAP,
+    };
+    use windows_sys::Win32::UI::WindowsAndMessaging::{
+        CreateIconIndirect, DestroyIcon, SendMessageW, ICONINFO, ICON_BIG, WM_SETICON,
+    };
+
+    /// 用一张 RGBA 位图造 HICON。
+    ///
+    /// 做法：32bpp **顶朝下** DIB（与 icon_assets 的行序一致，免去翻转）+ 全零 AND 掩码。
+    /// 32bpp 图标只要 alpha 通道非全零就按 alpha 决定透明度，掩码形同占位。
+    /// 失败返回 0，调用方应知悉任务栏按钮会回落 `ICON_SMALL`。
+    pub fn hicon_from_rgba(rgba: &[u8], size: u32) -> isize {
+        let n = size as usize;
+        if size == 0 || rgba.len() != n * n * 4 {
+            return 0;
+        }
+        let mut bi: BITMAPINFO = unsafe { std::mem::zeroed() };
+        bi.bmiHeader = BITMAPINFOHEADER {
+            biSize: std::mem::size_of::<BITMAPINFOHEADER>() as u32,
+            biWidth: size as i32,
+            biHeight: -(size as i32), // 负高度 = 顶朝下
+            biPlanes: 1,
+            biBitCount: 32,
+            biCompression: 0, // BI_RGB
+            biSizeImage: size * size * 4,
+            biXPelsPerMeter: 0,
+            biYPelsPerMeter: 0,
+            biClrUsed: 0,
+            biClrImportant: 0,
+        };
+        unsafe {
+            let dc = CreateCompatibleDC(std::ptr::null_mut());
+            if dc.is_null() {
+                return 0;
+            }
+            let mut bits: *mut core::ffi::c_void = std::ptr::null_mut();
+            let hbm: HBITMAP =
+                CreateDIBSection(dc, &bi, DIB_RGB_COLORS, &mut bits, std::ptr::null_mut(), 0);
+            if hbm.is_null() || bits.is_null() {
+                DeleteDC(dc);
+                return 0;
+            }
+            std::ptr::copy_nonoverlapping(rgba.as_ptr(), bits as *mut u8, rgba.len());
+            // 1bpp 掩码的步长按 WORD 对齐；全零 = 不透明，实际透明度交给 alpha。
+            let mask_stride = n.div_ceil(16) * 2;
+            let mask_bits = vec![0u8; mask_stride * n];
+            let mask = CreateBitmap(
+                size as i32,
+                size as i32,
+                1,
+                1,
+                mask_bits.as_ptr() as *const core::ffi::c_void,
+            );
+            let info = ICONINFO {
+                fIcon: TRUE,
+                xHotspot: 0,
+                yHotspot: 0,
+                hbmMask: mask,
+                hbmColor: hbm,
+            };
+            let hicon = CreateIconIndirect(&info);
+            // DIB 与掩码的内容已复制进 HICON，这两个位图可以立刻释放。
+            DeleteObject(mask as _);
+            DeleteObject(hbm as _);
+            DeleteDC(dc);
+            hicon as isize
+        }
+    }
+
+    /// 把窗口的 `ICON_BIG` 换成 `hicon`，返回被替换掉的旧句柄（0 表示原本未设）。
+    pub fn set_icon_big(hwnd: isize, hicon: isize) -> isize {
+        unsafe { SendMessageW(hwnd as HWND, WM_SETICON, ICON_BIG as usize, hicon) }
+    }
+
+    /// 释放自己造出来的 HICON（窗口已不再引用它之后才可调用）。
+    pub fn destroy(hicon: isize) {
+        if hicon != 0 {
+            unsafe { DestroyIcon(hicon as _) };
+        }
+    }
 }
 
 /// 把窗口图标与托盘图标换成当前 DPI 对应的精确尺寸版本。
@@ -673,7 +778,23 @@ fn apply_dpi_icons(app: &AppHandle) {
         return;
     };
     let scale = win.scale_factor().unwrap_or(1.0);
-    let _ = win.set_icon(dpi_icon(scale, TASKBAR_ICON_BASE));
+    // ICON_SMALL = SM_CXSMICON：缩略图预览头部（hover 弹出）与标题栏读的就是它。
+    let _ = win.set_icon(dpi_icon(scale, SMALL_ICON_BASE));
+    // ICON_BIG：任务栏按钮优先读它。替换后销毁上一张自己造的，避免 DPI 切换时泄漏。
+    #[cfg(windows)]
+    match win.hwnd() {
+        Ok(hwnd) => {
+            let (rgba, size) = dpi_rgba(scale, TASKBAR_ICON_BASE);
+            let hicon = icon_big::hicon_from_rgba(rgba, size);
+            if hicon != 0 {
+                let old = icon_big::set_icon_big(hwnd.0 as isize, hicon);
+                icon_big::destroy(old);
+            } else {
+                eprintln!("[icon] 造 HICON 失败，任务栏按钮将回落 ICON_SMALL（会被缩放一次）");
+            }
+        }
+        Err(e) => eprintln!("[icon] 取窗口句柄失败，任务栏按钮将回落 ICON_SMALL：{e}"),
+    }
     if let Some(tray) = app.tray_by_id(TRAY_ID) {
         let _ = tray.set_icon(Some(dpi_icon(scale, TRAY_ICON_BASE)));
     }
