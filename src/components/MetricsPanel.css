@@ -5,7 +5,7 @@
 }
 
 .metrics-grid {
-  --metrics-cols: 72px 96px 42px minmax(0, 1fr);
+  --metrics-cols: 48px 96px 42px minmax(0, 1fr);
   display: flex;
   flex-direction: column;
   gap: 5px;
@@ -15,11 +15,11 @@
 
 /* 统一四列：标签 | 条(定宽) | 百分比(定宽) | 详情(伸缩)。
    条与百分比必须用 px 定宽——子行 font-size 更小，em 会把列算窄导致不对齐。
-   标签列 72px：英文 MEMORY / GENERATION 大写约 50–80px，40px 会折行。 */
+   标签列 48px：中文 CPU/内存/显存 与英文 MEMORY 刚好贴住，减少与充能条的空档。 */
 .metrics-row {
   display: grid;
   grid-template-columns: var(--metrics-cols);
-  gap: 10px;
+  gap: 6px;
   align-items: center;
 }
 
@@ -30,6 +30,7 @@
   letter-spacing: 0.06em;
   text-transform: uppercase;
   line-height: 1.2;
+  white-space: nowrap;
 }
 
 /* 数值用 UI 等宽数字：单位与百分比同宽，避免 serif 混排参差 */
@@ -99,7 +100,7 @@
 .metrics-sub {
   display: grid;
   grid-template-columns: var(--metrics-cols, 72px 96px 42px minmax(0, 1fr));
-  gap: 10px;
+  gap: 6px;
   align-items: center;
   font-size: 12px;
   color: var(--ink-3);

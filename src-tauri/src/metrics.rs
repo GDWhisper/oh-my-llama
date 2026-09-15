@@ -16,7 +16,8 @@ pub struct GpuMetrics {
     pub usage: f32, // 0-100
     pub vram_total_mb: u64,
     pub vram_used_mb: u64,
-    pub temperature: Option<f32>, // Celsius，None 表示取不到
+    pub temperature: Option<f32>,   // Celsius，None 表示取不到
+    pub power_usage_w: Option<f32>, // 当前功耗（瓦），None 表示取不到
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -74,6 +75,8 @@ fn collect_gpus() -> Vec<GpuMetrics> {
             .temperature(nvml_wrapper::enum_wrappers::device::TemperatureSensor::Gpu)
             .ok()
             .map(|t| t as f32);
+        // NVML 返回毫瓦；消费卡多数支持，驱动/机型不支持时为 None。
+        let power_usage_w = device.power_usage().ok().map(|mw| mw as f32 / 1000.0);
 
         out.push(GpuMetrics {
             name,
@@ -81,6 +84,7 @@ fn collect_gpus() -> Vec<GpuMetrics> {
             vram_total_mb,
             vram_used_mb,
             temperature,
+            power_usage_w,
         });
     }
     out

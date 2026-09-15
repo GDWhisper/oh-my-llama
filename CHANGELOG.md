@@ -4,6 +4,20 @@
 
 > 本文件为**详细改动历史**（含涉及的文件与实现机制）；GitHub Release 页面为对应版本的**总结性**说明。
 
+## [0.2.4] - 2026-09-15
+
+### 新增功能
+- **界面风格切换（羊皮纸 parchment / 冷灰蓝 default）**：`src-tauri/src/lib.rs` 的 `AppSettings` 新增 `ui_theme`（`Option<String>`，`#[serde(default)]`，旧 `settings.json` 缺字段解析为 `None`、前端兜底羊皮纸），新增 `set_ui_theme` 命令（校验 `default`/`parchment` 后整体读-改-写落盘并返回完整设置，注册进 `generate_handler!`，单测 `ui_theme_round_trip_and_legacy_default` 覆盖 None / 显式 null / default / parchment 四种情形）；`src/lib/uiTheme.ts` 新增 `normalizeUiTheme` / `applyUiTheme`，在启动与切换时写 `html[data-theme]`，`index.html` 默认 `data-theme="parchment"` 防首屏闪白；`src/App.css` 把暖纸 token 收进 `:root` / `[data-theme='parchment']` 并新增 default 冷灰蓝色板与结构差异 token（标题栏木纹 vs 现代深灰、硬描边 vs 软描边），`src/App.tsx` 挂载即 `read_settings` 校准主题；`src/components/SettingsDialog.tsx` 加风格单选，`src/i18n/messages.ts` 补 `settings.theme` / `settings.themeHint` / `settings.themeDefault` / `settings.themeParchment` 双语键；`src/types.ts` 同步 `AppSettings.ui_theme` 与 `UiTheme`；`src-tauri/tauri.conf.json` 窗口宽 `1120 → 1140`。
+- **性能面板展示 GPU 功耗**：`src-tauri/src/metrics.rs` 的 `GpuMetrics` 新增 `power_usage_w`（`Option<f32>`，NVML `power_usage()` 毫瓦转瓦，不支持时为 `None`），`src/components/MetricsPanel.tsx` 展开态明细追加「功耗 X W」、收起态摘要多卡以「/」显示；`src/i18n/messages.ts` 补 `metrics.power` 中英键，`src/types.ts` 同步 `GpuMetrics.power_usage_w`。
+
+### 功能优化
+- **GPU 信息展示优化**：`src/components/MetricsPanel.tsx` 新增 `shortGpuName`（去 `NVIDIA GeForce ` 前缀，完整型号保留为 DOM `title`），GPU 核心温度由明细行移到与利用率同主行（`detailBits` 合并型号 + 温度），型号行更紧凑；`src/components/MetricsPanel.css` 同步微调。
+- **README 中英「llama-server」改为指向 llama.cpp 仓库超链接**：`README.md` / `README_En.md` 顶部术语链接更新，便于读者溯源上游项目。
+
+### Bug 修复
+- **任务栏 / 系统托盘图标发虚**：新增 `scripts/gen_app_icons.py` 从矢量母版 `assets/logo-original/app-icon.svg` 按各目标尺寸（含此前缺失的 16 / 20 / 24 / 25 / 40 / 48）精确渲染 PNG，`public/llama.png` 与 `public/oml-logo.svg` 品牌图、`src-tauri/app-icon.png` 及 `src-tauri/icons/*` 全套平台图标重新生成，按 DPI 喂精确尺寸修掉任务栏 / 托盘处的发虚；纯资源替换，未改动任何 Rust / TS 逻辑。
+- **缩略图预览头部图标发虚**：`src-tauri/src/lib.rs` 新增 `icon_big` 模块，把任务栏按钮（读 `ICON_BIG`，24×scale）、hover 任务栏弹出的缩略图预览头部（读 `ICON_SMALL`，16×scale = `SM_CXSMICON`）与系统托盘（16×scale）拆分为三个图标槽分别按 DPI 喂精确尺寸，修掉预览头部 24px 图标被 shell 双线性缩糊的问题；`src-tauri/Cargo.toml` 为 windows-sys 补 `Win32_UI_WindowsAndMessaging` 与 `Win32_Graphics_Gdi`，`scripts/gen_app_icons.py` 文档补「两个消费者读不同槽」的实测结论，`src-tauri/src/icon_assets.rs` 随之重生成。
+
 ## [0.2.3] - 2026-09-14
 
 ### 新增功能

@@ -22,6 +22,7 @@ import { MetricsPanel } from './components/MetricsPanel';
 import { TitleBar } from './components/TitleBar';
 import { useUpdater } from './hooks/useUpdater';
 import type { AppSettings } from './types';
+import { applyUiTheme, normalizeUiTheme } from './lib/uiTheme';
 import './App.css';
 
 // 复制到剪切板：优先 navigator.clipboard（安全上下文），失败时回退 execCommand。
@@ -174,6 +175,22 @@ export default function App() {
 
   // 设置浮窗开关：齿轮图标触发，承载语言等偏好设置。
   const [showSettings, setShowSettings] = useState(false);
+
+  // 界面风格：启动时读 settings.json 并写 html[data-theme]（index.html 默认 parchment，
+  // 避免首屏闪白；后端返回后再校准，用户选过 default 会立刻切回）。
+  useEffect(() => {
+    let alive = true;
+    invoke<AppSettings>('read_settings')
+      .then((s) => {
+        if (alive) applyUiTheme(normalizeUiTheme(s.ui_theme));
+      })
+      .catch(() => {
+        applyUiTheme('parchment');
+      });
+    return () => {
+      alive = false;
+    };
+  }, []);
 
   // 轻量周期自动检查：程序长时间不关闭时也按固定间隔再查一次（默认 6 小时），
   // 避免「只靠启动时那一次」导致常驻用户永远收不到更新提醒。
