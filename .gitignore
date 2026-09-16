@@ -35,6 +35,7 @@ dist-ssr
 .mcp.json
 .omp/
 .pi/
+.box-agent/
 openspec/
 .dev_docs/changes/
 
