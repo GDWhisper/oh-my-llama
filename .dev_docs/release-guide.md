@@ -9,8 +9,9 @@
 ## 一、前置约定（发布前必读）
 
 1. **Git worktree 结构**：`dev` 工作树（`F:\llama_run\llama-launcher-dev`）与 `main` 工作树（`F:\llama_run\tauri-launcher`）共享同一 `.git`。**`dev` 工作树不能 `git checkout main`**（被另一 worktree 占用）——合并必须到 `main` 工作树执行。重大改动先落 `dev`，勿直提交 `main`。
-   > **⚠️ `origin/*` 引用可能是陈旧的（发版必看）**：本机沙箱会静默拦写主仓库 `.git` 的 remotes 引用——`git fetch` 会**报成功但 `origin/*` 不更新**，`git status` 会**谎报** `ahead N`。
-   > 因此：① 合并一律用**本地分支 `dev`**（**不要**用 `origin/dev`，否则会合并到陈旧提交）；② 核对远端一律 `git ls-remote origin refs/heads/dev refs/heads/main`（`git status` 不可信）。
+   > **⚠️ `origin/*` 引用可能是陈旧的（发版必看）**：本环境 git **写不进 `refs/remotes/**`**——`git fetch` / `push` / `update-ref` 会**报成功但 `origin/*` 不更新**，`git status` 会**谎报** `ahead N`。
+   > **根因未明，但已排除两种可能**：① 与沙箱权限无关（实测关掉沙箱同样失败）；② 不是仓库损坏（`refs/heads/**`、tags、objects 的 git 写入都正常，只有 `refs/remotes/**` 不行）。**不要为此重建克隆、跑 `git gc` / `repack`，或怀疑本地仓库坏了——那不是解法，只会扩大损失。**
+   > 因此：① 合并一律用**本地分支 `dev`**（**不要**用 `origin/dev`，否则会合并到陈旧提交）；② 核对远端一律 `git ls-remote origin refs/heads/dev refs/heads/main`（`git status` 不可信）；③ 确需拨正本地引用，改主仓库 `.git/packed-refs` 的对应行（**持久**；同路径用 shell 写 loose 文件虽能即时生效，但会被下一次写 `refs/remotes` 的 git 命令连带清掉）。
 2. **排除项**：提交时**必须排除** `.claude/`、`.mcp.json`（外来 AI 工具脚手架，不属于本项目）。用显式 `git add <文件列表>`，不要 `git add -A`。
 3. **Git TLS**：本仓库已设 `git config http.sslBackend openssl`（仓库级），推送走 openssl 握手，避免 Windows schannel 失败。
 4. **gh 代理坑**：本机 `HTTPS_PROXY=http://127.0.0.1:7897` 通常未运行，导致 `gh` 直连报 `EOF`。所有 `gh` 命令前先 `unset HTTPS_PROXY HTTP_PROXY https_proxy http_proxy`（gh 自身走 Go TLS，不依赖 schannel，但会读取代理环境变量）。
@@ -81,7 +82,7 @@
 - **应用内更新说明为空 / 只有占位符** → 发布说明文件必须在**打标签之前**进 commit（`.dev_docs/release-notes-vX.Y.Z.md`）；CI 从 tag 所在 commit 读取。事后用 `gh release edit --notes-file` 只能补 Release 正文，**重写不了已上传的 `latest.json.notes`**，应用内仍看不到说明——只能补文件、删 tag 重打。
 - **资产 URL 显示 `untagged-...`** → 属 tauri-action 上传时的内部路径，Release 仍正确挂在 tag 下，无需处理。
 - **`dev` 不能 checkout main** → 合并去 `main` 工作树执行 `git merge --no-ff dev`。
-- **`origin/*` 引用陈旧 → 合并合错对象**（本机沙箱静默拦写主仓库 `.git` 的 remotes 引用：`git fetch` 报成功但引用不更新、`git status` 谎报 `ahead N`）：若写 `git merge origin/dev` 会合到**陈旧提交**（v0.2.4 实测只合进了 README 两个文件）。**合并用本地 `dev`**；核对远端一律 `git ls-remote origin refs/heads/dev`。
+- **`origin/*` 引用陈旧 → 合并合错对象**（本环境 git 写不进 `refs/remotes/**`：`git fetch` / `push` 报成功但引用不更新、`git status` 谎报 `ahead N`；**与沙箱无关、也非仓库损坏——别为此重 clone 或跑 `git gc`**）：若写 `git merge origin/dev` 会合到**陈旧提交**（v0.2.4 实测只合进了 README 两个文件）。**合并用本地 `dev`**；核对远端一律 `git ls-remote origin refs/heads/dev`。需拨正本地引用就改 `.git/packed-refs` 对应行（持久）。
   **若已合错 / 已打错 tag（补救，非破坏性、无需 force-push）**：在 `main` 上再 `git merge --no-ff dev` 纠正 → `gh release delete vX.Y.Z --yes --cleanup-tag`（删坏草稿 + 远端 tag）→ `git tag -d vX.Y.Z` 后在**纠正提交**上 `git tag -a vX.Y.Z` 并 `git push origin vX.Y.Z` 触发 CI 重跑。
 - **提交排除 `.claude/`、`.mcp.json`**。
 - **版本号只改 `tauri.conf.json` 一处**（唯一真源）。`Cargo.toml` / `package.json` 已省略 `version`，`Cargo.lock` 里的 `0.0.0` 属预期，**勿手工回填**。

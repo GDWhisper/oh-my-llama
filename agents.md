@@ -87,6 +87,7 @@ powershell scripts/dev-server.ps1 -Action start|stop|restart              # 管�
 - 本目录是 **dev 工作树**；main 分支被另一工作树（`F:\llama_run\tauri-launcher`）占用，**此处不能 `git checkout main`**，dev→main 合并须到 main 工作树执行。改动先落 dev，勿直提交 main。
 - 跑 `gh` 前先清代理环境变量（本机代理常未运行，直连报 EOF）：Git Bash 用 `unset HTTPS_PROXY HTTP_PROXY https_proxy http_proxy`；PowerShell 用 `Remove-Item Env:HTTPS_PROXY,Env:HTTP_PROXY,Env:https_proxy,Env:http_proxy -ErrorAction SilentlyContinue`。仓库 git 已设 `http.sslBackend openssl`，勿改。
 - **git 命令一律带 `-c gc.auto=0`**：本环境在回合结束时会回收后台子进程，而 git 的 `gc --auto` 默认 `gc.autoDetach=true` 会**转入后台运行**——被强杀在半途会把**对象库写残**（2026-09-15 20:02 因此整仓损坏：对象库残缺、dev worktree 的管理目录被清空、主 worktree 的工作区被删掉 110 个 tracked 文件）。`bad object HEAD`、`fatal: not a git repository: (NULL)`、fetch 报 `unresolved deltas` 都可能是此类损坏；**此时不要用 `git gc` / `repack` 去"修"**（它正是加害者），动手前先把工作区改动备份到仓库外。
+- **`origin/*` 引用会陈旧（根因未明；既非沙箱权限问题，也非仓库损坏）**：本环境 git 写不进 `refs/remotes/**`——`git fetch` / `push` / `update-ref` 一律**报成功但 `origin/*` 不变**，`git status` 会**谎报 `ahead N`**（实测关掉沙箱同样失败；`refs/heads/**`、tags、objects 的 git 写入都正常）。**别为此重建克隆、跑 `git gc` / `repack`，或怀疑仓库损坏。** 动作规范：合并只用**本地分支 `dev`**（用 `origin/dev` 会合到陈旧提交，v0.2.4 踩过），核对远端一律 `git ls-remote origin refs/heads/dev refs/heads/main`；确需拨正本地引用就改主仓库 `.git/packed-refs` 对应行（持久；shell 写 loose 会让下一次写 `refs/remotes` 的 git 命令连带清掉）。细节见 `.dev_docs/release-guide.md`。
 - 运行期数据在 `%APPDATA%/OhMyLlama/`：`configs.toml`（命名配置）、`settings.json`（应用设置，整体读-改-写）、`logs/`（llama-server 运行日志）；updater 签名私钥仅存本地 `~/.tauri/oh-my-llama.key`，绝不入库（CI 经 secret 注入）。
 
 ## 测试约定
