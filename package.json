@@ -10,7 +10,8 @@
     "lint:fix": "eslint . --fix",
     "format": "prettier --write \"src/**/*.{ts,tsx,css}\"",
     "format:check": "prettier --check \"src/**/*.{ts,tsx,css}\"",
-    "check:frontend": "tsc --noEmit && eslint . && prettier --check \"src/**/*.{ts,tsx,css}\"",
+    "check:css": "node scripts/check-css-selectors.mjs",
+    "check:frontend": "tsc --noEmit && eslint . && prettier --check \"src/**/*.{ts,tsx,css}\" && npm run check:css",
     "check:rust": "cargo fmt --manifest-path src-tauri/Cargo.toml --check && cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings",
     "check": "npm run check:frontend && npm run check:rust",
     "tauri": "tauri"

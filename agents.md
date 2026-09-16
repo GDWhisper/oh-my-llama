@@ -27,7 +27,8 @@ Oh My Llama：管理 `llama-server` 启动配置、参数与日志的桌面工�
 
 ```bash
 npm run tauri dev                    # 全应用开发，Vite 端口 6060
-npm run check                        # 本地门禁 = tsc + eslint + prettier + cargo fmt --check + clippy -D warnings
+npm run check                        # 本地门禁 = tsc + eslint + prettier + CSS 选择器检查 + cargo fmt --check + clippy -D warnings
+npm run check:css                    # 单独跑 CSS 选择器检查（拦「冒号+空格」这类会被浏览器静默丢弃的写法）
 cargo test --lib --manifest-path src-tauri/Cargo.toml                     # 单元测试（必须带 manifest-path，根目录裸跑会失败）
 cargo test --lib --manifest-path src-tauri/Cargo.toml build_server_args   # 按名子串过滤（可命中多个同前缀用例）
 powershell scripts/dev-server.ps1 -Action start|stop|restart              # 管理 dev server（含端口占用处理）
@@ -36,7 +37,7 @@ powershell scripts/dev-server.ps1 -Action start|stop|restart              # 管�
 其余 scripts（`build` / `lint:fix` / `format` / `tauri build` 等）见 `package.json`。
 
 - 提交前跑 `npm run check`；改了 Rust 逻辑再跑 `cargo test --lib --manifest-path src-tauri/Cargo.toml`。CI（`.github/workflows/build-check.yml`）在 dev 每次 push 时三平台跑 `npm run check` + `tauri build`，**不跑** `cargo test`——Rust 测试只靠本地。
-- 门禁红了修根因；禁止用 `#[allow]` 压过 clippy、从 check 中删检查项或剔除 eslint / prettier。
+- 门禁红了修根因；禁止用 `#[allow]` 压过 clippy、从 check 中删检查项或剔除 eslint / prettier / check:css。
 
 ## 架构约束（这些「看起来反常」但有意为之，不要顺手修正）
 
