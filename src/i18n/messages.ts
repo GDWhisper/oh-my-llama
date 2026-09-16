@@ -604,6 +604,10 @@ export const zh = {
   'settings.windowCloseAsk': '每次询问',
   'settings.windowCloseTray': '最小化到系统托盘',
   'settings.windowCloseQuit': '直接退出应用',
+  // 开机自启（登录时运行）
+  'settings.autostart': '开机自启动',
+  'settings.autostartHint': '登录系统后自动运行本应用。',
+  'settings.autostartLabel': '开机时自动运行',
   'tray.show': '显示主窗口',
   'tray.quit': '退出',
   'tray.promptTitle': '要退出还是最小化到托盘？',
@@ -1237,6 +1241,10 @@ export const en: Record<MessageKey, string> = {
   'settings.windowCloseAsk': 'Ask every time',
   'settings.windowCloseTray': 'Minimize to system tray',
   'settings.windowCloseQuit': 'Quit the application',
+  // Launch at login
+  'settings.autostart': 'Launch at Login',
+  'settings.autostartHint': 'Automatically run the app after you sign in.',
+  'settings.autostartLabel': 'Launch automatically at login',
   'tray.show': 'Show Main Window',
   'tray.quit': 'Quit',
   'tray.promptTitle': 'Quit or minimize to tray?',

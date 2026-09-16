@@ -28,6 +28,9 @@ use windows_sys::Win32::System::JobObjects::{
 mod metrics;
 use metrics::get_system_metrics;
 
+// 开机自启：Windows 的 HKCU\...\Run 注册表项读写（非 Windows 一律视为不支持）
+mod autostart;
+
 mod params;
 use params::{find_spec, get_param_registry};
 
@@ -274,6 +277,26 @@ async fn save_settings(
     // 立即生效：本次会话内下一次「检查更新」即按新代理策略（无需重启）。
     apply_update_proxy_env(&proxy);
     Ok(settings)
+}
+
+// ── 开机自启（登录时运行）─────────────────────────────────────────────
+// 系统侧真源是注册表 HKCU\...\Run 下 autostart::VALUE_NAME 那个值，**不**在 settings.json
+// 里再存一份镜像：两份状态会各自漂移（用户手工删掉条目后镜像仍是 true，界面就会骗人）。
+// 故 get 每次实查注册表，set 直接改注册表——不存在「读-改-写」的一致性问题。
+//
+// 返回类型用 Option：None = 当前平台不支持，前端据此隐藏卡片，而不是给一个点了必然报错的开关。
+#[tauri::command]
+async fn get_autostart() -> Result<Option<bool>, String> {
+    autostart::is_enabled()
+}
+
+// 勾选/取消开机自启。返回生效后的真实状态（读回注册表），前端用它校准乐观回填。
+// 写入总是按当前可执行文件路径，顺带修好「便携版被挪过目录、条目仍指旧路径」。
+#[tauri::command]
+async fn set_autostart(enabled: bool) -> Result<bool, String> {
+    let exe = std::env::current_exe().map_err(|err| format!("无法定位应用路径: {err}"))?;
+    autostart::set_enabled(enabled, &exe)?;
+    Ok(autostart::is_enabled()?.unwrap_or(enabled))
 }
 
 // ── 窗口关闭行为（最小化到托盘）────────────────────────────────────────
@@ -560,6 +583,8 @@ pub fn run() {
             set_close_pref,
             set_log_show_times,
             set_ui_theme,
+            get_autostart,
+            set_autostart,
             resolve_close_choice,
             set_tray_labels,
             get_system_metrics,
@@ -602,6 +627,12 @@ pub fn run() {
 
             // 覆盖 icon.ico 首帧那份兜底图：按当前 DPI 换成精确尺寸，避免 shell 双线性缩放
             apply_dpi_icons(app.handle());
+
+            // 开机自启条目自愈：已开启自启、但条目指向的不是当前这个可执行文件
+            // （便携版挪了目录 / 换了安装位置）时静默改指——否则开机会去拉起一个不存在的
+            // 路径，自启静默失效而界面仍显示「已开启」。未开启自启时不做任何写入。
+            // 失败不拦启动：自启是外围功能，不该拖累主流程。
+            let _ = autostart::heal_stale_entry();
             Ok(())
         })
         .on_window_event(|window, event| {
