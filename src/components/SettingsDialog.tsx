@@ -39,6 +39,12 @@ const sectionIcons = {
       <path d="M6.4 6.7l3.2 2.6M9.6 6.7l-3.2 2.6" />
     </svg>
   ),
+  autostart: (
+    <svg width="14" height="14" viewBox="0 0 16 16" aria-hidden="true">
+      <path d="M8 1.9v5.3" />
+      <path d="M12.4 4.2a5.7 5.7 0 1 1-8.8 0" />
+    </svg>
+  ),
   about: (
     <svg width="14" height="14" viewBox="0 0 16 16" aria-hidden="true">
       <circle cx="8" cy="8" r="6.2" />
@@ -59,7 +65,8 @@ interface Props {
   onOpenUpdate: () => void;
 }
 
-// 设置浮窗：居中弹层，承载语言、界面风格、更新（版本 / 自动检查 / 代理）、关闭窗口行为与关于五组设置。
+// 设置浮窗：居中弹层，承载语言、界面风格、更新（版本 / 自动检查 / 代理）、关闭窗口行为、
+// 开机自启与关于六组设置。
 // 复用公共 modal 遮罩与样式。
 export function SettingsDialog({
   open,
@@ -77,6 +84,9 @@ export function SettingsDialog({
   const [proxyError, setProxyError] = useState('');
   // 窗口关闭行为三态：null = 每次询问（未选择过的默认），true = 最小化到托盘，false = 直接退出。
   const [closePref, setClosePref] = useState<boolean | null>(null);
+  // 开机自启：true/false = 系统侧实况，null = 当前平台不支持（整张卡片不渲染）。
+  const [autostart, setAutostart] = useState<boolean | null>(null);
+  const [autostartError, setAutostartError] = useState('');
   // 界面风格：null = 未设置（按羊皮纸渲染），'default' | 'parchment' = 用户选过。
   const [uiTheme, setUiTheme] = useState<UiTheme | null>(null);
 
@@ -123,12 +133,43 @@ export function SettingsDialog({
       });
   }, [open]);
 
+  // 打开时实查系统侧的自启状态。真源是系统（注册表），不是 settings.json——用户手工
+  // 删掉条目后我们才知道实况，所以每次开窗都重新问一次；null 表示本平台不支持。
+  useEffect(() => {
+    if (!open) return;
+    let alive = true;
+    setAutostartError('');
+    invoke<boolean | null>('get_autostart')
+      .then((enabled) => {
+        if (alive) setAutostart(enabled);
+      })
+      .catch(() => {
+        if (alive) setAutostart(null);
+      });
+    return () => {
+      alive = false;
+    };
+  }, [open]);
+
   // 切换「关闭窗口行为」并立即落盘：乐观回填，再以后端返回值校准。
   const saveClosePref = (pref: boolean | null) => {
     setClosePref(pref);
     invoke<AppSettings>('set_close_pref', { pref })
       .then((s) => setClosePref(s.minimize_to_tray ?? null))
       .catch(() => {});
+  };
+
+  // 切换开机自启：乐观回填，再以后端读回的真实状态校准；写失败则回滚并就地提示。
+  const saveAutostart = (enabled: boolean) => {
+    const prev = autostart;
+    setAutostart(enabled);
+    setAutostartError('');
+    invoke<boolean>('set_autostart', { enabled })
+      .then((next) => setAutostart(next))
+      .catch((e) => {
+        setAutostart(prev);
+        setAutostartError(String(e));
+      });
   };
 
   // 切换界面风格：先写 DOM 让整页 token 立刻换，再落盘；失败时以后端返回值校准。
@@ -355,6 +396,30 @@ export function SettingsDialog({
               <span className="settings-check-label">{t('settings.windowCloseQuit')}</span>
             </label>
           </div>
+
+          {/* 仅在本平台支持时渲染：不支持时后端返回 null，宁可不出卡片，
+              也不给一个点了必然报错的开关。默认关闭 = 从未勾选过时注册表无条目。 */}
+          {autostart !== null && (
+            <div className="settings-section">
+              <div className="settings-section-head">
+                <span className="settings-label">
+                  {sectionIcons.autostart}
+                  {t('settings.autostart')}
+                </span>
+                <span className="settings-hint">{t('settings.autostartHint')}</span>
+              </div>
+              <label className="settings-option-row">
+                <input
+                  type="checkbox"
+                  className="settings-checkbox"
+                  checked={autostart}
+                  onChange={(event) => saveAutostart(event.target.checked)}
+                />
+                <span className="settings-check-label">{t('settings.autostartLabel')}</span>
+              </label>
+              {autostartError && <div className="settings-proxy-err">{autostartError}</div>}
+            </div>
+          )}
 
           <div className="settings-section">
             <div className="settings-section-head">

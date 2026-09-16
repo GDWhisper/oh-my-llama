@@ -9,6 +9,9 @@
 ## 一、前置约定（发布前必读）
 
 1. **Git worktree 结构**：`dev` 工作树（`F:\llama_run\llama-launcher-dev`）与 `main` 工作树（`F:\llama_run\tauri-launcher`）共享同一 `.git`。**`dev` 工作树不能 `git checkout main`**（被另一 worktree 占用）——合并必须到 `main` 工作树执行。重大改动先落 `dev`，勿直提交 `main`。
+   > **⚠️ `origin/*` 引用可能是陈旧的（发版必看）**：本环境 git **写不进 `refs/remotes/**`**——`git fetch` / `push` / `update-ref` 会**报成功但 `origin/*` 不更新**，`git status` 会**谎报** `ahead N`。
+   > **根因未明，但已排除两种可能**：① 与沙箱权限无关（实测关掉沙箱同样失败）；② 不是仓库损坏（`refs/heads/**`、tags、objects 的 git 写入都正常，只有 `refs/remotes/**` 不行）。**不要为此重建克隆、跑 `git gc` / `repack`，或怀疑本地仓库坏了——那不是解法，只会扩大损失。**
+   > 因此：① 合并一律用**本地分支 `dev`**（**不要**用 `origin/dev`，否则会合并到陈旧提交）；② 核对远端一律 `git ls-remote origin refs/heads/dev refs/heads/main`（`git status` 不可信）；③ 确需拨正本地引用，改主仓库 `.git/packed-refs` 的对应行（**持久**；同路径用 shell 写 loose 文件虽能即时生效，但会被下一次写 `refs/remotes` 的 git 命令连带清掉）。
 2. **排除项**：提交时**必须排除** `.claude/`、`.mcp.json`（外来 AI 工具脚手架，不属于本项目）。用显式 `git add <文件列表>`，不要 `git add -A`。
 3. **Git TLS**：本仓库已设 `git config http.sslBackend openssl`（仓库级），推送走 openssl 握手，避免 Windows schannel 失败。
 4. **gh 代理坑**：本机 `HTTPS_PROXY=http://127.0.0.1:7897` 通常未运行，导致 `gh` 直连报 `EOF`。所有 `gh` 命令前先 `unset HTTPS_PROXY HTTP_PROXY https_proxy http_proxy`（gh 自身走 Go TLS，不依赖 schannel，但会读取代理环境变量）。
@@ -34,6 +37,8 @@
 3. **提交**（在 `dev`）：`git add` 仅项目文件，**排除 `.claude/`、`.mcp.json`**。版本号、发布说明文件、CHANGELOG **一起进这一个 commit**（保证它们随 tag 落地）。commit message 用中文、概述本版本改动。可用 `git commit -F - <<'EOF'` 喂多行。
 4. **推送 dev**：`git push origin dev`。
 5. **合并到 main 工作树**：`cd F:/llama_run/tauri-launcher && git fetch origin && git merge --no-ff dev -m "Merge dev into main for vX.Y.Z"`。用 `--no-ff` 保留合并记录；**不要**在 `dev` 工作树 checkout main。
+   > **合并的是本地 `dev`，不是 `origin/dev`**（见第一节 stale-ref 警告）——若手滑合并了陈旧引用，合并结果只会出现 README 之类零星文件变动，而非本迭代的成批改动。
+   > **打 tag 前必须自检**：`git ls-tree <合并提交> -- .dev_docs/ | grep release-notes-vX.Y.Z` 能查到该文件才算合对。查不到就说明合错了对象——tag 一旦打上，CI 会把 Release 正文与 `latest.json.notes` **双双退回占位文案**，且 Release 名取到的 `__VERSION__` 是旧版本号（页面显示成上一版）。
 6. **推送 main**：`git push origin main`。
 7. **打标签触发 CI**：`git tag -a vX.Y.Z -m "Oh My Llama vX.Y.Z"` + `git push origin vX.Y.Z`。推送标签即触发 `release.yml`（三平台并行：Windows / Ubuntu 22.04 / macOS arm64）构建。
 8. **等待构建（前台，不可拆成两轮）**：`unset` 代理后在**前台**执行 `gh run watch <run_id> --repo GDWhisper/oh-my-llama --exit-status`（三平台并行，实测最长约 8-9 分钟，Bash 命令超时给足 600000ms）。**禁止用 `run_in_background` 把等待拆到后台**——后台返回后控制权已交还用户，发布步骤极易被漏掉；必须等到构建结束**在同一轮对话里**继续后续步骤。构建成功时 Release 以**草稿**形式生成（`releaseDraft: true`），这只是中间态，**不是终点**。
@@ -77,6 +82,8 @@
 - **应用内更新说明为空 / 只有占位符** → 发布说明文件必须在**打标签之前**进 commit（`.dev_docs/release-notes-vX.Y.Z.md`）；CI 从 tag 所在 commit 读取。事后用 `gh release edit --notes-file` 只能补 Release 正文，**重写不了已上传的 `latest.json.notes`**，应用内仍看不到说明——只能补文件、删 tag 重打。
 - **资产 URL 显示 `untagged-...`** → 属 tauri-action 上传时的内部路径，Release 仍正确挂在 tag 下，无需处理。
 - **`dev` 不能 checkout main** → 合并去 `main` 工作树执行 `git merge --no-ff dev`。
+- **`origin/*` 引用陈旧 → 合并合错对象**（本环境 git 写不进 `refs/remotes/**`：`git fetch` / `push` 报成功但引用不更新、`git status` 谎报 `ahead N`；**与沙箱无关、也非仓库损坏——别为此重 clone 或跑 `git gc`**）：若写 `git merge origin/dev` 会合到**陈旧提交**（v0.2.4 实测只合进了 README 两个文件）。**合并用本地 `dev`**；核对远端一律 `git ls-remote origin refs/heads/dev`。需拨正本地引用就改 `.git/packed-refs` 对应行（持久）。
+  **若已合错 / 已打错 tag（补救，非破坏性、无需 force-push）**：在 `main` 上再 `git merge --no-ff dev` 纠正 → `gh release delete vX.Y.Z --yes --cleanup-tag`（删坏草稿 + 远端 tag）→ `git tag -d vX.Y.Z` 后在**纠正提交**上 `git tag -a vX.Y.Z` 并 `git push origin vX.Y.Z` 触发 CI 重跑。
 - **提交排除 `.claude/`、`.mcp.json`**。
 - **版本号只改 `tauri.conf.json` 一处**（唯一真源）。`Cargo.toml` / `package.json` 已省略 `version`，`Cargo.lock` 里的 `0.0.0` 属预期，**勿手工回填**。
 - **`release.yml` 三平台并行**：Windows / Linux（ubuntu-22.04）/ macOS（macos-latest = 原生 arm64）；Linux 需在 runner 上安装 Tauri v2 官方系统依赖（webkit2gtk-4.1 等，见 workflow）。macOS 当前发未签名版（Gatekeeper 右键打开），其更新通道待 Apple 证书后启用。
@@ -91,7 +98,8 @@
 - [ ] `CHANGELOG.md` 已更新（详细、三类分段）
 - [ ] Release Note 已**复制 `release-note-template.md` 模板**填好，存为 `.dev_docs/release-notes-vX.Y.Z.md` 并随版本号一起 commit（含顶部固定文案、三大类齐全、无下载栏目、底部「详细改动参考 CHANGELOG」、**无开发期内部增减类条目**）
 - [ ] `git add` 已排除 `.claude/`、`.mcp.json`
-- [ ] `dev` 已推送、`main` 已合并并推送
+- [ ] `dev` 已推送、`main` 已合并并推送（**合并用本地 `dev`，勿用 `origin/dev`**；核对远端一律 `git ls-remote origin refs/heads/dev`）
+- [ ] **合并提交（即 tag 目标）含 `.dev_docs/release-notes-vX.Y.Z.md`**：`git ls-tree <合并提交> -- .dev_docs/ | grep release-notes-vX.Y.Z`（查不到 = 合错了对象，先纠正再打 tag）
 - [ ] tag `vX.Y.Z` 已推送并触发 CI
 - [ ] `gh release view vX.Y.Z --json body` 确认正文已是发布说明全文（仍是占位符说明 tag 里缺文件，需补文件重打 tag）
 - [ ] 已 `--draft=false --latest` 发布

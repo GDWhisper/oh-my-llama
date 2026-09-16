@@ -53,5 +53,9 @@ portable-pty = "0.8"
 #                               → Win32_UI_WindowsAndMessaging（任务栏按钮的 ICON_BIG）
 #   - CreateDIBSection / CreateBitmap / DeleteObject / CreateCompatibleDC / DeleteDC
 #                               → Win32_Graphics_Gdi（造 HICON 用）
+#   - RegCreateKeyExW / RegOpenKeyExW / RegQueryValueExW / RegSetValueExW /
+#     RegDeleteValueW / RegCloseKey
+#                               → Win32_System_Registry（开机自启的 HKCU\...\Run 项，
+#                                 见 autostart.rs；不引第三方自启插件）
 # 0.59 已锁定且本地缓存，离线可编译。
-windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_System_JobObjects", "Win32_System_Threading", "Win32_Security", "Win32_System_Console", "Win32_UI_WindowsAndMessaging", "Win32_Graphics_Gdi"] }
+windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_System_JobObjects", "Win32_System_Threading", "Win32_Security", "Win32_System_Console", "Win32_UI_WindowsAndMessaging", "Win32_Graphics_Gdi", "Win32_System_Registry"] }

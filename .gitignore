@@ -35,10 +35,18 @@ dist-ssr
 .mcp.json
 .omp/
 .pi/
+.box-agent/
 openspec/
 .dev_docs/changes/
 
 # Local scratch (build/test debris) — never commit
 tmp/
+
+# Box-Agent session working dirs (local scratch, not project source) — never commit
+/20[0-9][0-9]-[0-9][0-9]-[0-9][0-9]-*/
+
+# Promotion / video production material (local, not project source) — never commit
+/promo-video-kit/
+/promo-material/
 
 # Whole .codebuddy/ is foreign AI-tool scaffolding (not project source) — fully ignored, do not track or push.
