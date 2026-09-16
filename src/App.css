@@ -412,7 +412,7 @@ body {
     border-color 120ms ease;
 }
 
-.icon-btn: hover {
+.icon-btn:hover {
   color: var(--ink);
   background: var(--surface-2);
   border-color: var(--ink-3);
@@ -502,7 +502,7 @@ body {
   color: var(--ink-2);
   cursor: pointer;
 }
-.log-time-toggle: hover {
+.log-time-toggle:hover {
   background: var(--surface-2);
 }
 .log-time-toggle.active {
@@ -510,7 +510,7 @@ body {
   border-color: var(--accent);
   color: #ffffff;
 }
-.log-time-toggle.active: hover {
+.log-time-toggle.active:hover {
   background: var(--accent-ink);
 }
 .log-time-toggle svg {
@@ -615,7 +615,10 @@ body {
   width: 100%;
 }
 
-.field input: focus,
+/* 聚焦描边：面板里绝大多数输入框/下拉走这条。
+   排除 .extra-value-input —— 它有自己的专属聚焦样式（--custom 紫底 + 紫光环，
+   见 .extra-value-input:focus）。不排除的话，本规则特异性更高，橙描边会叠在紫光环外面。 */
+.field input:not(.extra-value-input):focus,
 .field select:focus {
   outline: 2px solid var(--accent);
   outline-offset: 0;
@@ -635,7 +638,7 @@ body {
   font-weight: 500;
 }
 
-.select-trigger: disabled {
+.select-trigger:disabled {
   background: var(--control);
   color: var(--ink-3);
   cursor: not-allowed;
@@ -703,11 +706,11 @@ body {
   border-color: var(--line);
 }
 
-.browse-btn: hover {
+.browse-btn:hover {
   background: var(--surface-2);
 }
 
-.browse-btn: disabled {
+.browse-btn:disabled {
   background: var(--control);
   color: var(--ink-3);
   cursor: not-allowed;
@@ -753,7 +756,7 @@ body {
   white-space: nowrap;
 }
 
-.path-suggest-text: hover {
+.path-suggest-text:hover {
   background: var(--surface-2);
 }
 
@@ -778,7 +781,7 @@ body {
     background 0.15s;
 }
 
-.path-suggest-remove: hover {
+.path-suggest-remove:hover {
   color: var(--stop);
   background: var(--surface-2);
 }
@@ -805,7 +808,7 @@ body {
   cursor: pointer;
 }
 
-.chip: hover {
+.chip:hover {
   background: var(--surface-2);
 }
 
@@ -843,7 +846,7 @@ body {
   color: #ffffff;
 }
 
-.btn-danger: hover {
+.btn-danger:hover {
   background: var(--stop-ink);
 }
 
@@ -917,7 +920,10 @@ body {
     box-shadow 0.15s;
 }
 
-.select-trigger: hover {
+/* 悬停态只对可点状态生效。必须带 :not(:disabled)：禁用态的规则（.select-trigger:disabled）
+   写在文件更前面，两者特异性同为 (0,2,0) 时靠后的胜出 —— 少了 :not(:disabled)，
+   悬停被禁用的下拉（未选模型目录时）边框仍会加深，与 cursor: not-allowed 自相矛盾。 */
+.select-trigger:hover:not(:disabled) {
   border-color: var(--ink-3);
 }
 
@@ -983,7 +989,7 @@ body {
   white-space: nowrap;
 }
 
-.option-main: hover {
+.option-main:hover {
   background: var(--surface-2);
 }
 
@@ -1028,7 +1034,7 @@ body {
     background 0.15s;
 }
 
-.option-delete: hover {
+.option-delete:hover {
   color: var(--stop);
   background: var(--stop-soft);
 }
@@ -1054,7 +1060,7 @@ body {
     background 0.15s;
 }
 
-.option-rename: hover {
+.option-rename:hover {
   color: var(--accent);
   background: var(--accent-soft);
 }
@@ -1085,7 +1091,7 @@ body {
   outline: none;
 }
 
-.name-input: focus {
+.name-input:focus {
   border-color: var(--accent);
   box-shadow: 0 0 0 2px var(--accent-ring);
 }
@@ -1152,7 +1158,7 @@ body {
   cursor: pointer;
 }
 
-.modal-close: hover {
+.modal-close:hover {
   background: var(--surface-2);
   color: var(--ink);
 }
@@ -1511,7 +1517,7 @@ button {
   cursor: pointer;
 }
 
-button: disabled {
+button:disabled {
   background: var(--accent-disabled);
   cursor: not-allowed;
 }
@@ -1523,7 +1529,7 @@ button: disabled {
   font-weight: 650;
 }
 
-/* 禁用态保持白底（否则会被通用 button: disabled 的浅蓝覆盖）：灰字 + 浅灰边，
+/* 禁用态保持白底（否则会被通用 button:disabled 的浅蓝覆盖）：灰字 + 浅灰边，
    视觉上与「不可点」一致但不再发蓝。覆盖 ControlPanel 的启动/打开预览等按钮。 */
 .btn-secondary:disabled {
   background: var(--surface);
@@ -1649,7 +1655,7 @@ button: disabled {
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
 }
 
-.term-jump: hover {
+.term-jump:hover {
   background: var(--code-hover);
   color: #ffffff;
 }
@@ -1691,7 +1697,7 @@ button: disabled {
   pointer-events: auto;
 }
 
-.term-maximize: hover {
+.term-maximize:hover {
   background: var(--code-hover);
   color: #ffffff;
 }
@@ -1734,7 +1740,7 @@ button: disabled {
   cursor: pointer;
 }
 
-.term-older: hover {
+.term-older:hover {
   background: var(--code-hover);
   color: #ffffff;
 }
@@ -1918,7 +1924,7 @@ button: disabled {
   cursor: pointer;
   vertical-align: middle;
 }
-.update-badge: hover {
+.update-badge:hover {
   background: var(--stop);
 }
 
@@ -1956,7 +1962,7 @@ button: disabled {
   cursor: pointer;
   user-select: none;
 }
-.settings-option-row: hover {
+.settings-option-row:hover {
   background: var(--surface-2);
 }
 
@@ -1993,7 +1999,7 @@ button: disabled {
   border-radius: var(--radius);
   cursor: pointer;
 }
-.update-toast-close: hover {
+.update-toast-close:hover {
   background: var(--surface-2);
   color: var(--ink);
 }
@@ -2025,7 +2031,7 @@ button: disabled {
   border-radius: var(--radius);
   cursor: pointer;
 }
-.update-toast-view: hover {
+.update-toast-view:hover {
   background: var(--accent-ink);
 }
 .update-toast-later {
@@ -2038,7 +2044,7 @@ button: disabled {
   border-radius: var(--radius);
   cursor: pointer;
 }
-.update-toast-later: hover {
+.update-toast-later:hover {
   background: var(--line);
 }
 
@@ -2104,7 +2110,7 @@ button: disabled {
   caret-color: var(--code);
 }
 
-.raw-box--edit: focus {
+.raw-box--edit:focus {
   outline: 2px solid var(--accent);
   outline-offset: 0;
 }
@@ -2227,13 +2233,13 @@ button: disabled {
   background: transparent;
 }
 
-.column.sidebar: :-webkit-scrollbar-thumb,
+.column.sidebar::-webkit-scrollbar-thumb,
 .column.main::-webkit-scrollbar-thumb {
   background: var(--line);
   border-radius: 4px;
 }
 
-.column.sidebar: :-webkit-scrollbar-thumb:hover,
+.column.sidebar::-webkit-scrollbar-thumb:hover,
 .column.main::-webkit-scrollbar-thumb:hover {
   background: var(--ink-3);
 }
