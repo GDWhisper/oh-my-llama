@@ -72,6 +72,9 @@
   height: 100%;
   background: var(--ink-2);
   border-radius: var(--radius);
+  /* 过渡保留 280ms（丝滑优先，用户明确要求）。命中它的那次刷新会让本条持续动画约
+     0.28s——实测把 WebView2 单次刷新的渲染/合成开销抬到 45–95ms；这是「可见且展开」
+     场景下的主要开销来源，被有意接受（本次优化只针对不可见/不使用场景）。 */
   transition: width 280ms ease;
 }
 

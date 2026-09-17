@@ -359,6 +359,7 @@ async fn resolve_close_choice(
     if minimize {
         if let Some(win) = app.get_webview_window("main") {
             let _ = win.hide();
+            emit_window_visible(&app, false);
         }
     } else {
         let _ = stop_server_inner(&app).await;
@@ -653,6 +654,7 @@ pub fn run() {
                 match pref {
                     Some(true) => {
                         let _ = window.hide();
+                        emit_window_visible(app, false);
                     }
                     Some(false) => graceful_exit(app),
                     None => {
@@ -832,11 +834,23 @@ fn apply_dpi_icons(app: &AppHandle) {
     }
 }
 
+/// 窗口可见性广播（唯一定义处）：前端据此停表/恢复轮询与指标刷新。
+///
+/// 为什么必须由后端广播：WebView2 在 `window.hide()`（wry 走 `controller.SetIsVisible(false)`）
+/// 之后**不会**把页面置为 `document.visibilityState === "hidden"`——2026-09-17 在已安装的
+/// v0.2.4 上实测，托盘常驻时前端仍按 1.5s 满频刷新系统指标（前端两处「隐藏降频」分支
+/// 因拿不到 hidden 而从未生效，空闲仍占 ~7% 单核）。故「窗口是否真的看不见」只能由
+/// 后端作为真源广播；**所有 hide/show 调用点都要调用本函数**，否则前端会停在停表状态。
+fn emit_window_visible(app: &AppHandle, visible: bool) {
+    let _ = app.emit("window://visible", visible);
+}
+
 fn show_main_window(app: &AppHandle) {
     if let Some(win) = app.get_webview_window("main") {
         let _ = win.unminimize();
         let _ = win.show();
         let _ = win.set_focus();
+        emit_window_visible(app, true);
     }
 }
 

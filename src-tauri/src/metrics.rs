@@ -30,11 +30,22 @@ pub struct MetricsSnapshot {
 }
 
 /// 跨请求复用的 System 实例（sysinfo 推荐保持常驻并增量刷新）。
+///
+/// 刻意用 `System::new()` 而非 `new_all()`：本模块只读 CPU 占用与内存总量/已用，
+/// 不需要整机进程表。`new_all()` 会把所有进程（含各自的 cmd/exe/环境字符串）枚举进
+/// `HashMap<Pid, Process>` 并常驻到进程结束——纯属白占内存。CPU 列表由
+/// `refresh_cpu_specifics` 在首次刷新时惰性建立（sysinfo 的 `CpusWrapper::init_if_needed`），
+/// 空 System 同样能拿到全局 CPU 占用。
 static SYSTEM: LazyLock<Mutex<System>> = LazyLock::new(|| {
-    let mut sys = System::new_all();
-    sys.refresh_cpu_specifics(CpuRefreshKind::everything());
+    let mut sys = System::new();
+    sys.refresh_cpu_specifics(cpu_refresh_kind());
     Mutex::new(sys)
 });
+
+/// 只刷 CPU 占用（不刷频率）：面板不展示主频，`everything()` 的频率刷新纯属浪费。
+fn cpu_refresh_kind() -> CpuRefreshKind {
+    CpuRefreshKind::new().with_cpu_usage()
+}
 
 /// 全局 NVML 实例（仅 NVIDIA）。初始化失败则为 None，降级处理。
 static NVML: LazyLock<Mutex<Option<nvml_wrapper::Nvml>>> =
@@ -93,7 +104,7 @@ fn collect_gpus() -> Vec<GpuMetrics> {
 #[tauri::command]
 pub fn get_system_metrics() -> MetricsSnapshot {
     let mut sys = SYSTEM.lock().unwrap();
-    sys.refresh_cpu_specifics(CpuRefreshKind::everything());
+    sys.refresh_cpu_specifics(cpu_refresh_kind());
     sys.refresh_memory();
 
     let cpu_usage = sys.global_cpu_info().cpu_usage();
@@ -117,5 +128,31 @@ pub fn get_system_metrics() -> MetricsSnapshot {
         mem_used_mb: mem_used / (1024 * 1024),
         mem_usage,
         gpus,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// 空 System（不枚举整机进程表）+ 只刷 CPU 占用的组合，仍须产出合法快照。
+    /// 首次调用建立 PDH 计数器（首个样本的差值为 0/无意义），故以第二次为准。
+    #[test]
+    fn snapshot_reads_cpu_and_memory_without_process_list() {
+        let _ = get_system_metrics();
+        std::thread::sleep(std::time::Duration::from_millis(150));
+        let s = get_system_metrics();
+
+        assert!(s.mem_total_mb > 0, "内存总量应可读");
+        assert!(
+            s.mem_used_mb > 0 && s.mem_used_mb <= s.mem_total_mb,
+            "已用内存应在 (0, 总量] 内"
+        );
+        assert!((0.0..=100.0).contains(&s.mem_usage), "内存占用应为百分比");
+        assert!(
+            s.cpu_usage.is_finite() && (0.0..=100.0).contains(&s.cpu_usage),
+            "CPU 占用应为 0-100 的有限值，实际 {}",
+            s.cpu_usage
+        );
     }
 }

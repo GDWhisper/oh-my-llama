@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { useI18n } from '../i18n';
+import { useWindowHidden } from '../hooks/useWindowHidden';
 import type { PerfSnapshot } from '../types';
 import './MetricsPanel.css';
 
@@ -22,12 +23,42 @@ interface MetricsSnapshot {
 }
 
 const INTERVAL = 1500;
-// 窗口隐藏/托盘常驻时降到 8s：面板看不见，满频采集是恒定浪费；切回即恢复满频。
-const INTERVAL_HIDDEN = 8000;
+// 收起态**不停表**：收起仍显示一行紧凑摘要（CPU / 内存 / GPU / 显存 / 功耗），
+// 停表会把摘要冻在旧值上（可见回归）。只降频到 3s——摘要仍在动，但用户没在看细节。
+const INTERVAL_COLLAPSED = 3000;
 
 function fmtMB(mb: number): string {
   if (mb >= 1024) return `${(mb / 1024).toFixed(1)} GB`;
   return `${Math.round(mb)} MB`;
+}
+
+/** 内存/显存换算成 16MB 桶：小于一格的抖动肉眼无差别，不应触发重渲染。 */
+function mbBucket(mb: number): number {
+  return Math.round(mb / 16);
+}
+
+/**
+ * 快照等价比较：把「看不见的抖动」归一后再比（CPU/GPU 利用率与温度、功耗取整，
+ * 内存/显存按 16MB 桶）。等价则复用旧引用，React 直接跳过重渲染。
+ * 动因：2026-09-17 实测每次刷新在 WebView2 侧要花 45–95ms（指标条宽度过渡 +
+ * 重排重绘），而 CPU 占用在小数位上每秒都在跳——静止场景占了大头。
+ */
+function sameSnapshot(prev: MetricsSnapshot | null, next: MetricsSnapshot): boolean {
+  if (!prev) return false;
+  if (Math.round(prev.cpu_usage) !== Math.round(next.cpu_usage)) return false;
+  if (mbBucket(prev.mem_used_mb) !== mbBucket(next.mem_used_mb)) return false;
+  if (mbBucket(prev.mem_total_mb) !== mbBucket(next.mem_total_mb)) return false;
+  if (prev.gpus.length !== next.gpus.length) return false;
+  for (let i = 0; i < prev.gpus.length; i += 1) {
+    const a = prev.gpus[i];
+    const b = next.gpus[i];
+    if (Math.round(a.usage) !== Math.round(b.usage)) return false;
+    if (mbBucket(a.vram_used_mb) !== mbBucket(b.vram_used_mb)) return false;
+    if (mbBucket(a.vram_total_mb) !== mbBucket(b.vram_total_mb)) return false;
+    if (Math.round(a.temperature ?? -1) !== Math.round(b.temperature ?? -1)) return false;
+    if (Math.round(a.power_usage_w ?? -1) !== Math.round(b.power_usage_w ?? -1)) return false;
+  }
+  return true;
 }
 
 function fmtTps(tps: number | null): string {
@@ -75,35 +106,36 @@ export function MetricsPanel({ perf }: { perf: PerfSnapshot | null }) {
   const [snap, setSnap] = useState<MetricsSnapshot | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [expanded, setExpanded] = useState(true);
+  // 「窗口看不见」真源：托盘隐藏由后端 window://visible 广播（WebView2 不会把页面置为
+  // hidden），最小化等路径由 document.visibilityState 兜底。
+  const hidden = useWindowHidden();
 
   useEffect(() => {
+    // 门控：窗口不可见（托盘常驻/最小化）时**完全停表**——没人看的数字不必刷新
+    // （实测每次刷新在 WebView2 侧要花 45–95ms）。面板收起则只降频（收起态仍有一行
+    // 紧凑摘要，停表会把它冻住）。恢复可见/展开时立即 tick 一次，避免先显示陈旧值。
+    if (hidden) {
+      return;
+    }
     let alive = true;
     const tick = async () => {
       try {
         const s = await invoke<MetricsSnapshot>('get_system_metrics');
         if (!alive) return;
-        setSnap(s);
+        // 数值无实质变化则复用旧引用：React 跳过重渲染，省掉整段重排重绘。
+        setSnap((prev) => (sameSnapshot(prev, s) ? prev : s));
         setErr(null);
       } catch (e) {
         if (alive) setErr(String(e));
       }
     };
-    // 频率随窗口可见性切换：visibilitychange 时按当前可见性重建定时器。
-    const currentInterval = () =>
-      document.visibilityState === 'hidden' ? INTERVAL_HIDDEN : INTERVAL;
-    let id = window.setInterval(tick, currentInterval());
-    const onVisibility = () => {
-      window.clearInterval(id);
-      id = window.setInterval(tick, currentInterval());
-    };
+    const id = window.setInterval(tick, expanded ? INTERVAL : INTERVAL_COLLAPSED);
     tick();
-    document.addEventListener('visibilitychange', onVisibility);
     return () => {
       alive = false;
       window.clearInterval(id);
-      document.removeEventListener('visibilitychange', onVisibility);
     };
-  }, []);
+  }, [hidden, expanded]);
 
   return (
     <div className="panel metrics-panel">
