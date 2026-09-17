@@ -4,6 +4,20 @@
 
 > 本文件为**详细改动历史**（含涉及的文件与实现机制）；GitHub Release 页面为对应版本的**总结性**说明。
 
+## [0.2.5] - 2026-09-17
+
+### 新增功能
+- **开机自启开关（默认关闭）**：新增 `src-tauri/src/autostart.rs`，直接用 windows-sys 的 `Win32_System_Registry`（不引第三方自启插件）读写 `HKCU\...\Run` 下自有 `VALUE_NAME` 条目；`src-tauri/Cargo.toml` 为 windows-sys 补 `Win32_System_Registry` feature。`src-tauri/src/lib.rs` 新增 `get_autostart`（`Option<bool>`，`None`=平台不支持、前端据此隐藏卡片）与 `set_autostart`（写入当前 exe 路径、返回读回真实状态供前端校准），均注册进 `generate_handler!`；`AppSettings` 不存自启镜像（避免与注册表漂移，每次实查）。`run()` 启动期调用 `autostart::heal_stale_entry()`：已开启但条目指向旧路径（便携版挪目录）时静默改指，失败不拦启动。`src/components/SettingsDialog.tsx` 加「开机自启动」卡片（仅 `get_autostart` 非 `null` 时渲染），`saveAutostart` 乐观回填 + 后端校准 + 失败回滚；`src/i18n/messages.ts` 补 `settings.autostart` / `settings.autostartHint` / `settings.autostartLabel` 中英键。
+
+### 功能优化
+- **隐藏态真正停表，降低后台 CPU**：根因 = `window.hide()` 后 WebView2 不把页面置 `document.visibilityState === 'hidden'`，旧「隐藏降频 8s」分支（`useServer` 与 `MetricsPanel` 各判一份 `visibilitychange`）从未生效，实测空闲仍占约 7% 单核。新增 `src-tauri/src/lib.rs` 的 `emit_window_visible`（唯一真源）在 `hide`/`show` 调用点广播 `window://visible`；新增 `src/hooks/useWindowHidden.ts` 合并「后端广播」与 `document.visibilityState` 双真源（`MetricsPanel` 不可见即停表、`useServer` 不可见才降频共用）。`MetricsPanel.tsx` 改为 `hidden` 时直接 `return` 完全停表，收起态 `INTERVAL` 由作废的 8s 改为 3s（`INTERVAL_COLLAPSED`，收起仍显示一行紧凑摘要、不能停表），新增 `sameSnapshot`（利用率取整 + 内存/显存 16MB 桶）等价则复用旧引用跳过 `setState`。`useServer.ts` 轮询门控与 `MetricsPanel` 统一走 `useWindowHidden`。
+- **日志批量 flush 改为事件驱动单次 timeout**：`useServer.ts` 的日志 flush 由常驻 `setInterval(LOG_FLUSH_MS)`（每秒 5 次空转）改为「首行到达挂一次 `setTimeout`、到点整批交 state、期间行自然合并」，无日志时不挂定时器，空闲期零心跳。
+- **后端指标采集瘦身**：`src-tauri/src/metrics.rs` 的 `SYSTEM` 由 `System::new_all()`（枚举整机进程表常驻）改 `System::new()` + 只 `refresh_cpu_specifics(with_cpu_usage())`（不刷主频），内存占用更低；新增单测 `snapshot_reads_cpu_and_memory_without_process_list` 覆盖空 System 组合。
+
+### Bug 修复
+- **29 处伪类选择器误写空格**：`src/App.css` 把 `.icon-btn: hover`、`.select-trigger: disabled`、`button: disabled`、`.column.sidebar: :-webkit-scrollbar-thumb` 等 29 条 `: `（冒号后空格）修正为 `:`，此前浏览器整条丢弃导致部分悬停 / 禁用 / 聚焦样式不生效；其中 `.field input:focus` 改为 `:not(.extra-value-input):focus`、`select-trigger:hover` 改为 `:hover:not(:disabled)` 以消除特异性冲突（前者让专属紫光环不被橙描边覆盖，后者让禁用态下拉边框不因悬停加深）。`scripts/check-css-selectors.mjs` + `package.json` 的 `check:css` 把该写法纳入门禁防回潮。
+- **缩略图预览头部图标仍发虚**：`src-tauri/src/lib.rs` 缩略图预览头部改按 `ICON_SMALL`（系统小图标尺寸）精确喂图，修掉 v0.2.4 仍残留的发虚（`aa52550`）；`d9eff7e` 给 `TASKBAR_ICON_BASE` 加 `#[cfg(windows)]` 修掉非 Windows 构建 dead_code（仅构建期影响，不影响发布产物）。
+
 ## [0.2.4] - 2026-09-15
 
 ### 新增功能

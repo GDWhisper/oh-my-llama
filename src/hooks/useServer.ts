@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
-import { listen } from '@tauri-apps/api/event';
 import type {
   ConfigsState,
   ParamSpec,
@@ -17,7 +16,9 @@ import {
   modelDisplayName,
   type AdvancedKey,
 } from '../lib/advanced';
+import { listenGuarded } from '../lib/listenGuarded';
 import { useI18n } from '../i18n';
+import { useWindowHidden } from './useWindowHidden';
 
 function useInterval(callback: () => void, delay: number | null) {
   useEffect(() => {
@@ -39,24 +40,6 @@ const EMPTY_ADVANCED_ENABLED = (): Record<AdvancedKey, boolean> =>
     },
     {} as Record<AdvancedKey, boolean>,
   );
-
-// listen 封装：注册成功后若组件已卸载（disposed）则立即取消监听。
-// 背景：React StrictMode 开发模式会 mount→unmount→再 mount。effect 的 async IIFE 里
-// `await listen(...)` 可能在 cleanup 执行之后才 resolve——cleanup 时 unlisten 尚未赋值、
-// 监听注册成功后若无人复查 disposed，残留 listener 会一直存活，导致同一条事件被处理
-// 两次（症状：日志面板每行双份、时间戳相同）。此封装把「注册后复查 disposed」收敛到一处。
-async function listenGuarded<T>(
-  event: string,
-  handler: (payload: T) => void,
-  isDisposed: () => boolean,
-): Promise<(() => void) | undefined> {
-  const unlisten = await listen(event, (ev) => handler(ev.payload as T));
-  if (isDisposed()) {
-    unlisten();
-    return undefined;
-  }
-  return unlisten;
-}
 
 // 受管进程「曾可服务但持续无响应」判定阈值（毫秒）。
 // 仅当进程曾被确认可服务（running=true）之后，又持续 N 秒探测不到（managed && !running），
@@ -315,13 +298,41 @@ export function useServer() {
   }, []);
 
   // 日志实时透传：挂载时先拉一次历史，随后订阅后端 log://line 增量事件。
-  // 增量行先进 ref 缓冲，由定时器按 LOG_FLUSH_MS 批量 flush 进 state——避免逐行
-  // setLogs 造成整个 App 以日志行频重渲染。log://clear 用于清空同步（立即生效）。
+  // 增量行先进 ref 缓冲，按 LOG_FLUSH_MS 批量 flush 进 state——避免逐行 setLogs
+  // 造成整个 App 以日志行频重渲染。log://clear 用于清空同步（立即生效）。
   // 用 listenGuarded 注册：StrictMode 双挂载下若本 effect 已被卸载，注册成功后立即
   // 取消，避免残留 listener 把每条日志追加两遍（每行双份）。
   useEffect(() => {
     let disposed = false;
     const unlisteners: (() => void)[] = [];
+    // flush 采用「事件驱动的单次 timeout」而非常驻 setInterval：无日志时不挂定时器，
+    // 空闲期彻底没有 200ms 心跳（此前 5 次/秒的空转在托盘常驻场景纯属浪费）。
+    // 首行到达即挂一次 timeout，到点把缓冲整批交给 state；期间到达的行自然合并进同批。
+    let flushTimer: number | null = null;
+    const flushSoon = () => {
+      if (flushTimer !== null) {
+        return;
+      }
+      flushTimer = window.setTimeout(() => {
+        flushTimer = null;
+        const batch = logBufferRef.current;
+        if (disposed || batch.length === 0) {
+          return;
+        }
+        logBufferRef.current = [];
+        // 一次追加 + 一次上限裁剪。
+        setLogs((prev) => {
+          const next = [...prev, ...batch];
+          return next.length > MAX_LOG_LINES ? next.slice(next.length - MAX_LOG_LINES) : next;
+        });
+      }, LOG_FLUSH_MS);
+    };
+    const cancelFlush = () => {
+      if (flushTimer !== null) {
+        window.clearTimeout(flushTimer);
+        flushTimer = null;
+      }
+    };
     (async () => {
       try {
         const data = await invoke<ServerLogLine[]>('read_logs');
@@ -334,8 +345,9 @@ export function useServer() {
       const unLine = await listenGuarded<ServerLogLine>(
         'log://line',
         (line) => {
-          // 只攒不渲染：批量 flush 见下方定时器。
+          // 只攒不渲染：批量 flush 见上方 flushSoon。
           logBufferRef.current.push({ ...line, id: logIdSeq.current++ });
+          flushSoon();
         },
         () => disposed,
       );
@@ -347,6 +359,7 @@ export function useServer() {
         () => {
           // clear 优先于缓冲：丢弃未 flush 的增量行并立即清空，保持时序语义。
           logBufferRef.current = [];
+          cancelFlush();
           setLogs([]);
         },
         () => disposed,
@@ -355,21 +368,9 @@ export function useServer() {
         unlisteners.push(unClear);
       }
     })();
-    // 批量 flush：缓冲非空才 setLogs，静止时零开销。一次追加 + 一次上限裁剪。
-    const flushTimer = window.setInterval(() => {
-      const batch = logBufferRef.current;
-      if (disposed || batch.length === 0) {
-        return;
-      }
-      logBufferRef.current = [];
-      setLogs((prev) => {
-        const next = [...prev, ...batch];
-        return next.length > MAX_LOG_LINES ? next.slice(next.length - MAX_LOG_LINES) : next;
-      });
-    }, LOG_FLUSH_MS);
     return () => {
       disposed = true;
-      window.clearInterval(flushTimer);
+      cancelFlush();
       unlisteners.forEach((un) => un());
     };
   }, []);
@@ -529,13 +530,10 @@ export function useServer() {
   // Object/进程组兜底），挂载时的一次性 loadStatus 即可确认初始态。
   // 启/停按钮成功后显式 loadStatus（见 start/stop），status 一变门控即自动启停；
   // 外部杀受管进程时轮询尚在（managed 期间），下一周期即发现 managed=false 并停轮询。
-  // 可见 1.5s / 隐藏 8s 维持不变（visibilitychange 切 delay 即重建 useInterval）。
-  const [hidden, setHidden] = useState(() => document.visibilityState === 'hidden');
-  useEffect(() => {
-    const syncHidden = () => setHidden(document.visibilityState === 'hidden');
-    document.addEventListener('visibilitychange', syncHidden);
-    return () => document.removeEventListener('visibilitychange', syncHidden);
-  }, []);
+  // 可见 1.5s / 隐藏 8s（delay 变即重建 useInterval）。
+  // 「隐藏」真源见 useWindowHidden：托盘隐藏只有后端 window://visible 事件能感知，
+  // WebView2 在 window.hide() 后不会把 document.visibilityState 置为 hidden。
+  const hidden = useWindowHidden();
   const polling = !!status?.managed || !!status?.running || starting;
   useInterval(refreshNow, polling ? (hidden ? POLL_INTERVAL_HIDDEN_MS : POLL_INTERVAL_MS) : null);
 
