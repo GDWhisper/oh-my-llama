@@ -3161,43 +3161,130 @@ enabled_advanced_params = ["ctx_size"]
     }
 
     #[test]
-    fn perf_accumulator_tracks_last_and_totals() {
+    fn perf_accumulator_denoises_real_request_samples() {
+        // 用户实测（27B）三组预处理样本：原始读数 1647 / 33 / 48 t/s 相差悬殊——
+        // 33 那条与 1647 同批被并发挤占，48 那条是 14-token 缓存命中断（固定开销主导）。
+        // 去噪后应回到同一档位（~1728 t/s，对应日志里 1600–1900 的大请求档）。
         let mut acc = perf::PerfAccumulator::default();
-        assert_eq!(acc.snapshot().last_prompt_tps, None);
-
-        // 两次请求：prompt 行与 eval 行分别累计。
-        assert!(acc.feed("prompt eval time = 1000.00 ms / 500 tokens (2.00 ms per token, 500.00 tokens per second)"));
         assert!(acc.feed(
-            "eval time = 4000.00 ms / 100 tokens (40.00 ms per token, 25.00 tokens per second)"
+            "0.44.917.108 I slot print_timing: id  2 | task 2 | prompt eval time =    6079.60 ms / 10016 tokens (    0.61 ms per token,  1647.48 tokens per second)"
         ));
-        assert!(acc.feed("prompt eval time = 200.00 ms / 800 tokens (0.25 ms per token, 4000.00 tokens per second)"));
-        assert!(acc.feed(
-            "eval time = 2000.00 ms / 50 tokens (40.00 ms per token, 25.00 tokens per second)"
-        ));
-
+        // 只有一个样本：没有斜率可拟合 → 估计为空、「最近」回退原始读数（数据不丢）。
         let snap = acc.snapshot();
-        // 最近一次 = 第二次请求的值。
-        assert_eq!(snap.last_prompt_tokens, Some(800));
-        assert_eq!(snap.last_prompt_tps, Some(4000.0));
-        assert_eq!(snap.last_gen_tokens, Some(50));
-        assert_eq!(snap.last_gen_tps, Some(25.0));
-        // 累计 = 两次请求之和；requests 按 eval 行计。
-        assert_eq!(snap.prompt_tokens_total, 1300);
-        assert!((snap.prompt_ms_total - 1200.0).abs() < 1e-9);
-        assert_eq!(snap.gen_tokens_total, 150);
-        assert!((snap.gen_ms_total - 6000.0).abs() < 1e-9);
-        assert_eq!(snap.requests, 2);
+        assert_eq!(snap.prompt_tps_est, None);
+        assert_eq!(snap.last_prompt_tps, Some(1647.48));
 
-        // 平均吞吐 = Σtokens / Σ时间（非各请求 TPS 的算术平均）。
-        let avg_prompt = snap.prompt_tokens_total as f64 / (snap.prompt_ms_total / 1000.0);
-        assert!((avg_prompt - 1300.0 / 1.2).abs() < 1e-9);
-        let avg_gen = snap.gen_tokens_total as f64 / (snap.gen_ms_total / 1000.0);
-        assert!((avg_gen - 25.0).abs() < 1e-9);
+        assert!(acc.feed(
+            "0.45.159.745 I slot print_timing: id  3 | task 0 | prompt eval time =    4907.43 ms /   163 tokens (   30.11 ms per token,    33.21 tokens per second)"
+        ));
+        assert!(acc.feed(
+            "1.01.160.977 I slot print_timing: id  2 | task 70 | prompt eval time =     291.49 ms /    14 tokens (   20.82 ms per token,    48.03 tokens per second)"
+        ));
+        let snap = acc.snapshot();
+        let est = snap.prompt_tps_est.expect("model fitted");
+        assert!((est - 1728.0).abs() < 1.0, "est = {est}");
+        // 「最近」（14-token 缓存命中断）扣掉固定开销后与估计同档，而不是原始的 48。
+        assert!((snap.last_prompt_tps.unwrap() - est).abs() < 1.0);
+        // 请求数只按 eval 行计；此处还没有 eval 行。
+        assert_eq!(snap.requests, 0);
+
+        // 生成侧同一批样本：45 / 64 / 241 tokens（前两条被并发摊薄），估计回到单跑档位。
+        for line in [
+            "eval time =     908.58 ms /    45 tokens (   20.65 ms per token,    48.43 tokens per second)",
+            "eval time =    2521.46 ms /    64 tokens (   40.02 ms per token,    24.99 tokens per second)",
+            "eval time =    3307.14 ms /   241 tokens (   13.78 ms per token,    72.57 tokens per second)",
+        ] {
+            assert!(acc.feed(line));
+        }
+        let snap = acc.snapshot();
+        let gen_est = snap.gen_tps_est.expect("model fitted");
+        assert!((gen_est - 81.7).abs() < 0.5, "gen_est = {gen_est}");
+        assert!((snap.last_gen_tps.unwrap() - gen_est).abs() < 0.5);
+        assert_eq!(snap.requests, 3);
 
         acc.reset();
-        assert_eq!(acc.snapshot().last_prompt_tps, None);
-        assert_eq!(acc.snapshot().last_gen_tps, None);
-        assert_eq!(acc.snapshot().requests, 0);
+        let snap = acc.snapshot();
+        assert_eq!(snap.last_prompt_tps, None);
+        assert_eq!(snap.last_gen_tps, None);
+        assert_eq!(snap.prompt_tps_est, None);
+        assert_eq!(snap.requests, 0);
+    }
+
+    #[test]
+    fn perf_envelope_ignores_slow_outliers_and_rejects_tiny_spans() {
+        // 「只变慢」的离群样本（并发挤占/卡顿）落在包络上方，加入后估计不变。
+        let mut acc = perf::PerfAccumulator::default();
+        assert!(acc.feed(
+            "prompt eval time =     291.49 ms /    14 tokens (   20.82 ms per token,    48.03 tokens per second)"
+        ));
+        assert!(acc.feed(
+            "prompt eval time =    6079.60 ms / 10016 tokens (    0.61 ms per token,  1647.48 tokens per second)"
+        ));
+        let baseline = acc.snapshot().prompt_tps_est.expect("model fitted");
+        assert!(acc.feed(
+            "prompt eval time =   30715.99 ms /  2181 tokens (   14.08 ms per token,    71.01 tokens per second)"
+        ));
+        assert!((acc.snapshot().prompt_tps_est.unwrap() - baseline).abs() < 1e-9);
+
+        // tokens 跨度不足时不给估计（斜率会由单次抖动决定），但「最近」仍显示原始读数——不丢数据。
+        let mut acc = perf::PerfAccumulator::default();
+        assert!(acc.feed(
+            "prompt eval time =     200.00 ms /   100 tokens (    2.00 ms per token,   500.00 tokens per second)"
+        ));
+        assert!(acc.feed(
+            "prompt eval time =     196.00 ms /   104 tokens (    1.88 ms per token,   530.61 tokens per second)"
+        ));
+        let snap = acc.snapshot();
+        assert_eq!(snap.prompt_tps_est, None);
+        assert_eq!(snap.last_prompt_tps, Some(530.61));
+    }
+
+    #[test]
+    fn perf_envelope_does_not_inflate_slow_devices() {
+        // 「不是为高而高」的回归锚：慢设备（真实净速度 2.0 t/s、单请求固定开销 ~280ms）
+        // 校正后必须仍是 ~2.0——上修比例恒等于「固定开销 / 该请求总时长」，慢设备上趋近于零。
+        let mut acc = perf::PerfAccumulator::default();
+        // 三个生成样本：2-token 缓存命中断（原始 1.56）/ 100-token（1.99）/ 被并发挤占的 60-token（1.58）。
+        assert!(acc.feed(
+            "eval time =    1280.00 ms /     2 tokens (  640.00 ms per token,      1.56 tokens per second)"
+        ));
+        assert!(acc.feed(
+            "eval time =   50280.00 ms /   100 tokens (  502.80 ms per token,      1.99 tokens per second)"
+        ));
+        assert!(acc.feed(
+            "eval time =   38000.00 ms /    60 tokens (  633.33 ms per token,      1.58 tokens per second)"
+        ));
+        let snap = acc.snapshot();
+        // 挤占样本只会让「过快」的候选组合不可行，估计稳定在 2.0，不会被抬高。
+        let est = snap.gen_tps_est.expect("model fitted");
+        assert!((est - 2.0).abs() < 0.01, "est = {est}");
+        // 「最近」照常反映被挤占的这次请求（低于估计），不美化运行状况。
+        assert!((snap.last_gen_tps.unwrap() - 1.59).abs() < 0.01);
+        assert_eq!(snap.requests, 3);
+    }
+
+    #[test]
+    fn perf_envelope_zero_overhead_boundary_candidate() {
+        // 实测（27B 生成侧，会话日志 llama-server_20260918_160510）：每 token 成本随
+        // 长度上升，过任意两点都会得到负固定开销（被否决）——此前该类数据无估计，
+        // 卡片只能回退显示最近值。边界候选（固定开销 = 0）应给出「最快净每 token
+        // 档位」：15.469 ms/token ≈ 64.6 t/s，而非因无解而留空。
+        let mut acc = perf::PerfAccumulator::default();
+        for line in [
+            "eval time =    1759.73 ms /   112 tokens (   15.71 ms per token,    63.65 tokens per second)",
+            "eval time =    1795.03 ms /   115 tokens (   15.61 ms per token,    64.07 tokens per second)",
+            "eval time =    2103.83 ms /   136 tokens (   15.47 ms per token,    64.64 tokens per second)",
+            "eval time =    3332.36 ms /   213 tokens (   15.64 ms per token,    63.92 tokens per second)",
+            "eval time =    4257.93 ms /   238 tokens (   17.90 ms per token,    55.89 tokens per second)",
+        ] {
+            assert!(acc.feed(line));
+        }
+        let snap = acc.snapshot();
+        let est = snap.gen_tps_est.expect("boundary candidate fitted");
+        assert!((est - 64.64).abs() < 0.05, "est = {est}");
+        // 边界模型无固定开销可扣：最近 = 原始读数（不美化这次 55.9 的偏慢样本）。
+        assert!((snap.last_gen_tps.unwrap() - 55.89).abs() < 0.05);
+        assert_eq!(snap.requests, 5);
     }
 
     #[test]

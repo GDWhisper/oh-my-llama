@@ -638,8 +638,7 @@ export const zh = {
   'metrics.prefill': '预处理',
   'metrics.generate': '生成',
   'metrics.last': '最近',
-  'metrics.avg': '平均',
-  'metrics.requests': '累计 {count} 次请求',
+  'metrics.requests': '累计请求数',
 } as const;
 
 export type MessageKey = keyof typeof zh;
@@ -1275,6 +1274,5 @@ export const en: Record<MessageKey, string> = {
   'metrics.prefill': 'Prefill',
   'metrics.generate': 'Generation',
   'metrics.last': 'Last',
-  'metrics.avg': 'Avg',
-  'metrics.requests': '{count} request(s) total',
+  'metrics.requests': 'Total requests',
 };

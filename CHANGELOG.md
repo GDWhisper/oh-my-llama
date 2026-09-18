@@ -4,6 +4,17 @@
 
 > 本文件为**详细改动历史**（含涉及的文件与实现机制）；GitHub Release 页面为对应版本的**总结性**说明。
 
+## [0.2.6] - 2026-09-18
+
+### 新增功能
+- 无
+
+### 功能优化
+- **系统性能面板改版（推理速度卡片 / GPU 功耗条 / CPU 型号）**：`src/components/MetricsPanel.tsx` 推理性能区由两行「最近·平均」改为两张卡片（`PerfCard`：大字 `metrics.est`「估计」+ 小字 `metrics.last`「最近」，卡片够宽贴右下角、放不下折行；估计未就绪回退最近值），`metrics.requests` 由内嵌「平均」+ 插值改为独立一行纯数字；GPU 行把功耗并入「已用 / 上限」占用条（`Meter` + 百分比，基准取 NVML `power_management_limit()` 或 `enforced_power_limit()`，`power_limit_w` 取不到时只显示数值、不画条），温度仅在无功耗行时并入型号行；CPU 行新增型号（`MetricsSnapshot.cpu_brand` 由 `sys.cpus().first().brand()` 取，前端 `shortCpuName` 按 Intel i 系列 / Ultra / AMD Ryzen 白名单简写，取不到不渲染）；`sameSnapshot` 同步加 `cpu_brand` / `power_limit_w` 比较。`src-tauri/src/metrics.rs` 的 `GpuMetrics` 增 `power_limit_w`、`MetricsSnapshot` 增 `cpu_brand`（sysinfo 品牌串）；`src/types.ts` 同步 `GpuMetrics.power_limit_w` / `MetricsSnapshot.cpu_brand`；`src/i18n/messages.ts` 的 `metrics.requests` 改为不带插值的「累计请求数」（中）/「Total requests」（英）。
+
+### Bug 修复
+- **推理速度口径修正（下限包络拟合替代被拉低的平均值）**：原「平均」= `Σtokens / Σ时间` 在小样本（每批固定开销主导，14-token 缓存命中断被报 48 t/s）与多 slot 并发（同一墙钟被两 slot 各记一次、算两遍）下系统性偏低，实测预处理 48 t/s 而真实约 1700。重写为不丢任何样本、不设门槛的**下限包络拟合**（`src-tauri/src/perf.rs` 的 `RateModel` / `fit_model` / `offer_candidate`：候选直线须落所有样本下方且 `overhead_ms ≥ 0`、斜率有限为正，取总残差最小、并列取更慢斜率；候选集 = 过任意两点直线 ∪ 固定开销 = 0 边界线——后者解决生成侧每 token 成本随长度上升、过两点必带负固定开销而被否决、否则无估计的问题）；显示口径「估计」= `1000 / ms_per_token`（会话净速度）、「最近」= 单样本净速率 `tokens / max(ms − overhead, tokens × ms_per_token)`（扣固定开销，上修比例 = 固定开销 / 该请求总时长，慢设备不被抬高），两样本 tokens 差 < 64 不给估计（「最近」回退原始读数）。`src/types.ts` 的 `PerfSnapshot` 删 4 个累计字段（`*_tokens_total` / `*_ms_total`）、增 `prompt_tps_est` / `gen_tps_est`；`src/i18n/messages.ts` 的 `metrics.avg` → `metrics.est`（zh「估计」/ en "Est."）；`src-tauri/src/lib.rs` 的 `mod tests` 新增 4 个单测固化真实日志回放结论（`perf_accumulator_denoises_real_request_samples` / `perf_envelope_ignores_slow_outliers_and_rejects_tiny_spans` / `perf_envelope_does_not_inflate_slow_devices` / `perf_envelope_zero_overhead_boundary_candidate`）。审查与回放结论见 `docs/perf-metrics-audit-2026-09-18.md`。
+
 ## [0.2.5] - 2026-09-17
 
 ### 新增功能
@@ -348,6 +359,7 @@
 ### 说明
 - 本版本仅提供 Windows 安装包（`.exe` NSIS / `.msi`），无需预先安装 Node / Rust。
 
+[0.2.6]: https://github.com/GDWhisper/oh-my-llama/releases/tag/v0.2.6
 [0.1.8]: https://github.com/GDWhisper/oh-my-llama/releases/tag/v0.1.8
 [0.1.7]: https://github.com/GDWhisper/oh-my-llama/releases/tag/v0.1.7
 [0.1.6]: https://github.com/GDWhisper/oh-my-llama/releases/tag/v0.1.6

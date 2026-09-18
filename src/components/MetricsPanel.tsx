@@ -12,10 +12,12 @@ interface GpuMetrics {
   vram_used_mb: number;
   temperature: number | null;
   power_usage_w: number | null;
+  power_limit_w: number | null;
 }
 
 interface MetricsSnapshot {
   cpu_usage: number;
+  cpu_brand: string;
   mem_total_mb: number;
   mem_used_mb: number;
   mem_usage: number;
@@ -46,6 +48,7 @@ function mbBucket(mb: number): number {
 function sameSnapshot(prev: MetricsSnapshot | null, next: MetricsSnapshot): boolean {
   if (!prev) return false;
   if (Math.round(prev.cpu_usage) !== Math.round(next.cpu_usage)) return false;
+  if (prev.cpu_brand !== next.cpu_brand) return false;
   if (mbBucket(prev.mem_used_mb) !== mbBucket(next.mem_used_mb)) return false;
   if (mbBucket(prev.mem_total_mb) !== mbBucket(next.mem_total_mb)) return false;
   if (prev.gpus.length !== next.gpus.length) return false;
@@ -57,20 +60,24 @@ function sameSnapshot(prev: MetricsSnapshot | null, next: MetricsSnapshot): bool
     if (mbBucket(a.vram_total_mb) !== mbBucket(b.vram_total_mb)) return false;
     if (Math.round(a.temperature ?? -1) !== Math.round(b.temperature ?? -1)) return false;
     if (Math.round(a.power_usage_w ?? -1) !== Math.round(b.power_usage_w ?? -1)) return false;
+    if (Math.round(a.power_limit_w ?? -1) !== Math.round(b.power_limit_w ?? -1)) return false;
   }
   return true;
 }
 
-function fmtTps(tps: number | null): string {
+const TPS_UNIT = 't/s';
+
+/** 速度数字：位数按量级（≥100 取整，≥10 一位，其余两位）。 */
+function fmtTpsNum(tps: number | null): string {
   if (tps == null) return '—';
   const digits = tps >= 100 ? 0 : tps >= 10 ? 1 : 2;
-  return `${tps.toFixed(digits)} tok/s`;
+  return tps.toFixed(digits);
 }
 
-// 平均吞吐 = Σtokens / Σ时间：后端只下发累计值，平均在此派生（吞吐的真实平均，非各请求 TPS 均值）。
-function avgTps(tokensTotal: number, msTotal: number): string {
-  if (tokensTotal <= 0 || msTotal <= 0) return '—';
-  return fmtTps(tokensTotal / (msTotal / 1000));
+/** 带单位的速度文本，供「最近」小字与收起态紧凑行使用。 */
+function fmtTps(tps: number | null): string {
+  const num = fmtTpsNum(tps);
+  return num === '—' ? num : `${num} ${TPS_UNIT}`;
 }
 
 /** 占用条与百分比共用：0–100，非法值归 0；≥70 高亮 accent，≥90 用 stop */
@@ -91,6 +98,59 @@ function Meter({ value }: { value: number }) {
 
 function fmtPct(value: number): string {
   return `${clampPct(value).toFixed(0)}%`;
+}
+
+/**
+ * 推理速度卡片：大字给「估计」（会话下限包络，抗并发/卡顿噪声），小字保留「最近」
+ * 单次真实读数——卡片够宽时靠右下角，放不下自动折到下一行（见 .metrics-card-body）。
+ * 估计未就绪（样本跨度不足，见 perf.rs）时大字回退最近值，不显示小字。
+ */
+function PerfCard({
+  label,
+  est,
+  last,
+}: {
+  label: string;
+  est: number | null;
+  last: number | null;
+}) {
+  const { t } = useI18n();
+  const headline = est ?? last;
+  return (
+    <div className="metrics-card">
+      <span className="metrics-card-label">{label}</span>
+      <div className="metrics-card-body">
+        <span className="metrics-card-value">
+          {fmtTpsNum(headline)}
+          {headline !== null && <span className="metrics-card-unit">{TPS_UNIT}</span>}
+        </span>
+        {est !== null && (
+          <span className="metrics-card-sub">
+            {t('metrics.last')} {fmtTps(last)}
+          </span>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// CPU 型号简写白名单：命中哪个家族就取捕获组（只留型号），未命中一律原样返回全称——
+// 免得 Xeon、未来家族或其它厂商的串被逐词替换误伤。
+const CPU_SHORTHAND: RegExp[] = [
+  // Intel i 系列 / Ultra：「13th Gen Intel(R) Core(TM) i5-13600K」→「i5-13600K」、
+  // 「Intel(R) Core(TM) Ultra 7 265K」→「Ultra 7 265K」（X 档 Ultra X9 388H 同样命中）
+  /^(?:\d+(?:st|nd|rd|th)\s+Gen\s+)?Intel\(R\)\s+Core\(TM\)\s+(i\d+-\w+|Ultra\s+X?\d+\s+\w+)/i,
+  // AMD Ryzen：「AMD Ryzen 7 5800X 8-Core Processor」→「Ryzen 7 5800X」
+  /^AMD\s+(Ryzen\b.*?)(?:\s+\d+-Core Processor)?\s*$/i,
+];
+
+function shortCpuName(brand: string): string {
+  const name = brand.trim();
+  for (const pattern of CPU_SHORTHAND) {
+    const hit = pattern.exec(name);
+    if (hit) return hit[1];
+  }
+  return name;
 }
 
 /** 「NVIDIA GeForce RTX 5070 Ti」→「RTX 5070 Ti」；完整型号仍走 title。 */
@@ -163,6 +223,12 @@ export function MetricsPanel({ perf }: { perf: PerfSnapshot | null }) {
               <span className="metrics-label">{t('metrics.cpu')}</span>
               <Meter value={snap.cpu_usage} />
               <span className="metrics-value metrics-pct">{fmtPct(snap.cpu_usage)}</span>
+              {/* 型号取不到（非 x86 等）时不显示，避免留空列 */}
+              {snap.cpu_brand && (
+                <span className="metrics-detail" title={snap.cpu_brand}>
+                  {shortCpuName(snap.cpu_brand)}
+                </span>
+              )}
             </div>
 
             {/* 内存 */}
@@ -185,17 +251,25 @@ export function MetricsPanel({ perf }: { perf: PerfSnapshot | null }) {
               snap.gpus.map((g, i) => {
                 const hasVram = g.vram_total_mb > 0;
                 const vramPct = hasVram ? (g.vram_used_mb / g.vram_total_mb) * 100 : 0;
-                const subBits: string[] = [];
-                if (hasVram) {
-                  subBits.push(`${fmtMB(g.vram_used_mb)} / ${fmtMB(g.vram_total_mb)}`);
+                const powerW = g.power_usage_w;
+                const powerLimitW = g.power_limit_w;
+                // 功耗条以功率上限为基准；上限拿不到就只显示数值、不画条。
+                const powerPct =
+                  powerW !== null && powerLimitW !== null ? (powerW / powerLimitW) * 100 : null;
+                const powerBits: string[] = [];
+                if (powerW !== null) {
+                  // 与内存/显存同款「已用 / 上限」；上限拿不到时退成只报当前值
+                  powerBits.push(
+                    powerLimitW !== null
+                      ? `${powerW.toFixed(0)} W / ${powerLimitW.toFixed(0)} W`
+                      : `${powerW.toFixed(0)} W`,
+                  );
+                  // 温度是 GPU 核心温（NVML TemperatureSensor::Gpu）；有功耗行时并入该行。
+                  if (g.temperature !== null) powerBits.push(`${g.temperature.toFixed(0)} °C`);
                 }
-                if (g.power_usage_w !== null) {
-                  subBits.push(`${t('metrics.power')} ${g.power_usage_w.toFixed(0)} W`);
-                }
-                // 温度是 GPU 核心温（NVML TemperatureSensor::Gpu），与利用率同主行展示。
                 const detailBits: string[] = [shortGpuName(g.name)];
-                if (g.temperature !== null) {
-                  detailBits.push(`${t('metrics.temp')} ${g.temperature.toFixed(0)}°C`);
+                if (powerW === null && g.temperature !== null) {
+                  detailBits.push(`${t('metrics.temp')} ${g.temperature.toFixed(0)} °C`);
                 }
                 return (
                   <div className="metrics-gpu" key={`${g.name}-${i}`}>
@@ -210,18 +284,28 @@ export function MetricsPanel({ perf }: { perf: PerfSnapshot | null }) {
                         {detailBits.join(' · ')}
                       </span>
                     </div>
-                    {subBits.length > 0 && (
+                    {hasVram && (
                       <div className="metrics-sub">
-                        {hasVram ? (
+                        <span className="metrics-label">{t('metrics.vram')}</span>
+                        <Meter value={vramPct} />
+                        <span className="metrics-value metrics-pct">{fmtPct(vramPct)}</span>
+                        <span className="metrics-sub-detail">
+                          {fmtMB(g.vram_used_mb)} / {fmtMB(g.vram_total_mb)}
+                        </span>
+                      </div>
+                    )}
+                    {powerW !== null && (
+                      <div className="metrics-sub">
+                        <span className="metrics-label">{t('metrics.power')}</span>
+                        {powerPct !== null ? (
                           <>
-                            <span className="metrics-label">{t('metrics.vram')}</span>
-                            <Meter value={vramPct} />
-                            <span className="metrics-value metrics-pct">{fmtPct(vramPct)}</span>
+                            <Meter value={powerPct} />
+                            <span className="metrics-value metrics-pct">{fmtPct(powerPct)}</span>
+                            <span className="metrics-sub-detail">{powerBits.join(' · ')}</span>
                           </>
                         ) : (
-                          <span className="metrics-label" />
+                          <span className="metrics-sub-text">{powerBits.join(' · ')}</span>
                         )}
-                        <span className="metrics-sub-detail">{subBits.join(' · ')}</span>
                       </div>
                     )}
                   </div>
@@ -229,25 +313,25 @@ export function MetricsPanel({ perf }: { perf: PerfSnapshot | null }) {
               })
             )}
 
-            {/* 推理性能：来自 llama-server 日志 timings 行（最近一次请求 + 进程生命周期累计平均）。 */}
+            {/* 推理性能：来自 llama-server 日志 timings 行（「最近」= 最近一次净速率，
+                「估计」= 会话下限包络拟合的速度，见后端 perf.rs）。 */}
             {perf && (
               <div className="metrics-perf">
-                <div className="metrics-row">
-                  <span className="metrics-label">{t('metrics.prefill')}</span>
-                  <span className="metrics-value">
-                    {t('metrics.last')} {fmtTps(perf.last_prompt_tps)} · {t('metrics.avg')}{' '}
-                    {avgTps(perf.prompt_tokens_total, perf.prompt_ms_total)}
-                  </span>
+                <div className="metrics-cards">
+                  <PerfCard
+                    label={t('metrics.prefill')}
+                    est={perf.prompt_tps_est}
+                    last={perf.last_prompt_tps}
+                  />
+                  <PerfCard
+                    label={t('metrics.generate')}
+                    est={perf.gen_tps_est}
+                    last={perf.last_gen_tps}
+                  />
                 </div>
-                <div className="metrics-row">
-                  <span className="metrics-label">{t('metrics.generate')}</span>
-                  <span className="metrics-value">
-                    {t('metrics.last')} {fmtTps(perf.last_gen_tps)} · {t('metrics.avg')}{' '}
-                    {avgTps(perf.gen_tokens_total, perf.gen_ms_total)}
-                  </span>
-                </div>
-                <div className="metrics-perf-meta">
-                  {t('metrics.requests', { count: perf.requests })}
+                <div className="metrics-requests">
+                  <span className="metrics-label">{t('metrics.requests')}</span>
+                  <span className="metrics-value">{perf.requests.toLocaleString()}</span>
                 </div>
               </div>
             )}
