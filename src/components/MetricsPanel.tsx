@@ -102,20 +102,25 @@ function fmtPct(value: number): string {
 
 /**
  * 推理速度卡片：大字给「估计」（会话下限包络，抗并发/卡顿噪声），小字保留「最近」
- * 单次真实读数——卡片够宽时靠右下角，放不下自动折到下一行（见 .metrics-card-body）。
- * 估计未就绪（样本跨度不足，见 perf.rs）时大字回退最近值，不显示小字。
+ * 单次真实读数。小字固定折在大字下一行（两卡片文案长短不一，统一折行才好对齐，
+ * 见 .metrics-card-body）。估计未就绪（样本跨度不足，见 perf.rs）时大字回退最近值。
+ * sub 为小字覆盖项（KVMem fork 传「本轮等待 + 缓存命中率」，因为该 fork 的预处理
+ * 速率受缓存命中率主导，单看 t/s 会失真）。
  */
 function PerfCard({
   label,
   est,
   last,
+  sub,
 }: {
   label: string;
   est: number | null;
   last: number | null;
+  sub?: string;
 }) {
   const { t } = useI18n();
   const headline = est ?? last;
+  const subText = sub ?? (est !== null ? `${t('metrics.last')} ${fmtTps(last)}` : null);
   return (
     <div className="metrics-card">
       <span className="metrics-card-label">{label}</span>
@@ -124,11 +129,7 @@ function PerfCard({
           {fmtTpsNum(headline)}
           {headline !== null && <span className="metrics-card-unit">{TPS_UNIT}</span>}
         </span>
-        {est !== null && (
-          <span className="metrics-card-sub">
-            {t('metrics.last')} {fmtTps(last)}
-          </span>
-        )}
+        {subText !== null && <span className="metrics-card-sub">{subText}</span>}
       </div>
     </div>
   );
@@ -313,8 +314,8 @@ export function MetricsPanel({ perf }: { perf: PerfSnapshot | null }) {
               })
             )}
 
-            {/* 推理性能：来自 llama-server 日志 timings 行（「最近」= 最近一次净速率，
-                「估计」= 会话下限包络拟合的速度，见后端 perf.rs）。 */}
+            {/* 推理性能：来自 llama-server 日志（官方 timings 行或 KVMem fork 的 KVMEM_* 行；
+                「最近」= 最近一次净速率，「估计」= 会话下限包络拟合的速度，见后端 perf.rs）。 */}
             {perf && (
               <div className="metrics-perf">
                 <div className="metrics-cards">
@@ -322,6 +323,17 @@ export function MetricsPanel({ perf }: { perf: PerfSnapshot | null }) {
                     label={t('metrics.prefill')}
                     est={perf.prompt_tps_est}
                     last={perf.last_prompt_tps}
+                    sub={
+                      // KVMem fork 专有：预处理速率受缓存命中率主导，单看 t/s 会失真，
+                      // 小字换成「本轮等待 + 命中率」；官方 llama.cpp 两字段恒为 null，走默认小字。
+                      perf.last_prompt_wait_ms != null
+                        ? `${t('metrics.wait')} ${(perf.last_prompt_wait_ms / 1000).toFixed(2)} s${
+                            perf.last_prompt_cache_hit_pct != null
+                              ? ` · ${t('metrics.hit')} ${perf.last_prompt_cache_hit_pct.toFixed(1)}%`
+                              : ''
+                          }`
+                        : undefined
+                    }
                   />
                   <PerfCard
                     label={t('metrics.generate')}
