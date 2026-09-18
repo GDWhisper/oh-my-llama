@@ -1164,8 +1164,6 @@ fn build_server_args(config: &ServerConfig) -> Vec<String> {
         config.port.to_string(),
         "-c".into(),
         config.ctx_size.to_string(),
-        "--timeout".into(),
-        "2400".into(),
     ];
 
     // 仅当「已启用且未临时禁用」时才写入对应高级参数。
@@ -2585,7 +2583,8 @@ enabled_advanced_params = ["ctx_size"]
         assert!(joined.contains("--host 127.0.0.1"));
         assert!(joined.contains("--port 8080"));
         assert!(joined.contains("-c 4096"));
-        assert!(joined.contains("--timeout 2400"));
+        // 基础参数不含 --timeout：读写超时是可选的结构化参数，默认不注入
+        assert!(!joined.contains("--timeout"));
         // 仅启用 ctx_size 时不应出现其它高级参数
         assert!(!joined.contains("-n "));
         assert!(!joined.contains("--temp"));
@@ -2690,6 +2689,7 @@ enabled_advanced_params = ["ctx_size"]
                 "offline".into(),
                 "no_repack".into(),
                 "keep".into(),
+                "timeout".into(),
                 "definitely_not_a_real_param".into(),
             ],
             disabled_structured_params: vec!["keep".into()],
@@ -2699,6 +2699,8 @@ enabled_advanced_params = ["ctx_size"]
         let joined = build_server_args(&config).join(" ");
         assert!(joined.contains("--top-p 0.9"));
         assert!(joined.contains("--parallel 4"));
+        // 启用但未显式给值时用注册表默认值（timeout 默认 2400）
+        assert!(joined.contains("--timeout 2400"));
         // 布尔真值 → 裸 flag，不带 value
         assert!(joined.contains("--offline"));
         assert!(!joined.contains("--offline true"));
