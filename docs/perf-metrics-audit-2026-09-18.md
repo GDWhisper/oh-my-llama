@@ -39,6 +39,8 @@
 2. `overhead_ms ≥ 0`、斜率有限且为正；
 3. 取总残差最小者；并列取**斜率更慢**者（更保守的速度估计）。
 
+候选集 = 过任意两点的直线 ∪ **固定开销 = 0 的边界线**（`offer_candidate` 统一按总残差比较；边界线斜率取全体样本的最小每 token 耗时，是 O = 0 时唯一不穿过样本的斜率）。边界族不可缺：生成侧每 token 成本随长度上升（实测同一会话 15.5 → 18.6 ms/token），过任意两点的直线都带负固定开销、被第 2 条否决——缺了它该类数据**没有任何估计**，卡片只能回退显示最近值（表现为「生成卡片没有最近小字」，2026-09-18 用户实测发现）。
+
 显示口径：
 
 - **「最近」** = 单样本净速率 `tokens / max(ms − overhead, tokens × ms_per_token)`（扣每批固定开销）；
@@ -62,6 +64,7 @@
 | 20260918（本报告触发） | 预处理 最近/估计 **1728.03 / 1728.03**（原 48.0 / 904）；生成 **81.72 / 81.72**（原 72.6 / 52.0）；requests 3 |
 | 20260915（含 2181 tok / 30.7 s 离群样本） | 估计 **1721.64**，离群样本不污染；该次被挤占的请求在「最近」如实显示低值 |
 | 20260913（MiniCPM5-2B） | 大 prefill 原始 8612.62 → 估计 **8797.07**（+2.1%，固定开销占比小） |
+| 20260918_160510（改版后会话，回放时点 28 请求） | 预处理 最近/估计 **887.60 / 1611.64**；生成 **52.88 / 64.64**（边界候选生效） |
 | 慢设备（合成回归） | 真实 2.0 t/s + ~280 ms 固定开销 → 估计 **2.0**（上修趋近 0，不被抬高） |
 
 > 回放经临时测试完成（含机器路径，跑完已删）；结论已由 4.2 的单测固化。
@@ -70,9 +73,10 @@
 
 - `perf_accumulator_denoises_real_request_samples`——本报告日志原样样本（1647/33/48 → 1728；48/25/73 → 81.7）；
 - `perf_envelope_ignores_slow_outliers_and_rejects_tiny_spans`——离群样本免疫 + 跨度不足回退原始读数；
-- `perf_envelope_does_not_inflate_slow_devices`——「不为高而高」回归锚：慢设备（真实 2.0 t/s）含挤占样本仍输出 2.0，挤占只影响「最近」。
+- `perf_envelope_does_not_inflate_slow_devices`——「不为高而高」回归锚：慢设备（真实 2.0 t/s）含挤占样本仍输出 2.0，挤占只影响「最近」；
+- `perf_envelope_zero_overhead_boundary_candidate`——边界候选回归：成本随长度上升的生成样本（过两点全被否决）仍给出 64.6 t/s 估计。
 
-门禁：`npm run check` 全绿（tsc / eslint / prettier / check:css + `cargo fmt --check` + `clippy -D warnings`）；`cargo test --lib` **33 passed**。
+门禁：`npm run check` 全绿（tsc / eslint / prettier / check:css + `cargo fmt --check` + `clippy -D warnings`）；`cargo test --lib` **34 passed**。
 
 ## 五、已知限制
 
