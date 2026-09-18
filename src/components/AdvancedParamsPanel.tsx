@@ -50,6 +50,17 @@ function parentDirOf(path: string): string {
 // 全量铺开会淹没面板，超出部分提示用户继续输入缩小范围。
 const MAX_SUGGESTIONS = 24;
 
+// 上下文长度快捷预设：标签是日常叫法（K = 1024 tokens），点击填入 llama-server
+// 实际接受的 token 数。数字记法各语言通用，无需 i18n。
+const CTX_PRESETS = [
+  { label: '8K', value: 8192 },
+  { label: '64K', value: 65536 },
+  { label: '96K', value: 98304 },
+  { label: '128K', value: 131072 },
+  { label: '200K', value: 204800 },
+  { label: '256K', value: 262144 },
+];
+
 // 自定义参数行的归属列表：'enabled' = 启用（写入启动命令行），'disabled' = 临时禁用（保留文本不写入）。
 export type ExtraArgList = 'enabled' | 'disabled';
 
@@ -591,6 +602,21 @@ export function AdvancedParamsPanel(props: Props) {
                     onChange({ ...config, ctx_size: Number(raw || 0) });
                   }}
                 />
+                <div className="ctx-presets">
+                  {CTX_PRESETS.map(({ label, value }) => (
+                    <button
+                      key={label}
+                      type="button"
+                      className="chip"
+                      onClick={() => {
+                        setCtxDraft(String(value));
+                        onChange({ ...config, ctx_size: value });
+                      }}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
                 <div className="field-hint">{t('advanced.ctxHint')}</div>
               </>
             )}
