@@ -1,4 +1,4 @@
-//! llama-server 推理性能采集：解析日志中的 timings 行，维护「最近一次」与「累计平均」。
+//! llama-server 推理性能采集：解析日志中的 timings 行，输出「最近一次净速率」与会话速度估计。
 //!
 //! 数据源是 llama-server 每次请求完成后默认打印的日志行（无需 --metrics 等额外参数）：
 //! ```text
@@ -10,9 +10,19 @@
 //! - 伪终端（ConPTY）按 80 列把长行拦腰折断，一行 timings 可能拆成多条日志（数字从中间断开），
 //!   续行紧跟其后且无前缀，需拼接后解析（见 `PerfAccumulator::feed`）。
 //!
-//! 「平均」按 Σtokens / Σ时间 聚合——这是吞吐量的真实平均，而非各请求 TPS 的算术平均
-//! （后者会被小请求过度加权）。累计窗口 = 当前 llama-server 进程生命周期：
-//! 启动即清零、退出即清空并推送空快照，前端据此隐藏区块。
+//! 原始读数不能直接展示，两类系统性偏差要在线去噪（**不设样本门槛、不丢任何样本**）：
+//! - 耗时 ≈ 固定开销 + 每 token 成本 × tokens 中的固定开销（批启动/图构建）让小样本被开销
+//!   主导——实测 14-token 缓存命中断只报 48 t/s，而同一批的大请求 ~1650 t/s；
+//! - 多 slot 并发、卡顿/换页等只会让请求「变慢」——实测有 2181 tokens 耗 30.7 s 的离群样本。
+//!
+//! 故对每类样本做下限包络拟合：候选直线必须在所有样本下方（「变慢」只会把点推离包络，不污染
+//! 估计），取总残差最小者；其斜率倒数即会话速度估计（等价于本会话能达到的净速度）。小样本
+//! 正是钉住截距（固定开销）的关键数据，一律参与拟合。
+//!
+//! 累计窗口 = 当前 llama-server 进程生命周期：启动即清零、退出即清空并推送空快照，
+//! 前端据此隐藏区块。
+
+use std::collections::VecDeque;
 
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager};
@@ -23,6 +33,13 @@ pub type PerfState = std::sync::Mutex<PerfAccumulator>;
 /// 续行拼接缓冲上限（字节）：一条完整 timings 行约 150 字节，1024 足够宽容且防失控增长。
 const MAX_PENDING_LEN: usize = 1024;
 
+/// 拟合窗口（每类样本数）：只保留最近 N 个样本，更早的样本对「当前速度」参考价值递减。
+const FIT_WINDOW: usize = 128;
+
+/// 拟合两点所需的最小 tokens 跨度：两个小样本若靠得太近，斜率完全由单次抖动决定，
+/// 不足以作为速度估计（此时估计留空，样本仍照常参与后续拟合与「最近」展示）。
+const MIN_FIT_TOKEN_SPAN: u64 = 64;
+
 /// 从一行日志解析出的 timings 样本。
 #[derive(Debug, Clone, Copy, PartialEq, Serialize)]
 pub struct TimingSample {
@@ -32,21 +49,78 @@ pub struct TimingSample {
     pub tps: f64,
 }
 
-/// 前端可见的推理性能快照（perf://update 载荷 / get_perf_stats 返回值）。
-/// last_* 为最近一次请求；*_total 为当前服务进程生命周期内的累计（平均由前端派生）。
-#[derive(Debug, Clone, Default, PartialEq, Serialize)]
-pub struct PerfSnapshot {
-    pub last_prompt_tokens: Option<u64>,
-    pub last_prompt_ms: Option<f64>,
-    pub last_prompt_tps: Option<f64>,
-    pub last_gen_tokens: Option<u64>,
-    pub last_gen_ms: Option<f64>,
-    pub last_gen_tps: Option<f64>,
-    pub prompt_tokens_total: u64,
-    pub prompt_ms_total: f64,
-    pub gen_tokens_total: u64,
-    pub gen_ms_total: f64,
-    pub requests: u64,
+/// 下限包络模型：耗时 ≈ overhead_ms + ms_per_token × tokens。落在包络上方的额外耗时
+/// （并发挤占、卡顿等「只变慢」的噪声）不参与速度估计。
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct RateModel {
+    overhead_ms: f64,
+    ms_per_token: f64,
+}
+
+impl RateModel {
+    /// 会话速度估计：包络斜率倒数。
+    fn tps(&self) -> f64 {
+        1000.0 / self.ms_per_token
+    }
+
+    /// 单样本的净速率：扣掉固定开销。净时间下限为纯计算时间（浮点兜底；包络保证实际不触发）。
+    fn corrected_tps(&self, s: &TimingSample) -> f64 {
+        let net_ms = (s.ms - self.overhead_ms).max(s.tokens as f64 * self.ms_per_token);
+        s.tokens as f64 / (net_ms / 1000.0)
+    }
+}
+
+/// 下限包络拟合：枚举过任意两点的候选直线，保留「所有样本都在线上方且固定开销 ≥ 0」者，
+/// 取总残差最小；并列取斜率较大者（更保守的速度估计）。
+fn fit_model(samples: &VecDeque<TimingSample>) -> Option<RateModel> {
+    let mut best: Option<(f64, RateModel)> = None;
+    for (i, a) in samples.iter().enumerate() {
+        for b in samples.iter().skip(i + 1) {
+            let ((t1, m1), (t2, m2)) = if a.tokens <= b.tokens {
+                ((a.tokens, a.ms), (b.tokens, b.ms))
+            } else {
+                ((b.tokens, b.ms), (a.tokens, a.ms))
+            };
+            if t2 - t1 < MIN_FIT_TOKEN_SPAN {
+                continue;
+            }
+            let ms_per_token = (m2 - m1) / (t2 - t1) as f64;
+            let overhead_ms = m1 - ms_per_token * t1 as f64;
+            if !ms_per_token.is_finite() || ms_per_token <= 0.0 || overhead_ms < 0.0 {
+                continue;
+            }
+            // 包络条件：所有样本都在线上方（否则不是可行直线）。
+            let mut slack = 0.0;
+            let mut feasible = true;
+            for s in samples {
+                let residual = s.ms - (overhead_ms + ms_per_token * s.tokens as f64);
+                if residual < -1e-9 {
+                    feasible = false;
+                    break;
+                }
+                slack += residual;
+            }
+            if !feasible {
+                continue;
+            }
+            let candidate = RateModel {
+                overhead_ms,
+                ms_per_token,
+            };
+            let better = match best {
+                None => true,
+                Some((best_slack, best_model)) => {
+                    slack < best_slack - 1e-9
+                        || ((slack - best_slack).abs() <= 1e-9
+                            && candidate.ms_per_token > best_model.ms_per_token)
+                }
+            };
+            if better {
+                best = Some((slack, candidate));
+            }
+        }
+    }
+    best.map(|(_, model)| model)
 }
 
 /// 未完成的 timings 行（被 PTY 折断），挂起等下一行拼接。
@@ -92,16 +166,16 @@ fn parse_timing_body(is_prompt: bool, body: &str) -> Option<TimingSample> {
     })
 }
 
-/// 累计器：当前服务进程生命周期内的最近一次 + 累计值，兼持折断行的拼接状态。
+/// 累计器：持有最近样本、包络模型与折断行的拼接状态。
 #[derive(Debug, Default)]
 pub struct PerfAccumulator {
     pending: Option<PendingTiming>,
     last_prompt: Option<TimingSample>,
     last_gen: Option<TimingSample>,
-    prompt_tokens_total: u64,
-    prompt_ms_total: f64,
-    gen_tokens_total: u64,
-    gen_ms_total: f64,
+    prompt_samples: VecDeque<TimingSample>,
+    gen_samples: VecDeque<TimingSample>,
+    prompt_model: Option<RateModel>,
+    gen_model: Option<RateModel>,
     requests: u64,
 }
 
@@ -146,31 +220,41 @@ impl PerfAccumulator {
     fn record(&mut self, s: TimingSample) {
         if s.is_prompt {
             self.last_prompt = Some(s);
-            self.prompt_tokens_total += s.tokens;
-            self.prompt_ms_total += s.ms;
+            Self::push_sample(&mut self.prompt_samples, s);
+            self.prompt_model = fit_model(&self.prompt_samples);
         } else {
-            self.last_gen = Some(s);
-            self.gen_tokens_total += s.tokens;
-            self.gen_ms_total += s.ms;
             // 每条 eval 行对应一次请求完成（缓存全命中时可能没有 prompt 行）。
             self.requests += 1;
+            self.last_gen = Some(s);
+            Self::push_sample(&mut self.gen_samples, s);
+            self.gen_model = fit_model(&self.gen_samples);
         }
     }
 
+    /// 样本入窗口（含包络拟合用的历史）；超出窗口丢最旧的一个。
+    fn push_sample(samples: &mut VecDeque<TimingSample>, s: TimingSample) {
+        if samples.len() >= FIT_WINDOW {
+            samples.pop_front();
+        }
+        samples.push_back(s);
+    }
+
     pub fn snapshot(&self) -> PerfSnapshot {
-        let lp = self.last_prompt.as_ref();
-        let lg = self.last_gen.as_ref();
+        // 无模型（样本跨度不足）时「最近」给原始读数：不隐藏数据；估计列以 null 呈现。
+        let last_tps = |s: Option<&TimingSample>, model: Option<RateModel>| match (s, model) {
+            (Some(s), Some(model)) => Some(model.corrected_tps(s)),
+            (Some(s), None) => Some(s.tps),
+            (None, _) => None,
+        };
         PerfSnapshot {
-            last_prompt_tokens: lp.map(|s| s.tokens),
-            last_prompt_ms: lp.map(|s| s.ms),
-            last_prompt_tps: lp.map(|s| s.tps),
-            last_gen_tokens: lg.map(|s| s.tokens),
-            last_gen_ms: lg.map(|s| s.ms),
-            last_gen_tps: lg.map(|s| s.tps),
-            prompt_tokens_total: self.prompt_tokens_total,
-            prompt_ms_total: self.prompt_ms_total,
-            gen_tokens_total: self.gen_tokens_total,
-            gen_ms_total: self.gen_ms_total,
+            last_prompt_tokens: self.last_prompt.map(|s| s.tokens),
+            last_prompt_ms: self.last_prompt.map(|s| s.ms),
+            last_prompt_tps: last_tps(self.last_prompt.as_ref(), self.prompt_model),
+            prompt_tps_est: self.prompt_model.map(|m| m.tps()),
+            last_gen_tokens: self.last_gen.map(|s| s.tokens),
+            last_gen_ms: self.last_gen.map(|s| s.ms),
+            last_gen_tps: last_tps(self.last_gen.as_ref(), self.gen_model),
+            gen_tps_est: self.gen_model.map(|m| m.tps()),
             requests: self.requests,
         }
     }
@@ -178,6 +262,22 @@ impl PerfAccumulator {
     pub fn reset(&mut self) {
         *self = Self::default();
     }
+}
+
+/// 前端可见的推理性能快照（perf://update 载荷 / get_perf_stats 返回值）。
+/// last_* = 最近一次样本（tps 为扣固定开销后的净速率）；*_tps_est = 会话速度估计
+/// （下限包络拟合的斜率倒数，对并发挤占/卡顿等「只变慢」噪声稳健；拟合未就绪为 null）。
+#[derive(Debug, Clone, Default, PartialEq, Serialize)]
+pub struct PerfSnapshot {
+    pub last_prompt_tokens: Option<u64>,
+    pub last_prompt_ms: Option<f64>,
+    pub last_prompt_tps: Option<f64>,
+    pub prompt_tps_est: Option<f64>,
+    pub last_gen_tokens: Option<u64>,
+    pub last_gen_ms: Option<f64>,
+    pub last_gen_tps: Option<f64>,
+    pub gen_tps_est: Option<f64>,
+    pub requests: u64,
 }
 
 /// 消费线程每收到一行日志调用：命中 timings 行则累计并向前端推送快照。

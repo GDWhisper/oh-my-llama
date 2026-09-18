@@ -78,19 +78,18 @@ export interface ServerLogLine {
 
 // llama-server 推理性能快照（perf://update 载荷 / get_perf_stats 返回值）。
 // 由后端解析 llama-server 日志中的 timings 行而来，无需 --metrics 等额外参数：
-// last_* = 最近一次请求；*_total = 当前服务进程生命周期内的累计（平均 = Σtokens / Σ时间，前端派生）。
+// last_* = 最近一次样本（tps 已扣每批固定开销）；*_tps_est = 会话速度估计
+// （下限包络拟合的斜率倒数，对并发挤占/卡顿等「只变慢」的噪声稳健；拟合未就绪为 null）。
 // 服务进程启动/退出时后端清零并推送空快照，前端将无数据快照归一为 null 以隐藏区块。
 export interface PerfSnapshot {
   last_prompt_tokens: number | null;
   last_prompt_ms: number | null;
   last_prompt_tps: number | null;
+  prompt_tps_est: number | null;
   last_gen_tokens: number | null;
   last_gen_ms: number | null;
   last_gen_tps: number | null;
-  prompt_tokens_total: number;
-  prompt_ms_total: number;
-  gen_tokens_total: number;
-  gen_ms_total: number;
+  gen_tps_est: number | null;
   requests: number;
 }
 

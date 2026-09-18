@@ -67,12 +67,6 @@ function fmtTps(tps: number | null): string {
   return `${tps.toFixed(digits)} tok/s`;
 }
 
-// 平均吞吐 = Σtokens / Σ时间：后端只下发累计值，平均在此派生（吞吐的真实平均，非各请求 TPS 均值）。
-function avgTps(tokensTotal: number, msTotal: number): string {
-  if (tokensTotal <= 0 || msTotal <= 0) return '—';
-  return fmtTps(tokensTotal / (msTotal / 1000));
-}
-
 /** 占用条与百分比共用：0–100，非法值归 0；≥70 高亮 accent，≥90 用 stop */
 function clampPct(value: number): number {
   if (!Number.isFinite(value)) return 0;
@@ -229,21 +223,22 @@ export function MetricsPanel({ perf }: { perf: PerfSnapshot | null }) {
               })
             )}
 
-            {/* 推理性能：来自 llama-server 日志 timings 行（最近一次请求 + 进程生命周期累计平均）。 */}
+            {/* 推理性能：来自 llama-server 日志 timings 行（「最近」= 最近一次净速率，
+                「估计」= 会话下限包络拟合的速度，见后端 perf.rs）。 */}
             {perf && (
               <div className="metrics-perf">
                 <div className="metrics-row">
                   <span className="metrics-label">{t('metrics.prefill')}</span>
                   <span className="metrics-value">
-                    {t('metrics.last')} {fmtTps(perf.last_prompt_tps)} · {t('metrics.avg')}{' '}
-                    {avgTps(perf.prompt_tokens_total, perf.prompt_ms_total)}
+                    {t('metrics.last')} {fmtTps(perf.last_prompt_tps)} · {t('metrics.est')}{' '}
+                    {fmtTps(perf.prompt_tps_est)}
                   </span>
                 </div>
                 <div className="metrics-row">
                   <span className="metrics-label">{t('metrics.generate')}</span>
                   <span className="metrics-value">
-                    {t('metrics.last')} {fmtTps(perf.last_gen_tps)} · {t('metrics.avg')}{' '}
-                    {avgTps(perf.gen_tokens_total, perf.gen_ms_total)}
+                    {t('metrics.last')} {fmtTps(perf.last_gen_tps)} · {t('metrics.est')}{' '}
+                    {fmtTps(perf.gen_tps_est)}
                   </span>
                 </div>
                 <div className="metrics-perf-meta">
