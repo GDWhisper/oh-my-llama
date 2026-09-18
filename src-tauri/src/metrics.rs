@@ -18,11 +18,13 @@ pub struct GpuMetrics {
     pub vram_used_mb: u64,
     pub temperature: Option<f32>,   // Celsius，None 表示取不到
     pub power_usage_w: Option<f32>, // 当前功耗（瓦），None 表示取不到
+    pub power_limit_w: Option<f32>, // 功率上限（瓦），功耗条填充比例的基准；None 表示取不到
 }
 
 #[derive(Debug, Clone, Serialize)]
 pub struct MetricsSnapshot {
-    pub cpu_usage: f32, // 0-100 全局占用
+    pub cpu_usage: f32,    // 0-100 全局占用
+    pub cpu_brand: String, // CPU 型号（sysinfo 的 CPUID 品牌串）；非 x86 等取不到时为空串
     pub mem_total_mb: u64,
     pub mem_used_mb: u64,
     pub mem_usage: f32, // 0-100
@@ -88,6 +90,14 @@ fn collect_gpus() -> Vec<GpuMetrics> {
             .map(|t| t as f32);
         // NVML 返回毫瓦；消费卡多数支持，驱动/机型不支持时为 None。
         let power_usage_w = device.power_usage().ok().map(|mw| mw as f32 / 1000.0);
+        // 功耗条基准取「当前生效上限」（用户在 nvidia-smi -pl 里改过就跟随），
+        // 取不到再退回配置上限；仍为 0 视为不可用（避免前端除以 0）。
+        let power_limit_w = device
+            .power_management_limit()
+            .or_else(|_| device.enforced_power_limit())
+            .ok()
+            .map(|mw| mw as f32 / 1000.0)
+            .filter(|w| *w > 0.0);
 
         out.push(GpuMetrics {
             name,
@@ -96,6 +106,7 @@ fn collect_gpus() -> Vec<GpuMetrics> {
             vram_used_mb,
             temperature,
             power_usage_w,
+            power_limit_w,
         });
     }
     out
@@ -108,6 +119,12 @@ pub fn get_system_metrics() -> MetricsSnapshot {
     sys.refresh_memory();
 
     let cpu_usage = sys.global_cpu_info().cpu_usage();
+    // 品牌串随 CPU 列表在首次刷新时一并填充，此后只是读取常驻字符串（无需额外轮询开销）。
+    let cpu_brand = sys
+        .cpus()
+        .first()
+        .map(|c| c.brand().trim().to_string())
+        .unwrap_or_default();
 
     let mem_total = sys.total_memory();
     let mem_used = sys.used_memory();
@@ -124,6 +141,7 @@ pub fn get_system_metrics() -> MetricsSnapshot {
 
     MetricsSnapshot {
         cpu_usage,
+        cpu_brand,
         mem_total_mb: mem_total / (1024 * 1024),
         mem_used_mb: mem_used / (1024 * 1024),
         mem_usage,

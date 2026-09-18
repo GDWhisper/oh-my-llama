@@ -129,25 +129,83 @@
   min-width: 0;
 }
 
-/* 推理性能：无占用条，数值从条列起铺满 */
+/* 无条可画的子行（如拿不到功率上限的功耗行）：数值紧贴标签起排，不留空列 */
+.metrics-sub-text {
+  grid-column: 2 / -1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+
+/* 推理性能：紧贴上方占用条（不留大段空白），仅以细分隔线区隔 */
 .metrics-perf {
   border-top: 1px solid var(--line);
-  padding-top: 8px;
-  margin-top: 3px;
+  padding-top: 7px;
+  margin-top: 4px;
   display: flex;
   flex-direction: column;
-  gap: 5px;
+  gap: 7px;
 }
 
-.metrics-perf .metrics-row {
-  grid-template-columns: 40px minmax(0, 1fr);
+/* 预处理/生成两格并排 */
+.metrics-cards {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
 }
 
-.metrics-perf-meta {
-  font-size: 12px;
+/* 速度卡片：底用浅色面、直角硬描边，大字给会话估计值 */
+.metrics-card {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 5px 9px 6px;
+  background: var(--surface-2);
+  border: 1px solid var(--header-border);
+  border-radius: var(--radius);
+}
+
+.metrics-card-label {
   color: var(--ink-3);
-  padding-left: 82px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  line-height: 1.3;
+  white-space: nowrap;
+}
+
+.metrics-card-value {
+  color: var(--accent-ink);
+  font-family: var(--ui);
+  font-weight: 700;
+  font-size: 26px;
+  line-height: 1.15;
+  letter-spacing: -0.01em;
   font-variant-numeric: tabular-nums;
+}
+
+.metrics-card-unit {
+  font-size: 13px;
+  font-weight: 650;
+  color: var(--ink-3);
+  margin-left: 3px;
+}
+
+.metrics-card-sub {
+  font-size: 11px;
+  color: var(--ink-3);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* 累计请求数：左标签 + 右对齐计数 */
+.metrics-requests {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
 }
 
 .metrics-error {
