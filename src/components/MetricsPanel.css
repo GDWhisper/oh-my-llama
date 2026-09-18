@@ -176,13 +176,27 @@
   white-space: nowrap;
 }
 
-/* 大字与小字固定分两行：两卡片文案长短不一（KVMem 的「等待 · 命中」明显更长），
-   若只让放不下的那张折行，两张卡的行高就不一致——统一折行、小字左对齐贴大字下方 */
+/* 大字与小字默认同排：小字贴右下角（基线对齐）。放不下的那张会自行折行，但两卡文案
+   长短不同、折得会不一致——任一张放不下时由 .stack-sub 让两张一起折（判定与测量见
+   MetricsPanel.tsx 的 stackSub）。 */
 .metrics-card-body {
   display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0 8px;
+}
+
+/* 折行态：小字独立一行、右对齐（与同排时贴右的位置一致）。column-gap 保留 8px：
+   与同排态一致，测量（读 columnGap）在两个态下结果相同，不会来回抖。 */
+.metrics-cards.stack-sub .metrics-card-body {
   flex-direction: column;
   align-items: flex-start;
-  gap: 0;
+  gap: 0 8px;
+}
+
+.metrics-cards.stack-sub .metrics-card-sub {
+  align-self: flex-end;
 }
 
 .metrics-card-value {
