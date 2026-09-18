@@ -102,7 +102,8 @@ function fmtPct(value: number): string {
 
 /**
  * 推理速度卡片：大字给「估计」（会话下限包络，抗并发/卡顿噪声），小字保留「最近」
- * 单次真实读数。估计未就绪（样本跨度不足，见 perf.rs）时大字回退最近值，不显示小字。
+ * 单次真实读数——卡片够宽时靠右下角，放不下自动折到下一行（见 .metrics-card-body）。
+ * 估计未就绪（样本跨度不足，见 perf.rs）时大字回退最近值，不显示小字。
  */
 function PerfCard({
   label,
@@ -118,15 +119,17 @@ function PerfCard({
   return (
     <div className="metrics-card">
       <span className="metrics-card-label">{label}</span>
-      <span className="metrics-card-value">
-        {fmtTpsNum(headline)}
-        {headline !== null && <span className="metrics-card-unit">{TPS_UNIT}</span>}
-      </span>
-      {est !== null && (
-        <span className="metrics-card-sub">
-          {t('metrics.last')} {fmtTps(last)}
+      <div className="metrics-card-body">
+        <span className="metrics-card-value">
+          {fmtTpsNum(headline)}
+          {headline !== null && <span className="metrics-card-unit">{TPS_UNIT}</span>}
         </span>
-      )}
+        {est !== null && (
+          <span className="metrics-card-sub">
+            {t('metrics.last')} {fmtTps(last)}
+          </span>
+        )}
+      </div>
     </div>
   );
 }

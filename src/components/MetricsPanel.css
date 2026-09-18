@@ -176,6 +176,15 @@
   white-space: nowrap;
 }
 
+/* 大字与「最近」同排：够宽时「最近」贴右下角（基线对齐），放不下自动折行回到大字下方 */
+.metrics-card-body {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0 8px;
+}
+
 .metrics-card-value {
   color: var(--accent-ink);
   font-family: var(--ui);
