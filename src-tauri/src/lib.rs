@@ -3264,6 +3264,30 @@ enabled_advanced_params = ["ctx_size"]
     }
 
     #[test]
+    fn perf_envelope_zero_overhead_boundary_candidate() {
+        // 实测（27B 生成侧，会话日志 llama-server_20260918_160510）：每 token 成本随
+        // 长度上升，过任意两点都会得到负固定开销（被否决）——此前该类数据无估计，
+        // 卡片只能回退显示最近值。边界候选（固定开销 = 0）应给出「最快净每 token
+        // 档位」：15.469 ms/token ≈ 64.6 t/s，而非因无解而留空。
+        let mut acc = perf::PerfAccumulator::default();
+        for line in [
+            "eval time =    1759.73 ms /   112 tokens (   15.71 ms per token,    63.65 tokens per second)",
+            "eval time =    1795.03 ms /   115 tokens (   15.61 ms per token,    64.07 tokens per second)",
+            "eval time =    2103.83 ms /   136 tokens (   15.47 ms per token,    64.64 tokens per second)",
+            "eval time =    3332.36 ms /   213 tokens (   15.64 ms per token,    63.92 tokens per second)",
+            "eval time =    4257.93 ms /   238 tokens (   17.90 ms per token,    55.89 tokens per second)",
+        ] {
+            assert!(acc.feed(line));
+        }
+        let snap = acc.snapshot();
+        let est = snap.gen_tps_est.expect("boundary candidate fitted");
+        assert!((est - 64.64).abs() < 0.05, "est = {est}");
+        // 边界模型无固定开销可扣：最近 = 原始读数（不美化这次 55.9 的偏慢样本）。
+        assert!((snap.last_gen_tps.unwrap() - 55.89).abs() < 0.05);
+        assert_eq!(snap.requests, 5);
+    }
+
+    #[test]
     fn prune_log_files_keeps_latest_and_ignores_others() {
         let dir = std::env::temp_dir().join(format!("llama_logprune_test_{}", std::process::id()));
         std::fs::create_dir_all(&dir).expect("create temp dir");

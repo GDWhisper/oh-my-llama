@@ -70,8 +70,8 @@ impl RateModel {
     }
 }
 
-/// 下限包络拟合：枚举过任意两点的候选直线，保留「所有样本都在线上方且固定开销 ≥ 0」者，
-/// 取总残差最小；并列取斜率较大者（更保守的速度估计）。
+/// 下限包络拟合：枚举过任意两点的候选直线与「固定开销 = 0」的边界候选，
+/// 保留「所有样本都在线上方且固定开销 ≥ 0」者，取总残差最小；并列取斜率较大者（更保守的速度估计）。
 fn fit_model(samples: &VecDeque<TimingSample>) -> Option<RateModel> {
     let mut best: Option<(f64, RateModel)> = None;
     for (i, a) in samples.iter().enumerate() {
@@ -103,24 +103,57 @@ fn fit_model(samples: &VecDeque<TimingSample>) -> Option<RateModel> {
             if !feasible {
                 continue;
             }
-            let candidate = RateModel {
-                overhead_ms,
-                ms_per_token,
-            };
-            let better = match best {
-                None => true,
-                Some((best_slack, best_model)) => {
-                    slack < best_slack - 1e-9
-                        || ((slack - best_slack).abs() <= 1e-9
-                            && candidate.ms_per_token > best_model.ms_per_token)
-                }
-            };
-            if better {
-                best = Some((slack, candidate));
-            }
+            offer_candidate(
+                &mut best,
+                slack,
+                RateModel {
+                    overhead_ms,
+                    ms_per_token,
+                },
+            );
         }
     }
+    // 边界候选：生成侧每 token 成本随长度增长时，过任意两点的直线都带负固定开销
+    // （被上面否决）——此时最优包络落在固定开销 = 0 的边界上、只经过一个样本。
+    // 斜率取全体样本的最小每 token 耗时：这是 O = 0 时唯一不穿过任何样本的斜率。
+    let mut min_ratio = f64::INFINITY;
+    let mut min_tokens = u64::MAX;
+    let mut max_tokens = 0u64;
+    for s in samples {
+        min_ratio = min_ratio.min(s.ms / s.tokens as f64);
+        min_tokens = min_tokens.min(s.tokens);
+        max_tokens = max_tokens.max(s.tokens);
+    }
+    if max_tokens.saturating_sub(min_tokens) >= MIN_FIT_TOKEN_SPAN {
+        let slack: f64 = samples
+            .iter()
+            .map(|s| s.ms - min_ratio * s.tokens as f64)
+            .sum();
+        offer_candidate(
+            &mut best,
+            slack,
+            RateModel {
+                overhead_ms: 0.0,
+                ms_per_token: min_ratio,
+            },
+        );
+    }
     best.map(|(_, model)| model)
+}
+
+/// 候选入池：总残差更小者优先；并列取斜率更慢者（更保守）。
+fn offer_candidate(best: &mut Option<(f64, RateModel)>, slack: f64, model: RateModel) {
+    let better = match best {
+        None => true,
+        Some((best_slack, best_model)) => {
+            slack < *best_slack - 1e-9
+                || ((slack - *best_slack).abs() <= 1e-9
+                    && model.ms_per_token > best_model.ms_per_token)
+        }
+    };
+    if better {
+        *best = Some((slack, model));
+    }
 }
 
 /// 未完成的 timings 行（被 PTY 折断），挂起等下一行拼接。
