@@ -10,6 +10,30 @@
 //! - 伪终端（ConPTY）按 80 列把长行拦腰折断，一行 timings 可能拆成多条日志（数字从中间断开），
 //!   续行紧跟其后且无前缀，需拼接后解析（见 `PerfAccumulator::feed`）。
 //!
+//! **KVMem fork**（llama-kvmem-server，独立单槽服务）完全不打印上述 timings 行，自报数据在
+//! `KVMEM_*` 行里（2026-09-18 实测格式）：
+//! ```text
+//! KVMEM_CHAT_TURN n_prompt=45168 n_gen=170 prefill_ms=790.94 gen_ms=5959.75 wall_ms=6750.68 gen_toks=28.52
+//! KVMEM_TRACE multimodal_compute rows=169 elapsed_ms=311.555 image=0 replay=0
+//! KVMEM_TRACE multimodal_prefill context=… prefix_hit_rows=44999 lcp=44999 new_text_rows=169 …
+//! KVMEM_TRACE n_prompt=45168 query=[44624,44627) force_pos=-1 last_user_chars=12
+//! ```
+//! （`KVMEM_CHAT_PREFILL ms=… n_prompt=…` 是 fork 另一条重复度量行，不参与解析——其
+//! ms/n_prompt 与算力口径重复，采用会与 compute 行重复计数。）
+//! - 预处理（面板大字）取**算力口径**：一轮内全部 `multimodal_compute` 行的 Σrows / Σelapsed_ms
+//!   （replay=1 是同一段行的复算，同样是真实计算，照记）。不逐批取样本——fork 每批固定为
+//!   `-b` 量级、批间只有批次开销之差，逐批拟合会把边际速度外推虚高（全量回放：逐批估计
+//!   1226 t/s vs 按轮 835 t/s，后者才与 44634-token 大轮的真实读数一致）。
+//!   同时从 `KVMEM_TRACE multimodal_prefill` 行取本轮命中缓存的行数，配合 `CHAT_TURN` 的
+//!   prefill_ms 给出「本轮等待 + 缓存命中率」作为面板小字——缓存命中轮里 n_prompt ÷ prefill_ms
+//!   会高达数万 t/s（命中多少就"快"多少），既不是算力也不能当预处理速度显示（2026-09-19
+//!   用户实测反馈：9000 t/s 明显不对）。
+//! - 生成样本与请求计数取每轮收尾的 `KVMEM_CHAT_TURN`（n_gen / gen_ms；每行 = 一次完成请求）。
+//!   其 `gen_ms` 口径经过实测校验：同机同配置回放时，该值与该轮「客户端首 token→末 token」的
+//!   实测速率一致（差 <1%），TTFT ≈ prefill_ms + 0.1~0.3 s、尾部 ~0.05 s，没有藏时间。
+//! - fork 与官方 llama.cpp 的度量行互斥（fork 无 timings 行，官方无 KVMEM 行），两条解析
+//!   路径互不影响。
+//!
 //! 原始读数不能直接展示，两类系统性偏差要在线去噪（**不设样本门槛、不丢任何样本**）：
 //! - 耗时 ≈ 固定开销 + 每 token 成本 × tokens 中的固定开销（批启动/图构建）让小样本被开销
 //!   主导——实测 14-token 缓存命中断只报 48 t/s，而同一批的大请求 ~1650 t/s；
@@ -199,6 +223,63 @@ fn parse_timing_body(is_prompt: bool, body: &str) -> Option<TimingSample> {
     })
 }
 
+/// KVMem fork 的度量行（与官方 llama.cpp 的行互斥）。
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum KvmemLine {
+    /// 一轮请求起始（每轮一条，先于该轮预处理；用于清掉上一轮被中断时的残留累计）。
+    RequestStart,
+    /// 预处理的一次前向：rows 行、耗时 ms（算力口径的样本来源）。
+    Compute { rows: u64, ms: f64 },
+    /// 本轮预处理命中缓存的行数（`multimodal_prefill` trace 行）。
+    HitRows { rows: u64 },
+    /// 一轮请求收尾：本轮提示词/生成 token 数与各自的耗时。
+    Turn {
+        n_prompt: u64,
+        n_gen: u64,
+        prefill_ms: f64,
+        gen_ms: f64,
+    },
+}
+
+/// 取 `key=` 后紧跟的数值，读到第一个非数值字符为止。
+/// 兼容 fork 实测的字段粘连输出（如 `ms=1492.79n_prompt=47348`，两字段间缺空格）。
+fn kv_value(line: &str, key: &str) -> Option<f64> {
+    let rest = line.get(line.find(key)? + key.len()..)?;
+    let end = rest
+        .find(|c: char| !c.is_ascii_digit() && c != '.' && c != '-')
+        .unwrap_or(rest.len());
+    rest[..end].parse().ok()
+}
+
+/// 识别 KVMem fork 的度量行；其余行（含官方 timings 行与 fork 的其它 trace 行）返回 None。
+fn classify_kvmem(line: &str) -> Option<KvmemLine> {
+    if line.contains("multimodal_compute") {
+        let rows = kv_value(line, "rows=")?;
+        let ms = kv_value(line, "elapsed_ms=")?;
+        return (rows >= 1.0 && ms > 0.0).then_some(KvmemLine::Compute {
+            rows: rows as u64,
+            ms,
+        });
+    }
+    if line.contains("multimodal_prefill context=") {
+        return Some(KvmemLine::HitRows {
+            rows: kv_value(line, "prefix_hit_rows=")? as u64,
+        });
+    }
+    if line.contains("KVMEM_CHAT_TURN") {
+        return Some(KvmemLine::Turn {
+            n_prompt: kv_value(line, "n_prompt=")? as u64,
+            n_gen: kv_value(line, "n_gen=")? as u64,
+            prefill_ms: kv_value(line, "prefill_ms=")?,
+            gen_ms: kv_value(line, "gen_ms=")?,
+        });
+    }
+    if line.contains("KVMEM_TRACE n_prompt=") {
+        return Some(KvmemLine::RequestStart);
+    }
+    None
+}
+
 /// 累计器：持有最近样本、包络模型与折断行的拼接状态。
 #[derive(Debug, Default)]
 pub struct PerfAccumulator {
@@ -210,11 +291,81 @@ pub struct PerfAccumulator {
     prompt_model: Option<RateModel>,
     gen_model: Option<RateModel>,
     requests: u64,
+    /// KVMem：当前轮已累计的预处理计算（Σrows, Σcompute_ms）与命中缓存的行数。
+    kvmem_compute: (u64, f64),
+    kvmem_hit_rows: Option<u64>,
+    /// KVMem：本轮预处理墙钟与缓存命中率（面板小字；官方 llama.cpp 下恒为 None）。
+    last_prompt_wait_ms: Option<f64>,
+    last_prompt_cache_hit_pct: Option<f64>,
 }
 
 impl PerfAccumulator {
-    /// 喂入一行日志；该行（或与此前折断行的拼接）命中 timings 则记录并返回 true。
+    /// 喂入一行日志；该行（或与此前折断行的拼接）产出了新样本则返回 true（前端据此刷新快照）。
+    /// KVMem 行与官方 timings 行互斥，分流后各自解析。
     pub fn feed(&mut self, line: &str) -> bool {
+        match classify_kvmem(line) {
+            Some(KvmemLine::RequestStart) => {
+                // 一轮请求起始：清掉上一轮被中断（fork 中断轮不打印收尾行）时的残留累计。
+                self.kvmem_compute = (0, 0.0);
+                self.kvmem_hit_rows = None;
+                false
+            }
+            Some(KvmemLine::Compute { rows, ms }) => {
+                self.kvmem_compute.0 += rows;
+                self.kvmem_compute.1 += ms;
+                false
+            }
+            Some(KvmemLine::HitRows { rows }) => {
+                self.kvmem_hit_rows = Some(rows);
+                false
+            }
+            Some(KvmemLine::Turn {
+                n_prompt,
+                n_gen,
+                prefill_ms,
+                gen_ms,
+            }) => {
+                self.record_kvmem_turn(n_prompt, n_gen, prefill_ms, gen_ms);
+                true
+            }
+            None => self.feed_timing_line(line),
+        }
+    }
+
+    /// KVMem 一轮收尾：预处理算力样本 + 本轮等待/命中率 + 生成样本与请求计数。
+    fn record_kvmem_turn(&mut self, n_prompt: u64, n_gen: u64, prefill_ms: f64, gen_ms: f64) {
+        let (rows, ms) = std::mem::take(&mut self.kvmem_compute);
+        let hit_rows = self.kvmem_hit_rows.take();
+        // 无 compute 行的一轮（异常中断等）跳过预处理算力样本。
+        if rows > 0 && ms > 0.0 {
+            self.record(TimingSample {
+                is_prompt: true,
+                tokens: rows,
+                ms,
+                tps: rows as f64 * 1000.0 / ms,
+            });
+        }
+        // 面板小字「本轮等待 + 缓存命中率」；命中率缺 trace 行时留空、只显示等待。
+        if prefill_ms > 0.0 && n_prompt > 0 {
+            self.last_prompt_wait_ms = Some(prefill_ms);
+            self.last_prompt_cache_hit_pct =
+                hit_rows.map(|h| h.min(n_prompt) as f64 * 100.0 / n_prompt as f64);
+        }
+        if n_gen > 0 && gen_ms > 0.0 {
+            self.record(TimingSample {
+                is_prompt: false,
+                tokens: n_gen,
+                ms: gen_ms,
+                tps: n_gen as f64 * 1000.0 / gen_ms,
+            });
+        } else {
+            // 0 生成 token 的轮次（如首 token 即 EOS）同样是一次完成请求，只计数。
+            self.requests += 1;
+        }
+    }
+
+    /// 官方 llama.cpp timings 行路径（原有逻辑，未改动）。
+    fn feed_timing_line(&mut self, line: &str) -> bool {
         if let Some(pending) = self.pending.take() {
             let joined = format!("{}{}", pending.body, line);
             if let Some(sample) = parse_timing_body(pending.is_prompt, &joined) {
@@ -289,6 +440,8 @@ impl PerfAccumulator {
             last_gen_tps: last_tps(self.last_gen.as_ref(), self.gen_model),
             gen_tps_est: self.gen_model.map(|m| m.tps()),
             requests: self.requests,
+            last_prompt_wait_ms: self.last_prompt_wait_ms,
+            last_prompt_cache_hit_pct: self.last_prompt_cache_hit_pct,
         }
     }
 
@@ -300,6 +453,8 @@ impl PerfAccumulator {
 /// 前端可见的推理性能快照（perf://update 载荷 / get_perf_stats 返回值）。
 /// last_* = 最近一次样本（tps 为扣固定开销后的净速率）；*_tps_est = 会话速度估计
 /// （下限包络拟合的斜率倒数，对并发挤占/卡顿等「只变慢」噪声稳健；拟合未就绪为 null）。
+/// last_prompt_wait_ms / last_prompt_cache_hit_pct 仅 KVMem fork 有值：本轮预处理墙钟
+/// 与缓存命中率（面板小字；官方 llama.cpp 无对应日志，恒为 null）。
 #[derive(Debug, Clone, Default, PartialEq, Serialize)]
 pub struct PerfSnapshot {
     pub last_prompt_tokens: Option<u64>,
@@ -311,6 +466,8 @@ pub struct PerfSnapshot {
     pub last_gen_tps: Option<f64>,
     pub gen_tps_est: Option<f64>,
     pub requests: u64,
+    pub last_prompt_wait_ms: Option<f64>,
+    pub last_prompt_cache_hit_pct: Option<f64>,
 }
 
 /// 消费线程每收到一行日志调用：命中 timings 行则累计并向前端推送快照。

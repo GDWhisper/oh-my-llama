@@ -1164,8 +1164,6 @@ fn build_server_args(config: &ServerConfig) -> Vec<String> {
         config.port.to_string(),
         "-c".into(),
         config.ctx_size.to_string(),
-        "--timeout".into(),
-        "2400".into(),
     ];
 
     // 仅当「已启用且未临时禁用」时才写入对应高级参数。
@@ -2585,7 +2583,8 @@ enabled_advanced_params = ["ctx_size"]
         assert!(joined.contains("--host 127.0.0.1"));
         assert!(joined.contains("--port 8080"));
         assert!(joined.contains("-c 4096"));
-        assert!(joined.contains("--timeout 2400"));
+        // 基础参数不含 --timeout：读写超时是可选的结构化参数，默认不注入
+        assert!(!joined.contains("--timeout"));
         // 仅启用 ctx_size 时不应出现其它高级参数
         assert!(!joined.contains("-n "));
         assert!(!joined.contains("--temp"));
@@ -2690,6 +2689,7 @@ enabled_advanced_params = ["ctx_size"]
                 "offline".into(),
                 "no_repack".into(),
                 "keep".into(),
+                "timeout".into(),
                 "definitely_not_a_real_param".into(),
             ],
             disabled_structured_params: vec!["keep".into()],
@@ -2699,6 +2699,8 @@ enabled_advanced_params = ["ctx_size"]
         let joined = build_server_args(&config).join(" ");
         assert!(joined.contains("--top-p 0.9"));
         assert!(joined.contains("--parallel 4"));
+        // 启用但未显式给值时用注册表默认值（timeout 默认 2400）
+        assert!(joined.contains("--timeout 2400"));
         // 布尔真值 → 裸 flag，不带 value
         assert!(joined.contains("--offline"));
         assert!(!joined.contains("--offline true"));
@@ -3158,6 +3160,190 @@ enabled_advanced_params = ["ctx_size"]
         let snap = acc.snapshot();
         assert_eq!(snap.last_gen_tokens, Some(506));
         assert_eq!(snap.last_prompt_tps, None);
+    }
+
+    #[test]
+    fn parse_kvmem_fork_prefill_and_turn_lines() {
+        // KVMem fork（llama-kvmem-server）不打印 timings 行，度量取自 KVMEM_* 行（以下均为
+        // 2026-09-18 实测日志原文，llama-server_20260918_225938.log 第 2、3 轮）。预处理取算力
+        // 口径：一轮内 Σmultimodal_compute.rows ÷ Σelapsed_ms（replay=1 是复算，照记）；面板
+        // 小字另取「本轮等待（CHAT_TURN.prefill_ms）+ 缓存命中率（prefix_hit_rows ÷ n_prompt）」。
+        let mut acc = perf::PerfAccumulator::default();
+        assert!(!acc.feed(
+            "KVMEM_TRACE n_prompt=45168 query=[44624,44627) force_pos=-1 last_user_chars=12"
+        ));
+        assert!(!acc
+            .feed("KVMEM_TRACE multimodal_compute rows=169 elapsed_ms=311.555 image=0 replay=0"));
+        assert!(!acc
+            .feed("KVMEM_TRACE multimodal_compute rows=169 elapsed_ms=249.104 image=0 replay=1"));
+        assert!(!acc.feed(
+            "KVMEM_TRACE multimodal_prefill context=0000018773BFB2A0 prefix_hit_rows=44999 lcp=44999 new_text_rows=169 new_image_rows=0 replayed_rows=169 vision_encode_calls=0 encoder_ms=0.00 logical_cursor=45168 model_cursor=45168 mtp_synced_rows=0 cached_tail_rows=0 replay_reason=selection_or_attention_view_changed embedding_cache_bytes=0 checkpoint_bytes=628627056"
+        ));
+        assert!(acc.feed(
+            "KVMEM_CHAT_TURN n_prompt=45168 n_gen=170 prefill_ms=790.94 gen_ms=5959.75 wall_ms=6750.68 gen_toks=28.52"
+        ));
+        let snap = acc.snapshot();
+        // 算力样本 = 本轮两行 compute 之和（338 行 / 560.659 ms）；单个样本拟合未就绪，最近值给原始读数。
+        assert_eq!(snap.last_prompt_tokens, Some(338));
+        assert!((snap.last_prompt_ms.unwrap() - 560.659).abs() < 1e-9);
+        assert!((snap.last_prompt_tps.unwrap() - 338.0 * 1000.0 / 560.659).abs() < 1e-6);
+        assert_eq!(snap.prompt_tps_est, None);
+        // 小字：等待 790.94 ms，命中 44999/45168 ≈ 99.6%。
+        assert!((snap.last_prompt_wait_ms.unwrap() - 790.94).abs() < 1e-9);
+        assert!((snap.last_prompt_cache_hit_pct.unwrap() - 44999.0 * 100.0 / 45168.0).abs() < 1e-9);
+        // 生成样本与请求计数来自收尾行；收尾不清除预处理最近值。
+        assert_eq!(snap.last_gen_tokens, Some(170));
+        assert!((snap.last_gen_tps.unwrap() - 170.0 * 1000.0 / 5959.75).abs() < 1e-6);
+        assert_eq!(snap.requests, 1);
+
+        // 第 3 轮（45430-token，实际只算 92 行新文本、复算一次）：两个算力样本后拟合就绪。
+        assert!(!acc.feed(
+            "KVMEM_TRACE n_prompt=45430 query=[44624,44627) force_pos=-1 last_user_chars=12"
+        ));
+        assert!(
+            !acc.feed("KVMEM_TRACE multimodal_compute rows=92 elapsed_ms=181.597 image=0 replay=0")
+        );
+        assert!(
+            !acc.feed("KVMEM_TRACE multimodal_compute rows=92 elapsed_ms=123.316 image=0 replay=1")
+        );
+        assert!(!acc.feed(
+            "KVMEM_TRACE multimodal_prefill context=0000018773BFB2A0 prefix_hit_rows=45338 lcp=45338 new_text_rows=92 new_image_rows=0 replayed_rows=92 vision_encode_calls=0 encoder_ms=0.00 logical_cursor=45430 model_cursor=45430 mtp_synced_rows=0 cached_tail_rows=0 replay_reason=selection_or_attention_view_changed embedding_cache_bytes=0 checkpoint_bytes=628627056"
+        ));
+        assert!(acc.feed(
+            "KVMEM_CHAT_TURN n_prompt=45430 n_gen=118 prefill_ms=497.52 gen_ms=3515.76 wall_ms=4013.28 gen_toks=33.56"
+        ));
+        let snap = acc.snapshot();
+        assert_eq!(snap.last_prompt_tokens, Some(184));
+        assert!((snap.last_prompt_ms.unwrap() - 304.913).abs() < 1e-9);
+        assert_eq!(snap.requests, 2);
+        assert!((snap.last_prompt_wait_ms.unwrap() - 497.52).abs() < 1e-9);
+        assert!((snap.last_prompt_cache_hit_pct.unwrap() - 45338.0 * 100.0 / 45430.0).abs() < 1e-9);
+        // 两轮样本的每 token 成本几乎相同（1.657 vs 1.659 ms），过这两点的直线固定开销为负
+        // （被否决），包络落在固定开销 = 0 的边界上，估计 = 较慢一轮的原始读数。
+        let est = snap.prompt_tps_est.expect("算力样本拟合就绪");
+        assert!((est - 184.0 * 1000.0 / 304.913).abs() < 1e-6, "est = {est}");
+
+        // 同一个累计器里官方 timings 行照常解析（两套日志互斥，互不干扰）。
+        assert!(acc.feed(
+            "0.45.539.515 I slot print_timing: id  0 | task 0 |        eval time =    1227.111 ms /   119 tokens (   10.31 ms per token,    96.98 tokens per second)"
+        ));
+        let snap = acc.snapshot();
+        assert_eq!(snap.requests, 3);
+        assert_eq!(snap.last_gen_tokens, Some(119));
+    }
+
+    #[test]
+    fn parse_kvmem_fork_lenient_and_incomplete_turns() {
+        let mut acc = perf::PerfAccumulator::default();
+        // 其它 KVMEM_* 度量行不参与解析（均为实测原文）：预处理只认 multimodal_compute——
+        // KVMEM_CHAT_PREFILL 的 ms/n_prompt 与算力口径重复，采用会重复计数；`cache_commit`
+        // 行虽含 KVMEM_TRACE 与 n_prompt，但不是轮次起始，不得重置累计。
+        assert!(!acc.feed("KVMEM_CHAT_PREFILL ms=1492.79n_prompt=47348"));
+        assert!(!acc.feed("KVMEM_GEN_WALL n=121 ms=6830.15 toks=17.72"));
+        assert!(!acc.feed(
+            "KVMEM_TRACE cache_commit n_prompt=18613 n_gen=1245 n_cached=19858 stored=19858"
+        ));
+        assert!(!acc.feed(
+            "KVMEM_PREFILL_PERF total_ms=785.552 first_ms=311.555 replay_ms=249.104 retrieval_ms=128.129 checkpoint_select_ms=0.001 checkpoint_save_ms=49.864 checkpoint_restore_ms=14.887 mean_nested_ms=0.035 carry_nested_ms=0.000 saves=1 restores=1 shared=1 restore_skips=1 checkpoint_unique_bytes=628627056"
+        ));
+        assert!(!acc.feed("CUDA Graph id 648 reused"));
+        let snap = acc.snapshot();
+        assert_eq!(snap.requests, 0);
+        assert_eq!(snap.last_prompt_wait_ms, None);
+        assert_eq!(snap.last_prompt_tokens, None);
+
+        // 字段粘连容忍：同批日志里实测出现过 `ms=1492.79n_prompt=47348`（缺空格，即上一行
+        // CHAT_PREFILL 的原样）。收尾行按同型粘连回放：取值在首个非数值字符处截断，
+        // gen_ms 读到 6830.15 即止、不会连上 wall_ms。
+        assert!(acc.feed(
+            "KVMEM_CHAT_TURN n_prompt=47348 n_gen=121 prefill_ms=1492.79 gen_ms=6830.15wall_ms=8322.94 gen_toks=17.72"
+        ));
+        let snap = acc.snapshot();
+        assert!((snap.last_gen_ms.unwrap() - 6830.15).abs() < 1e-9);
+        assert!((snap.last_gen_tps.unwrap() - 121.0 * 1000.0 / 6830.15).abs() < 1e-6);
+        // 该轮没有 compute 行：跳过预处理算力样本；等待照记、命中率留空（小字只显示等待）。
+        assert_eq!(snap.last_prompt_tokens, None);
+        assert!((snap.last_prompt_wait_ms.unwrap() - 1492.79).abs() < 1e-9);
+        assert_eq!(snap.last_prompt_cache_hit_pct, None);
+        assert_eq!(snap.requests, 1);
+
+        // 中断轮（有 compute 行、无收尾行）：残留不得算进下一轮——下一轮起始行清零。
+        assert!(!acc.feed("KVMEM_TRACE n_prompt=100 query=[1,2) force_pos=-1 last_user_chars=1"));
+        assert!(
+            !acc.feed("KVMEM_TRACE multimodal_compute rows=999 elapsed_ms=999.0 image=0 replay=0")
+        );
+        assert!(!acc.feed("KVMEM_TRACE n_prompt=200 query=[3,4) force_pos=-1 last_user_chars=1"));
+        assert!(acc.feed("KVMEM_CHAT_TURN n_prompt=200 n_gen=10 prefill_ms=50.00 gen_ms=500.00"));
+        let snap = acc.snapshot();
+        assert_eq!(snap.last_prompt_tokens, None); // 999 行残留没有被当成本轮样本
+        assert_eq!(snap.requests, 2);
+
+        // 0 生成 token 的轮次（首 token 即 EOS）同样计一次请求，跳过生成样本。
+        assert!(acc.feed("KVMEM_CHAT_TURN n_prompt=300 n_gen=0 prefill_ms=100.00 gen_ms=0.00"));
+        let snap = acc.snapshot();
+        assert_eq!(snap.requests, 3);
+        assert_eq!(snap.last_gen_tokens, Some(10)); // 仍是上一轮的生成样本
+    }
+
+    #[test]
+    fn kvmem_fork_estimates_match_real_log_rates() {
+        // 真实回放（llama-server_20260918_225938.log 前 3 轮）：大冷轮（44634-token、命中 0）在
+        // 日志里拆成 177 条 compute 行，这里用其汇总值（Σrows=44644、Σms=53446.446，含 replay 的
+        // 10 行）等价回放，避免内联长篇原文；后两轮为日志原文（几乎全命中缓存，实际只算
+        // 169/92 行新文本）。按轮聚合才能让拟合落在真实档位（逐批样本会把边际速度外推虚高）：
+        // 算力估计 ≈ 大轮真实读数 835 t/s，生成估计 ≈ 末轮原始读数 33.6 t/s。
+        let mut acc = perf::PerfAccumulator::default();
+        for (start, computes, hit, turn) in [
+            (
+                "KVMEM_TRACE n_prompt=44634 query=[44624,44627) force_pos=-1 last_user_chars=12",
+                &["KVMEM_TRACE multimodal_compute rows=44644 elapsed_ms=53446.446 image=0 replay=0"]
+                    [..],
+                None,
+                "KVMEM_CHAT_TURN n_prompt=44634 n_gen=365 prefill_ms=54251.90 gen_ms=16153.04 wall_ms=70404.93 gen_toks=22.60",
+            ),
+            (
+                "KVMEM_TRACE n_prompt=45168 query=[44624,44627) force_pos=-1 last_user_chars=12",
+                &[
+                    "KVMEM_TRACE multimodal_compute rows=169 elapsed_ms=311.555 image=0 replay=0",
+                    "KVMEM_TRACE multimodal_compute rows=169 elapsed_ms=249.104 image=0 replay=1",
+                ][..],
+                Some("KVMEM_TRACE multimodal_prefill context=0000018773BFB2A0 prefix_hit_rows=44999 lcp=44999 new_text_rows=169 new_image_rows=0 replayed_rows=169 vision_encode_calls=0 encoder_ms=0.00 logical_cursor=45168 model_cursor=45168 mtp_synced_rows=0 cached_tail_rows=0 replay_reason=selection_or_attention_view_changed embedding_cache_bytes=0 checkpoint_bytes=628627056"),
+                "KVMEM_CHAT_TURN n_prompt=45168 n_gen=170 prefill_ms=790.94 gen_ms=5959.75 wall_ms=6750.68 gen_toks=28.52",
+            ),
+            (
+                "KVMEM_TRACE n_prompt=45430 query=[44624,44627) force_pos=-1 last_user_chars=12",
+                &[
+                    "KVMEM_TRACE multimodal_compute rows=92 elapsed_ms=181.597 image=0 replay=0",
+                    "KVMEM_TRACE multimodal_compute rows=92 elapsed_ms=123.316 image=0 replay=1",
+                ][..],
+                Some("KVMEM_TRACE multimodal_prefill context=0000018773BFB2A0 prefix_hit_rows=45338 lcp=45338 new_text_rows=92 new_image_rows=0 replayed_rows=92 vision_encode_calls=0 encoder_ms=0.00 logical_cursor=45430 model_cursor=45430 mtp_synced_rows=0 cached_tail_rows=0 replay_reason=selection_or_attention_view_changed embedding_cache_bytes=0 checkpoint_bytes=628627056"),
+                "KVMEM_CHAT_TURN n_prompt=45430 n_gen=118 prefill_ms=497.52 gen_ms=3515.76 wall_ms=4013.28 gen_toks=33.56",
+            ),
+        ] {
+            assert!(!acc.feed(start));
+            for line in computes {
+                assert!(!acc.feed(line));
+            }
+            if let Some(hit) = hit {
+                assert!(!acc.feed(hit));
+            }
+            assert!(acc.feed(turn));
+        }
+        let snap = acc.snapshot();
+        assert_eq!(snap.requests, 3);
+        let prompt_est = snap.prompt_tps_est.expect("预处理算力样本拟合就绪");
+        assert!(
+            (prompt_est - 836.6).abs() < 1.0,
+            "prompt_est = {prompt_est}"
+        );
+        // 「最近」（末轮 184 行 / 304.913 ms）扣固定开销后与估计同档，原始读数为 603.5。
+        assert!((snap.last_prompt_tps.unwrap() - prompt_est).abs() < 1.0);
+        // 面板小字 == 末轮：等待 497.52 ms、命中 45338/45430 ≈ 99.8%。
+        assert!((snap.last_prompt_wait_ms.unwrap() - 497.52).abs() < 1e-9);
+        assert!((snap.last_prompt_cache_hit_pct.unwrap() - 45338.0 * 100.0 / 45430.0).abs() < 1e-9);
+        let gen_est = snap.gen_tps_est.expect("生成样本拟合就绪");
+        assert!((gen_est - 33.56).abs() < 0.1, "gen_est = {gen_est}");
+        assert!((snap.last_gen_tps.unwrap() - 118.0 * 1000.0 / 3515.76).abs() < 1e-6);
     }
 
     #[test]

@@ -812,6 +812,13 @@ body {
   background: var(--surface-2);
 }
 
+/* 上下文长度快捷预设：输入框下方一排 chip，点击填入对应 token 数。 */
+.ctx-presets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
 /* 官方参数选择器：注册表 160+ 项无法平铺，用搜索框 + 结果片定位。
    结果区限高可滚，避免一次展开把整个面板撑开。 */
 .structured-chooser {

@@ -9,7 +9,7 @@ import type { MessageKey, Translator } from '../i18n/messages';
 export interface ParsedArg {
   // '' 表示位置参数（无 flag）
   flag: string;
-  kind: 'value' | 'bool' | 'model' | 'unknown' | 'positional' | 'exe' | 'ignore' | 'known';
+  kind: 'value' | 'bool' | 'model' | 'unknown' | 'positional' | 'exe' | 'known';
   field?: keyof ServerConfig;
   key?: AdvancedKey;
   boolValue?: boolean;
@@ -20,7 +20,7 @@ export interface ParsedArg {
 }
 
 interface FlagInfo {
-  kind: 'value' | 'bool' | 'model' | 'ignore' | 'known';
+  kind: 'value' | 'bool' | 'model' | 'known';
   key?: AdvancedKey;
   field?: keyof ServerConfig;
   boolValue?: boolean;
@@ -67,9 +67,6 @@ const FLAG_INFO: Record<string, FlagInfo> = {
   '--spec-draft-n-min': { kind: 'known', labelKey: 'preview.spec_draft_n_min' },
   '--spec-draft-p-min': { kind: 'known', labelKey: 'preview.spec_draft_p_min' },
   '--spec-type': { kind: 'known', labelKey: 'preview.spec_type' },
-  // 启动器内部常量（由 build_server_args 自动追加）：识别但忽略，不进 patch / extra_args，
-  // 且会吞掉其后的取值 token，避免回写时污染自定义参数。
-  '--timeout': { kind: 'ignore' },
 
   // ── 已识别的 llama-server 参数（kind:'known'，友好预览 + 原样转发）────────
   // 通用（common）
@@ -262,6 +259,7 @@ const FLAG_INFO: Record<string, FlagInfo> = {
   '--reranking': { kind: 'known', labelKey: 'preview.rerank', takesValue: false },
   '--reuse-port': { kind: 'known', labelKey: 'preview.reuse_port', takesValue: false },
   '-to': { kind: 'known', labelKey: 'preview.timeout' },
+  '--timeout': { kind: 'known', labelKey: 'preview.timeout' },
   '--sse-ping-interval': { kind: 'known', labelKey: 'preview.sse_ping_interval' },
   '--threads-http': { kind: 'known', labelKey: 'preview.threads_http' },
   '--cache-prompt': { kind: 'known', labelKey: 'preview.cache_prompt', takesValue: false },
@@ -395,15 +393,6 @@ export function parseLlamaArgs(input: string): ParsedArg[] {
       }
       const info = FLAG_INFO[tok];
       if (info) {
-        // 启动器内部常量（如 --timeout）：识别但忽略；仍需吞掉其后的取值 token
-        // （--flag value 形式），否则会被误判为位置参数进入 extra_args。
-        if (info.kind === 'ignore') {
-          if (value === null && i + 1 < tokens.length && !tokens[i + 1].startsWith('-')) {
-            i++;
-          }
-          out.push({ flag: tok, kind: 'ignore', value: null });
-          continue;
-        }
         if (info.kind === 'known') {
           // 已识别但走自定义参数的 flag：按 takesValue 决定是否吞掉下一个取值 token；
           // 纯布尔开关（takesValue:false）不吞值，避免误吃后续参数。
@@ -495,7 +484,7 @@ const structuredKeyOf = (labelKey?: MessageKey): string | undefined =>
 // 按同一语义直接从 arg 元数据归一，免逐行回查 FLAG_INFO），以及后续
 // 「高级参数卡片重复徽章」任务。语义要点：已知 flag 按落点归一——
 // -c 与 --ctx-size、--mmap 与 --no-mmap、--top-k 多次出现均视为同一身份；
-// 'ignore'（启动器内部常量，不落配置）与表中未收录的 flag 返回 null，不参与重复判定。
+// 表中未收录的 flag 返回 null，不参与重复判定。
 export function flagIdentityOf(flag: string): string | null {
   const info = FLAG_INFO[flag];
   if (!info) return null;
@@ -509,8 +498,6 @@ export function flagIdentityOf(flag: string): string | null {
       const key = structuredKeyOf(info.labelKey);
       return key ? `structured:${key}` : null;
     }
-    default:
-      return null; // 'ignore'
   }
 }
 
@@ -566,9 +553,6 @@ export function buildPlan(args: ParsedArg[], t: Translator, registry: ParamSpec[
   const specByKey = new Map(registry.map((spec) => [spec.key, spec]));
 
   for (const arg of args) {
-    // 启动器内部常量：识别时已忽略，回写不会污染配置，直接跳过。
-    if (arg.kind === 'ignore') continue;
-
     // 归一该 arg 的身份：value/bool/model → 'field:<field>'；
     // known → 'structured:<key>'（labelKey 缺失时按 flag 原文计）；
     // unknown → 'extra:<flag>'（透传参数精确同名才算重复）；exe / positional → null（不参与判定）。
@@ -840,7 +824,6 @@ export function configToCommand(config: ServerConfig, registry: ParamSpec[]): st
   parts.push('--host', config.host);
   parts.push('--port', String(config.port));
   parts.push('-c', String(config.ctx_size));
-  parts.push('--timeout', '2400');
   if (active('n_predict')) parts.push('-n', String(config.n_predict));
   if (active('n_gpu_layers')) parts.push('-ngl', String(config.n_gpu_layers));
   if (active('threads')) parts.push('-t', String(config.threads));

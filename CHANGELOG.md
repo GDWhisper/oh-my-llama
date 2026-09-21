@@ -4,6 +4,18 @@
 
 > 本文件为**详细改动历史**（含涉及的文件与实现机制）；GitHub Release 页面为对应版本的**总结性**说明。
 
+## [0.2.7] - 2026-09-21
+
+### 新增功能
+- **上下文长度快捷预设标签（8K–256K）**：`src/components/AdvancedParamsPanel.tsx` 上下文长度输入框下方新增一排 chip 预设（8K / 64K / 96K / 128K / 200K / 256K，标签是日常记法、点击填入 llama-server 实际接受的 token 数），`src/App.css` 加 `.ctx-presets`；数字记法各语言通用、无需 i18n。
+- **度量面板解析 KVMem fork 日志**：`src-tauri/src/lib.rs` 新增解析 KVMem fork 的 `KVMEM_*` 日志行（预处理墙钟与缓存命中率），`src-tauri/src/perf.rs` 的 `PerfSnapshot` 增 `last_prompt_wait_ms` / `last_prompt_cache_hit_pct`（仅该 fork 有值、官方 llama.cpp 恒为 `null`）；`src/types.ts` 的 `PerfSnapshot` 同步两字段；`src/components/MetricsPanel.tsx` 的 `PerfCard` 小字支持覆盖项——KVMem fork 预处理卡小字改显「本轮等待 + 命中率」（该 fork 预处理速率受命中率主导、单看 t/s 失真），`src/i18n/messages.ts` 补 `metrics.wait` / `metrics.hit` 中英键，`src/components/MetricsPanel.css` 同步。
+
+### 功能优化
+- **读写超时改为可选结构化参数（移除强制注入）**：原启动器无条件在每条命令塞 `--timeout 2400`（`src-tauri/src/lib.rs` 的 `build_server_args` 与 `src/lib/parseArgs.ts` 的 `configToCommand` 两处硬编码），且与结构化参数 `timeout`（flag `-to`）同义重复。现删除两处硬编码、默认回落 llama-server 默认 600s；`scripts/gen_structured_params.py` 把 `timeout` 的 flag 由 `-to` 改为 `--timeout`、注册表默认 `0 → 2400`（`src-tauri/src/params.rs` 同步 `flag: "--timeout"` / `default: "2400"`），超时统一由「读写超时」卡片控制（粘贴 `--timeout` 由 `ignore` 改 `known`、粘入即升级为可编辑卡片，与 `-to` 同现走既有判重提醒，`ignore` 机制整体移除）。
+
+### Bug 修复
+- **推理速度卡片小字折行不一致**：`src/components/MetricsPanel.tsx` + `MetricsPanel.css` 两卡小字原固定折到大字下一行、KVMem「等待 · 命中」更长导致两卡行高不齐；改为默认同排贴右下角、放不下时按「大字+间距+小字」实测宽度（`ResizeObserver`）任一张放不下就让两张一起折行（`.stack-sub`）、小字右对齐，两卡基线一致、不抖动；`sameSnapshot` 不受影响。
+
 ## [0.2.6] - 2026-09-18
 
 ### 新增功能
@@ -359,6 +371,7 @@
 ### 说明
 - 本版本仅提供 Windows 安装包（`.exe` NSIS / `.msi`），无需预先安装 Node / Rust。
 
+[0.2.7]: https://github.com/GDWhisper/oh-my-llama/releases/tag/v0.2.7
 [0.2.6]: https://github.com/GDWhisper/oh-my-llama/releases/tag/v0.2.6
 [0.1.8]: https://github.com/GDWhisper/oh-my-llama/releases/tag/v0.1.8
 [0.1.7]: https://github.com/GDWhisper/oh-my-llama/releases/tag/v0.1.7

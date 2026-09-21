@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { useI18n } from '../i18n';
 import { useWindowHidden } from '../hooks/useWindowHidden';
@@ -102,20 +102,25 @@ function fmtPct(value: number): string {
 
 /**
  * 推理速度卡片：大字给「估计」（会话下限包络，抗并发/卡顿噪声），小字保留「最近」
- * 单次真实读数——卡片够宽时靠右下角，放不下自动折到下一行（见 .metrics-card-body）。
- * 估计未就绪（样本跨度不足，见 perf.rs）时大字回退最近值，不显示小字。
+ * 单次真实读数——默认与大字同排、贴右下角，放不下时由父级让两张卡一起折到下一行
+ * （小字右对齐，见 .metrics-card-body / .stack-sub）。估计未就绪（样本跨度不足，
+ * 见 perf.rs）时大字回退最近值。sub 为小字覆盖项（KVMem fork 传「本轮等待 + 缓存
+ * 命中率」，因为该 fork 的预处理速率受缓存命中率主导，单看 t/s 会失真）。
  */
 function PerfCard({
   label,
   est,
   last,
+  sub,
 }: {
   label: string;
   est: number | null;
   last: number | null;
+  sub?: string;
 }) {
   const { t } = useI18n();
   const headline = est ?? last;
+  const subText = sub ?? (est !== null ? `${t('metrics.last')} ${fmtTps(last)}` : null);
   return (
     <div className="metrics-card">
       <span className="metrics-card-label">{label}</span>
@@ -124,11 +129,7 @@ function PerfCard({
           {fmtTpsNum(headline)}
           {headline !== null && <span className="metrics-card-unit">{TPS_UNIT}</span>}
         </span>
-        {est !== null && (
-          <span className="metrics-card-sub">
-            {t('metrics.last')} {fmtTps(last)}
-          </span>
-        )}
+        {subText !== null && <span className="metrics-card-sub">{subText}</span>}
       </div>
     </div>
   );
@@ -162,13 +163,40 @@ function shortGpuName(name: string): string {
 }
 
 export function MetricsPanel({ perf }: { perf: PerfSnapshot | null }) {
-  const { t } = useI18n();
+  const { t, lang } = useI18n();
   const [snap, setSnap] = useState<MetricsSnapshot | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [expanded, setExpanded] = useState(true);
   // 「窗口看不见」真源：托盘隐藏由后端 window://visible 广播（WebView2 不会把页面置为
   // hidden），最小化等路径由 document.visibilityState 兜底。
   const hidden = useWindowHidden();
+  // 两张速度卡等宽，但小字长度不一（KVMem 的「等待 · 命中」明显更长）：默认同排（小字贴
+  // 右下角），放不下时若只折其中一张，两卡的基线就不一致。按「大字 + 间距 + 小字」与卡片
+  // 可用宽度实测比较，任一张放不下就让两张一起折行（.stack-sub）——实测而非固定断点，
+  // 随窗口宽度与数字位数自适应。
+  const cardsRef = useRef<HTMLDivElement | null>(null);
+  const [stackSub, setStackSub] = useState(false);
+
+  useEffect(() => {
+    const el = cardsRef.current;
+    if (!el) return;
+    const measure = () => {
+      let stacked = false;
+      for (const body of el.querySelectorAll<HTMLElement>('.metrics-card-body')) {
+        const value = body.firstElementChild as HTMLElement | null;
+        const sub = body.lastElementChild as HTMLElement | null;
+        if (!value || !sub || sub === value) continue; // 估计未就绪、无小字的卡片不参与
+        const gap = parseFloat(getComputedStyle(body).columnGap) || 0;
+        if (value.offsetWidth + sub.offsetWidth + gap > body.clientWidth) stacked = true;
+      }
+      setStackSub(stacked);
+    };
+    measure();
+    // 卡片宽度只随窗口/面板尺寸变化，监听尺寸即可（轮询没意义）。
+    const observer = new ResizeObserver(measure);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [perf, expanded, lang]);
 
   useEffect(() => {
     // 门控：窗口不可见（托盘常驻/最小化）时**完全停表**——没人看的数字不必刷新
@@ -313,15 +341,26 @@ export function MetricsPanel({ perf }: { perf: PerfSnapshot | null }) {
               })
             )}
 
-            {/* 推理性能：来自 llama-server 日志 timings 行（「最近」= 最近一次净速率，
-                「估计」= 会话下限包络拟合的速度，见后端 perf.rs）。 */}
+            {/* 推理性能：来自 llama-server 日志（官方 timings 行或 KVMem fork 的 KVMEM_* 行；
+                「最近」= 最近一次净速率，「估计」= 会话下限包络拟合的速度，见后端 perf.rs）。 */}
             {perf && (
               <div className="metrics-perf">
-                <div className="metrics-cards">
+                <div className={`metrics-cards${stackSub ? ' stack-sub' : ''}`} ref={cardsRef}>
                   <PerfCard
                     label={t('metrics.prefill')}
                     est={perf.prompt_tps_est}
                     last={perf.last_prompt_tps}
+                    sub={
+                      // KVMem fork 专有：预处理速率受缓存命中率主导，单看 t/s 会失真，
+                      // 小字换成「本轮等待 + 命中率」；官方 llama.cpp 两字段恒为 null，走默认小字。
+                      perf.last_prompt_wait_ms != null
+                        ? `${t('metrics.wait')} ${(perf.last_prompt_wait_ms / 1000).toFixed(2)} s${
+                            perf.last_prompt_cache_hit_pct != null
+                              ? ` · ${t('metrics.hit')} ${perf.last_prompt_cache_hit_pct.toFixed(1)}%`
+                              : ''
+                          }`
+                        : undefined
+                    }
                   />
                   <PerfCard
                     label={t('metrics.generate')}

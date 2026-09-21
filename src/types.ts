@@ -80,6 +80,8 @@ export interface ServerLogLine {
 // 由后端解析 llama-server 日志中的 timings 行而来，无需 --metrics 等额外参数：
 // last_* = 最近一次样本（tps 已扣每批固定开销）；*_tps_est = 会话速度估计
 // （下限包络拟合的斜率倒数，对并发挤占/卡顿等「只变慢」的噪声稳健；拟合未就绪为 null）。
+// last_prompt_wait_ms / last_prompt_cache_hit_pct 仅 KVMem fork 有值：本轮预处理墙钟
+// 与缓存命中率（面板小字）；官方 llama.cpp 无对应日志，恒为 null。
 // 服务进程启动/退出时后端清零并推送空快照，前端将无数据快照归一为 null 以隐藏区块。
 export interface PerfSnapshot {
   last_prompt_tokens: number | null;
@@ -91,6 +93,8 @@ export interface PerfSnapshot {
   last_gen_tps: number | null;
   gen_tps_est: number | null;
   requests: number;
+  last_prompt_wait_ms: number | null;
+  last_prompt_cache_hit_pct: number | null;
 }
 
 // 应用级设置（与服务器启动配置 ServerConfig 解耦）。

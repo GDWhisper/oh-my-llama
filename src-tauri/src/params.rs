@@ -1452,9 +1452,9 @@ pub const PARAM_REGISTRY: &[ParamSpec] = &[
     },
     ParamSpec {
         key: "timeout",
-        flag: "-to",
+        flag: "--timeout",
         ptype: ParamType::Int,
-        default: "0",
+        default: "2400",
         min: None,
         max: None,
         choices: None,
