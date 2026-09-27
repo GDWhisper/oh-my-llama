@@ -120,6 +120,21 @@ pub struct ServerStatus {
     pub port: u16,
     pub host: String,
     pub url: String,
+    // ── 运行记账（后端内部状态，serde skip，不进 IPC 契约，src/types.ts 无需变动）──
+    // 本应用拉起的服务地址（spawn 时写、服务收场时随 default() 清空）：受管进程在世时
+    // 运行判定只看这个地址，与「当前编辑中的配置地址」解耦——运行期间改端口/换配置
+    // 不得影响运行中服务的状态，更不得拿配置地址的探测结果误报「已停止」。
+    #[serde(skip)]
+    started_host: String,
+    #[serde(skip)]
+    started_port: u16,
+    // 「运行中」结论所指的地址（翻转 true 时锁定，running=true 时必非空）：只有该地址
+    // 不再应答（或本应用的服务进程已死）才算服务停止；观察目标因改配置而漂移时旧结论
+    // 只能作废，绝不写「已停止」——那条日志只属于真正结束的服务。
+    #[serde(skip)]
+    run_host: String,
+    #[serde(skip)]
+    run_port: u16,
 }
 
 impl Default for ServerStatus {
@@ -131,6 +146,10 @@ impl Default for ServerStatus {
             port: 8080,
             host: String::new(),
             url: String::new(),
+            started_host: String::new(),
+            started_port: 0,
+            run_host: String::new(),
+            run_port: 0,
         }
     }
 }
@@ -1070,82 +1089,232 @@ fn rename_named_config_in_store(
     Ok(())
 }
 
+/// 状态轮询的观察目标（纯函数）：本应用拉起的进程还在，就只看它启动时的地址——运行期间
+/// 改端口/换配置都改变不了运行中服务的位置，绝不能拿配置地址的探测结果去判它的死活。
+/// 没有在管进程时才看配置地址（检测该地址上的外部服务 / 下次启动的目标端口）。
+fn watch_target(
+    owned_alive: bool,
+    started: Option<(&str, u16)>,
+    config: (&str, u16),
+) -> (String, u16) {
+    match (owned_alive, started) {
+        (true, Some((host, port))) => (host.to_string(), port),
+        _ => (config.0.to_string(), config.1),
+    }
+}
+
+/// get_status 本轮应写的一条结论日志。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum StatusLog {
+    /// 不写日志。
+    None,
+    /// 「llama-server 已停止。」——只属于真正结束的服务。
+    Stopped,
+    /// 「llama-server 已就绪」——本应用拉起的服务在端口上应答了。
+    Ready,
+    /// 「检测到外部服务在该地址监听」。
+    External,
+}
+
+/// 未运行时的落位：进程还活着（模型仍在加载）就保持受管、保留 pid 与启动地址，使 Stop
+/// 始终可用、端口就绪后下一轮询即翻转为运行中；否则整体收场。
+fn settle_idle(status: &mut ServerStatus, owned_alive: bool) {
+    status.running = false;
+    status.run_host.clear();
+    status.run_port = 0;
+    if owned_alive {
+        status.managed = true;
+    } else {
+        status.managed = false;
+        status.pid = None;
+        status.started_host.clear();
+        status.started_port = 0;
+    }
+}
+
+/// get_status 的状态迁移（纯逻辑，探测已在锁外完成），返回本轮该写的一条结论日志。
+///
+/// 记账约定：`started_*` 是本应用服务的地址，`run_*` 是「运行中」结论所指的地址，
+/// `watch` 是本轮观察目标（见 watch_target，受管进程在世时恒为 started 地址）。
+///
+/// 「已停止」只在「运行结论所指的那份服务确实没了」时写：观察目标与结论同址且不再应答，
+/// 或结论出自本应用的服务而它的进程已死（此时观察目标必然已漂走）。观察目标因改端口/
+/// 换配置漂移时，旧结论（尤其外部服务的）静默作废——服务没停，只是我们不再看那个地址。
+fn advance_status(
+    status: &mut ServerStatus,
+    owned_alive: bool,
+    watch: (&str, u16),
+    listening: bool,
+    grace: bool,
+) -> StatusLog {
+    let run_addr = (status.run_host.as_str(), status.run_port);
+    let started_addr = (status.started_host.as_str(), status.started_port);
+
+    if status.running {
+        if run_addr != watch {
+            // 观察目标漂移（运行期间改了端口/换了配置）。结论地址 = 启动地址 → 是本应用
+            // 的服务：受管进程在世时 watch 恒为启动地址，漂了只可能是进程已死，服务确已
+            // 结束，如实记「已停止」；外部结论则只是换了个地址看，它并没有停。
+            let ours = !status.started_host.is_empty() && run_addr == started_addr;
+            settle_idle(status, owned_alive);
+            return if ours {
+                StatusLog::Stopped
+            } else {
+                StatusLog::None
+            };
+        }
+        if listening {
+            if grace {
+                // 停止宽限期：不翻转、不写日志（见 STOP_GRACE 注释），维持现状。
+                return StatusLog::None;
+            }
+            // 持续运行：归属随进程存活校正（进程被外部杀掉后 managed 归零，按外部展示）。
+            status.managed = owned_alive;
+            if !owned_alive {
+                status.pid = None;
+                // 进程已不在：started_* 不再描述任何本应用还掌控的服务。不清的话，之后
+                // 改端口/换配置的漂移分支会把这份外部结论误当成自己的服务，误写「已停止」。
+                status.started_host.clear();
+                status.started_port = 0;
+            }
+            return StatusLog::None;
+        }
+        // 结论地址不再应答：这份服务确实停了。
+        settle_idle(status, owned_alive);
+        return StatusLog::Stopped;
+    }
+
+    // 未在运行：看本轮观察目标。
+    if listening {
+        if grace {
+            // 停止宽限期里端口还有应答：是自己那条尚未咽气的连接，保持沉默、不翻 running
+            // （否则 managed=false + running=true 会渲染出「外部服务」徽章）。
+            return StatusLog::None;
+        }
+        let log = if owned_alive {
+            StatusLog::Ready
+        } else {
+            StatusLog::External
+        };
+        status.running = true;
+        status.run_host = watch.0.to_string();
+        status.run_port = watch.1;
+        status.managed = owned_alive;
+        if !owned_alive {
+            status.pid = None;
+            // 同上：非本应用在管（进程不在）就整体清掉启动记账，只留外部结论地址。
+            status.started_host.clear();
+            status.started_port = 0;
+        }
+        return log;
+    }
+    settle_idle(status, owned_alive);
+    StatusLog::None
+}
+
+/// host/port/url 指向「正在跟踪的服务地址」（运行结论的地址，或在管进程的启动地址），
+/// 否则指向当前配置地址——即便未运行，预览地址也显示正确目标。
+fn align_display(status: &mut ServerStatus, config: &ServerConfig) {
+    if status.running && !status.run_host.is_empty() {
+        status.host = status.run_host.clone();
+        status.port = status.run_port;
+    } else if status.managed && !status.started_host.is_empty() {
+        status.host = status.started_host.clone();
+        status.port = status.started_port;
+    } else {
+        status.host = config.host.clone();
+        status.port = config.port;
+    }
+    status.url = format!("http://{}:{}", status.host, status.port);
+}
+
+/// 停止宽限期的记账地址（纯函数）：服务的启动地址——编辑配置不再改写它；没记账时退回
+/// 当前显示地址。宽限窗口必须罩住「真正被停止的那个监听器」，否则停止后旧端口若仍被
+/// 自己尚未咽气的连接应答，会被误判成外部服务。
+fn stop_grace_addr(status: &ServerStatus) -> (&str, u16) {
+    if status.started_host.is_empty() {
+        (status.host.as_str(), status.port)
+    } else {
+        (status.started_host.as_str(), status.started_port)
+    }
+}
+
 #[tauri::command]
 async fn get_status(app: AppHandle, config: ServerConfig) -> Result<ServerStatus, String> {
     let state = app.state::<tauri::async_runtime::Mutex<ServerStatus>>();
 
-    // 探测不依赖状态，放锁外做：probe_health 同步阻塞最长约 2.3s（连接超时 800ms + 读超时
-    // 1500ms，端口被「TCP 可连但不回 HTTP」的服务占用时），持锁探测会令 stop/start/
+    // 观察目标选定 + 探测都放锁外做：probe_health 同步阻塞最长约 2.3s（连接超时 800ms +
+    // 读超时 1500ms，端口被「TCP 可连但不回 HTTP」的服务占用时），持锁探测会令 stop/start/
     // open_preview 排队等锁；回环端口未开的常规路径 connect 立即 refused，无感。
-    let listening = matches!(probe_health(&config.host, config.port), HealthProbe::Ready);
+    let watch = {
+        let status = state.lock().await;
+        let owned = status.managed && is_process_running(status.pid);
+        let started = (!status.started_host.is_empty())
+            .then(|| (status.started_host.as_str(), status.started_port));
+        watch_target(owned, started, (&config.host, config.port))
+    };
+    let listening = matches!(probe_health(&watch.0, watch.1), HealthProbe::Ready);
 
     let mut status = state.lock().await;
 
     // 两个独立事实，解耦判断：
-    //  - listening：配置地址上是否真有服务在监听（用户关心的「服务在跑吗」）。
+    //  - listening：观察目标上是否真有服务在监听（用户关心的「服务在跑吗」）。
     //  - owned_alive：本应用拉起的进程是否仍存活（决定 managed / Stop 是否可用）。
-    // 探测与拿锁之间状态可能被 start/stop 修改，owned_alive 基于拿锁后的最新值计算。
+    // 探测与拿锁之间状态可能被 start/stop 修改：按拿锁后的最新值重算；观察目标若已不是
+    // 刚才探测的那个，本轮探测结果作废（不迁移状态），下一轮自会用新目标重测。
     let owned_alive = status.managed && is_process_running(status.pid);
-    // 停止宽限期：本应用刚刚才停止该地址上的服务，进程/OS 还没把端口让出去。
-    // 此刻 owned_alive 必然为 false（受管态已被 stop_server_inner 复位），但不能据此断言
-    // 是外部服务——那正是自己那条尚未咽气的连接。
-    let grace = !owned_alive && in_stop_grace(&config.host, config.port);
-
-    if listening {
-        if !grace {
-            // 端口确有服务在监听 → 运行中。
-            // managed 取决于是否仍由本应用掌控（pid 存活）；外部（或脱离掌控）的服务 managed=false。
-            if !status.running {
-                let note = if owned_alive {
-                    "llama-server 已就绪"
-                } else {
-                    "检测到外部服务在该地址监听"
-                };
-                append_log_inner(
-                    &app,
-                    ServerLogLine {
-                        ts: now(),
-                        level: "info".into(),
-                        text: format!("{} ({}:{})", note, config.host, config.port),
-                    },
-                );
-            }
-            status.running = true;
-            status.managed = owned_alive;
-            if !owned_alive {
-                status.pid = None;
-            }
-        }
-        // 宽限期内保持 status 现状（stop_server_inner 已复位的「未运行」）：不写日志，
-        // 也不把 running 翻成 true——否则 managed=false + running=true 会让前端渲染出
-        // 「外部服务」徽章。端口真正释放后下一次轮询自然收敛。
-    } else {
-        // 端口无服务：若正处在宽限期，说明这次停止已生效，窗口到此为止。
-        clear_stop_grace();
-        if status.running {
-            append_log_inner(
-                &app,
-                ServerLogLine {
-                    ts: now(),
-                    level: "warn".into(),
-                    text: "llama-server 已停止。".into(),
-                },
-            );
-        }
-        status.running = false;
-        // 受管态与「端口是否就绪」解耦：只要本应用拉起的进程还活着（如正在加载大模型），
-        // 就保持 managed=true、保留 pid，使 Stop 始终可用，且端口就绪后下一轮询即翻转为运行中。
-        if owned_alive {
-            status.managed = true;
-        } else {
-            status.managed = false;
-            status.pid = None;
-        }
+    let started = (!status.started_host.is_empty())
+        .then(|| (status.started_host.as_str(), status.started_port));
+    let watch_now = watch_target(owned_alive, started, (&config.host, config.port));
+    if watch_now != watch {
+        align_display(&mut status, &config);
+        return Ok(status.clone());
     }
-    // host/port/url 始终与当前配置对齐（即便未运行，预览地址也显示正确目标）。
-    status.host = config.host.clone();
-    status.port = config.port;
-    status.url = format!("http://{}:{}", config.host, config.port);
+    // 停止宽限期：本应用刚刚才停止该地址上的服务，进程/OS 还没把端口让出去。此刻
+    // owned_alive 必然为 false（受管态已被 stop_server_inner 复位），但不能据此断言是
+    // 外部服务——那正是自己那条尚未咽气的连接。
+    let in_grace = in_stop_grace(&watch.0, watch.1);
+    let grace = !owned_alive && in_grace;
+    // 端口确认让出：宽限窗口到此为止（只对本次真正观察到释放的那个地址生效）。
+    if !listening && in_grace {
+        clear_stop_grace();
+    }
+
+    let log = advance_status(
+        &mut status,
+        owned_alive,
+        (watch.0.as_str(), watch.1),
+        listening,
+        grace,
+    );
+    match log {
+        StatusLog::None => {}
+        StatusLog::Stopped => append_log_inner(
+            &app,
+            ServerLogLine {
+                ts: now(),
+                level: "warn".into(),
+                text: "llama-server 已停止。".into(),
+            },
+        ),
+        StatusLog::Ready => append_log_inner(
+            &app,
+            ServerLogLine {
+                ts: now(),
+                level: "info".into(),
+                text: format!("llama-server 已就绪 ({}:{})", watch.0, watch.1),
+            },
+        ),
+        StatusLog::External => append_log_inner(
+            &app,
+            ServerLogLine {
+                ts: now(),
+                level: "info".into(),
+                text: format!("检测到外部服务在该地址监听 ({}:{})", watch.0, watch.1),
+            },
+        ),
+    }
+    align_display(&mut status, &config);
 
     Ok(status.clone())
 }
@@ -1338,6 +1507,9 @@ async fn start_server(app: AppHandle, config: ServerConfig) -> Result<ServerStat
         status.running = false;
         status.managed = true;
         status.pid = Some(pid);
+        // 记下服务的启动地址：此后运行判定只看它，与编辑中的配置地址解耦。
+        status.started_host = config.host.clone();
+        status.started_port = config.port;
     }
     // 新进程 = 新的测量窗口：清零推理性能累计（perf.rs）。
     reset_perf(&app);
@@ -1458,6 +1630,9 @@ async fn start_server(app: AppHandle, config: ServerConfig) -> Result<ServerStat
             status.running = true;
             status.managed = true;
             status.pid = Some(pid);
+            // 「运行中」结论锁定在服务自己的地址上（此后改配置也不得改写它）。
+            status.run_host = config.host.clone();
+            status.run_port = config.port;
         } else if alive {
             // 超时但进程仍存活（仍在加载大模型）：先记受管态，running 由 get_status 据端口后续修正。
             status.running = false;
@@ -1467,9 +1642,8 @@ async fn start_server(app: AppHandle, config: ServerConfig) -> Result<ServerStat
             // 进程已退出：交由 wait_process 复位，这里仅确保运行态为 false。
             status.running = false;
         }
-        status.host = config.host.clone();
-        status.port = config.port;
-        status.url = format!("http://{}:{}", config.host, config.port);
+        // 与 get_status 同一套显示地址对齐（运行结论地址 → 启动地址 → 配置地址），单点收口。
+        align_display(&mut status, &config);
         status.clone()
     };
 
@@ -1622,8 +1796,10 @@ async fn stop_server_inner(app: &AppHandle) -> Result<(), String> {
         );
     }
     let pid = status.pid;
-    // 先记账再清状态：窗口依据的是停止目标地址，而下一行的复位会把 host/port 一并清空。
-    begin_stop_grace(&status.host, status.port);
+    // 先记账再清状态：窗口依据的是停止目标地址（见 stop_grace_addr），而下一行的复位
+    // 会把这些一并清空。
+    let (grace_host, grace_port) = stop_grace_addr(&status);
+    begin_stop_grace(grace_host, grace_port);
     *status = ServerStatus::default();
     drop(status);
 
@@ -3665,5 +3841,202 @@ enabled_advanced_params = ["ctx_size"]
 
         clear_stop_grace();
         assert!(!in_stop_grace("0.0.0.0", 8080));
+    }
+
+    // ── get_status 状态迁移：运行判定与「编辑中的配置地址」解耦 ────────────
+    // 回归场景：服务运行期间改监听端口 / 换配置，曾拿配置地址的「探不到」误判服务停止，
+    // 日志实时刷「llama-server 已停止。」——与真正运行中的服务毫无关系。
+
+    fn running_owned(run: (&str, u16), started: (&str, u16)) -> ServerStatus {
+        ServerStatus {
+            running: true,
+            managed: true,
+            pid: Some(4242),
+            started_host: started.0.into(),
+            started_port: started.1,
+            run_host: run.0.into(),
+            run_port: run.1,
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn watch_target_follows_started_addr_while_owned_process_alive() {
+        // 进程在世：观察目标恒为服务启动地址，配置改成什么都不影响它的死活判定。
+        assert_eq!(
+            watch_target(true, Some(("0.0.0.0", 8080)), ("0.0.0.0", 9090)),
+            ("0.0.0.0".to_string(), 8080)
+        );
+        // 无在管进程：看配置地址（外部服务检测 / 下次启动目标）。
+        assert_eq!(
+            watch_target(false, None, ("0.0.0.0", 9090)),
+            ("0.0.0.0".to_string(), 9090)
+        );
+        // 启动地址记账缺失时兜底配置地址。
+        assert_eq!(
+            watch_target(true, None, ("0.0.0.0", 9090)),
+            ("0.0.0.0".to_string(), 9090)
+        );
+    }
+
+    #[test]
+    fn advance_status_keeps_running_when_config_address_drifts() {
+        // 运行中改端口/换配置：受管进程在世 → 观察目标仍是启动地址，服务照常应答 →
+        // 不写「已停止」、不翻 running、归属不变。
+        let mut st = running_owned(("0.0.0.0", 8080), ("0.0.0.0", 8080));
+        let watch = watch_target(true, Some(("0.0.0.0", 8080)), ("0.0.0.0", 9090));
+        assert_eq!(
+            advance_status(&mut st, true, (watch.0.as_str(), watch.1), true, false),
+            StatusLog::None
+        );
+        assert!(st.running);
+        assert!(st.managed);
+    }
+
+    #[test]
+    fn advance_status_still_reports_stop_of_owned_service_after_drift() {
+        // 进程已死且配置已漂走：结论出自本应用的服务（结论地址 = 启动地址）→ 它确已结束，
+        // 照实记「已停止」，不得因换过配置而漏报。
+        let mut st = running_owned(("0.0.0.0", 8080), ("0.0.0.0", 8080));
+        let watch = watch_target(false, Some(("0.0.0.0", 8080)), ("0.0.0.0", 9090));
+        assert_eq!(
+            advance_status(&mut st, false, (watch.0.as_str(), watch.1), false, false),
+            StatusLog::Stopped
+        );
+        assert!(!st.running);
+        assert!(!st.managed);
+        assert!(st.started_host.is_empty());
+    }
+
+    #[test]
+    fn advance_status_drops_external_verdict_silently_on_drift() {
+        // 外部服务结论 + 换配置：只是换了个地址看，它并没有停——静默作废，绝不误报「已停止」。
+        let mut st = ServerStatus {
+            running: true,
+            run_host: "0.0.0.0".into(),
+            run_port: 8080,
+            ..Default::default()
+        };
+        let watch = watch_target(false, None, ("0.0.0.0", 9090));
+        assert_eq!(
+            advance_status(&mut st, false, (watch.0.as_str(), watch.1), false, false),
+            StatusLog::None
+        );
+        assert!(!st.running);
+    }
+
+    #[test]
+    fn advance_status_logs_stop_only_when_watched_service_goes_away() {
+        // 观察目标不变、确实不再应答：这份服务停了，记「已停止」（既有行为不回归）。
+        let mut st = running_owned(("0.0.0.0", 8080), ("0.0.0.0", 8080));
+        assert_eq!(
+            advance_status(&mut st, false, ("0.0.0.0", 8080), false, false),
+            StatusLog::Stopped
+        );
+        // 就绪翻入运行：记「已就绪」，结论地址锁定为服务地址。
+        let mut st = ServerStatus::default();
+        assert_eq!(
+            advance_status(&mut st, true, ("0.0.0.0", 8080), true, false),
+            StatusLog::Ready
+        );
+        assert!(st.running && st.managed);
+        assert_eq!(st.run_host, "0.0.0.0");
+        assert_eq!(st.run_port, 8080);
+        // 外部翻入运行：记「检测到外部服务」，且不归本应用管（managed=false、pid 清空）。
+        let mut st = ServerStatus::default();
+        assert_eq!(
+            advance_status(&mut st, false, ("0.0.0.0", 8080), true, false),
+            StatusLog::External
+        );
+        assert!(st.running && !st.managed && st.pid.is_none());
+    }
+
+    #[test]
+    fn advance_status_loading_and_grace_stay_silent() {
+        // 加载中（进程在世、端口未就绪）：保持受管、保留 pid 与启动地址，不写日志。
+        let mut st = ServerStatus {
+            managed: true,
+            pid: Some(4242),
+            started_host: "0.0.0.0".into(),
+            started_port: 8080,
+            ..Default::default()
+        };
+        assert_eq!(
+            advance_status(&mut st, true, ("0.0.0.0", 8080), false, false),
+            StatusLog::None
+        );
+        assert!(!st.running && st.managed && st.pid.is_some());
+        assert!(!st.started_host.is_empty());
+        // 停止宽限期里端口还有应答：沉默、不翻 running（避免「外部服务」徽章误报）。
+        let mut st = ServerStatus::default();
+        assert_eq!(
+            advance_status(&mut st, false, ("0.0.0.0", 8080), true, true),
+            StatusLog::None
+        );
+        assert!(!st.running);
+    }
+
+    #[test]
+    fn advance_status_external_takeover_clears_started_bookkeeping() {
+        // 进程已死但端口仍应答（外部抢占 / liveness 一次假阴性）：本应用的启动记账必须
+        // 整体清空，否则之后改端口/换配置的漂移分支会把这份外部结论误当成自己的服务、
+        // 误报「已停止」——与本修复要消灭的假日志同类。
+        let mut st = running_owned(("0.0.0.0", 8080), ("0.0.0.0", 8080));
+        assert_eq!(
+            advance_status(&mut st, false, ("0.0.0.0", 8080), true, false),
+            StatusLog::None
+        );
+        assert!(st.running && !st.managed && st.pid.is_none());
+        assert!(st.started_host.is_empty() && st.started_port == 0);
+        // 随后改端口/换配置：旧结论静默作废，不写「已停止」。
+        assert_eq!(
+            advance_status(&mut st, false, ("0.0.0.0", 9090), false, false),
+            StatusLog::None
+        );
+        assert!(!st.running);
+    }
+
+    #[test]
+    fn align_display_points_at_tracked_service_then_config() {
+        let config = ServerConfig {
+            host: "0.0.0.0".into(),
+            port: 9090,
+            ..Default::default()
+        };
+        // 运行中：指向结论地址（服务真实所在，改配置也不漂）。
+        let mut st = running_owned(("0.0.0.0", 8080), ("0.0.0.0", 8080));
+        align_display(&mut st, &config);
+        assert_eq!((st.host.as_str(), st.port), ("0.0.0.0", 8080));
+        assert_eq!(st.url, "http://0.0.0.0:8080");
+        // 加载中（受管未就绪）：指向启动地址。
+        let mut st = ServerStatus {
+            managed: true,
+            pid: Some(4242),
+            started_host: "0.0.0.0".into(),
+            started_port: 8080,
+            ..Default::default()
+        };
+        align_display(&mut st, &config);
+        assert_eq!((st.host.as_str(), st.port), ("0.0.0.0", 8080));
+        // 无跟踪对象：指向当前配置地址（预览目标正确）。
+        let mut st = ServerStatus::default();
+        align_display(&mut st, &config);
+        assert_eq!((st.host.as_str(), st.port), ("0.0.0.0", 9090));
+        assert_eq!(st.url, "http://0.0.0.0:9090");
+    }
+
+    #[test]
+    fn stop_grace_addr_prefers_started_addr() {
+        // 运行中改过端口/换过配置：宽限窗口必须罩住启动地址（真正被停止的监听器），
+        // 而不是跟着配置漂走的显示地址。
+        let st = running_owned(("0.0.0.0", 8080), ("0.0.0.0", 8080));
+        assert_eq!(stop_grace_addr(&st), ("0.0.0.0", 8080));
+        // 没有启动记账时退回当前显示地址（防御路径）。
+        let st = ServerStatus {
+            host: "0.0.0.0".into(),
+            port: 9090,
+            ..Default::default()
+        };
+        assert_eq!(stop_grace_addr(&st), ("0.0.0.0", 9090));
     }
 }
