@@ -225,6 +225,17 @@ export function MetricsPanel({ perf }: { perf: PerfSnapshot | null }) {
     };
   }, [hidden, expanded]);
 
+  // 草稿接受率行小字「44/120 · 均长 2.31」：接受数/验证数与均长各自可缺（旧版日志无均长），
+  // 缺哪段省哪段；均长量级 1–5，两位小数足够分辨。
+  const draftDetailParts: string[] = [];
+  if (perf && perf.last_draft_accepted != null && perf.last_draft_total != null) {
+    draftDetailParts.push(`${perf.last_draft_accepted}/${perf.last_draft_total}`);
+  }
+  if (perf && perf.last_draft_mean_len != null) {
+    draftDetailParts.push(`${t('metrics.draftMeanLen')} ${perf.last_draft_mean_len.toFixed(2)}`);
+  }
+  const draftDetail = draftDetailParts.length > 0 ? draftDetailParts.join(' · ') : null;
+
   return (
     <div className="panel metrics-panel">
       <div className="panel-header">
@@ -368,6 +379,20 @@ export function MetricsPanel({ perf }: { perf: PerfSnapshot | null }) {
                     last={perf.last_gen_tps}
                   />
                 </div>
+                {/* 草稿接受率：最近一次「带草稿」请求（官方 llama.cpp 投机解码，含 MTP）的接受
+                    统计。无草稿数据（KVMem fork / 未开投机解码）时字段为 null，整行不渲染，
+                    不显示 0% 占位。accept_rate 是 0–1，×100 走 fmtPct 与面板其它百分比同格式。 */}
+                {perf.last_draft_accept_rate != null && (
+                  <div className="metrics-requests">
+                    <span className="metrics-label">{t('metrics.draftAccept')}</span>
+                    <span className="metrics-value">
+                      {fmtPct(perf.last_draft_accept_rate * 100)}
+                      {draftDetail !== null && (
+                        <span className="metrics-detail">{` ${draftDetail}`}</span>
+                      )}
+                    </span>
+                  </div>
+                )}
                 <div className="metrics-requests">
                   <span className="metrics-label">{t('metrics.requests')}</span>
                   <span className="metrics-value">{perf.requests.toLocaleString()}</span>
@@ -426,6 +451,15 @@ export function MetricsPanel({ perf }: { perf: PerfSnapshot | null }) {
                 <span className="metrics-value">
                   {t('metrics.generate')} {fmtTps(perf.last_gen_tps)}
                 </span>
+                {/* 草稿项与展开态同门槛：仅有带草稿请求的统计时出现，无数据不追加 */}
+                {perf.last_draft_accept_rate != null && (
+                  <>
+                    <span className="metrics-sep">·</span>
+                    <span className="metrics-value">
+                      {t('metrics.draft')} {fmtPct(perf.last_draft_accept_rate * 100)}
+                    </span>
+                  </>
+                )}
               </>
             )}
           </div>

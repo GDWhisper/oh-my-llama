@@ -641,6 +641,9 @@ export const zh = {
   'metrics.wait': '等待',
   'metrics.hit': '命中',
   'metrics.requests': '累计请求数',
+  'metrics.draft': '草稿',
+  'metrics.draftAccept': '草稿接受率',
+  'metrics.draftMeanLen': '均长',
 } as const;
 
 export type MessageKey = keyof typeof zh;
@@ -1279,4 +1282,7 @@ export const en: Record<MessageKey, string> = {
   'metrics.wait': 'wait',
   'metrics.hit': 'hit',
   'metrics.requests': 'Total requests',
+  'metrics.draft': 'Draft',
+  'metrics.draftAccept': 'Draft accept',
+  'metrics.draftMeanLen': 'mean',
 };

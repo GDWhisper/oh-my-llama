@@ -4,7 +4,12 @@
 //! ```text
 //! prompt eval time =    1097.82 ms /   512 tokens (    2.14 ms per token,   466.39 tokens per second)
 //!      eval time =   17398.56 ms /   506 tokens (   34.39 ms per token,    29.08 tokens per second)
+//! draft acceptance = 0.36667 (   44 accepted /  120 generated), mean len =  1.37
 //! ```
+//! 末行只在开启官方投机解码（含 MTP `draft-mtp`）时出现，旧版无 mean len 且写作
+//! `draft acceptance rate = 0.57576 (  171 accepted /  297 generated)`，两种历史格式都要认。
+//! 草稿接受统计只记「最近一次」（同 last_* 口径、不进拟合窗口），接受率一律按 accepted/total
+//! 现算、不采信行内 rate 数值；KVMem fork 不打此行，快照对应字段恒为空。
 //! 现实比示例脏两处，解析都必须扛住：
 //! - 新版 llama.cpp 行首带时间戳与 slot 前缀：`0.45.539.510 I slot print_timing: id  0 | task 0 | `；
 //! - 伪终端（ConPTY）按 80 列把长行拦腰折断，一行 timings 可能拆成多条日志（数字从中间断开），
@@ -180,11 +185,21 @@ fn offer_candidate(best: &mut Option<(f64, RateModel)>, slack: f64, model: RateM
     }
 }
 
-/// 未完成的 timings 行（被 PTY 折断），挂起等下一行拼接。
+/// 未完成的度量行（被 PTY 折断），挂起等下一行拼接。
 #[derive(Debug)]
-struct PendingTiming {
-    is_prompt: bool,
-    body: String,
+enum PendingLine {
+    /// timings 行正文（"= ... ms / N tokens (...)"）。
+    Timing { is_prompt: bool, body: String },
+    /// draft acceptance 行正文（"draft acceptance" 之后的部分）。
+    Draft { body: String },
+}
+
+impl PendingLine {
+    fn body(&self) -> &str {
+        match self {
+            PendingLine::Timing { body, .. } | PendingLine::Draft { body } => body,
+        }
+    }
 }
 
 /// 在一行里定位 timings 的起始，返回 (是否 prompt 行, "=" 起的剩余正文)。
@@ -198,6 +213,14 @@ fn locate_timing(line: &str) -> Option<(bool, &str)> {
     } else {
         None
     }
+}
+
+/// 在一行里定位 draft acceptance 行的起始，返回其后的正文。
+/// 两种历史格式（`draft acceptance = …` 与 `draft acceptance rate = …`）共用该子串，
+/// 行首可带任意前缀，故用 find 而非前缀匹配；与 timings 起始互斥（draft 行无 "eval time"）。
+fn locate_draft(line: &str) -> Option<&str> {
+    let i = line.find("draft acceptance")?;
+    Some(&line[i + "draft acceptance".len()..])
 }
 
 /// 解析 timings 正文（"= ... ms / N tokens ( ... ms per token, ... tokens per second)"）。
@@ -220,6 +243,58 @@ fn parse_timing_body(is_prompt: bool, body: &str) -> Option<TimingSample> {
         tokens,
         ms,
         tps,
+    })
+}
+
+/// 从一行 draft acceptance 解析出的草稿接受统计（官方投机解码，含 MTP）。
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct DraftSample {
+    accepted: u64,
+    total: u64,
+    /// 新版日志的 mean len（平均每验证步接受长度）；旧版无此字段为 None。
+    mean_len: Option<f64>,
+}
+
+/// 解析 draft acceptance 正文（"draft acceptance" 之后的部分，含可选 "rate" 字样与行内 rate 数值）。
+/// 两种历史格式统一按 `(<a> accepted / <t> generated)` 取数，行内 rate 一概不采信——接受率由
+/// 调用方按 a/t 现算；新版尾部可带 `, mean len = <m>`，旧版到 `)` 为止。
+/// 返回 None 的情形：正文不完整（折断行）、或数值非法（t = 0、括号残缺、mean len 非有限等脏值）。
+fn parse_draft_body(body: &str) -> Option<DraftSample> {
+    let (left, right) = body.split_once(" accepted / ")?;
+    // accepted 在 `(` 与对齐空格之后；缺括号或数字残缺都按脏值/不完整处理。
+    let open = left.rfind('(')?;
+    let accepted = left[open + 1..].trim().parse::<u64>().ok()?;
+    let (total_raw, tail) = right.split_once(" generated")?;
+    let total = total_raw.trim().parse::<u64>().ok()?;
+    if total == 0 {
+        return None;
+    }
+    // 收尾括号之后只允许行尾或新版的 ", mean len = <m>"；残缺或多余一概不认。
+    let tail = tail.strip_prefix(')')?.trim();
+    let mean_len = if tail.is_empty() {
+        None
+    } else {
+        let value = tail
+            .strip_prefix(',')?
+            .trim()
+            .strip_prefix("mean len")?
+            .trim()
+            .strip_prefix('=')?
+            .trim();
+        // 半截数值（折断在小数点处）不当完整数认，留续行拼接后再解析。
+        if value.ends_with('.') {
+            return None;
+        }
+        let m = value.parse::<f64>().ok()?;
+        if !m.is_finite() {
+            return None;
+        }
+        Some(m)
+    };
+    Some(DraftSample {
+        accepted,
+        total,
+        mean_len,
     })
 }
 
@@ -283,7 +358,7 @@ fn classify_kvmem(line: &str) -> Option<KvmemLine> {
 /// 累计器：持有最近样本、包络模型与折断行的拼接状态。
 #[derive(Debug, Default)]
 pub struct PerfAccumulator {
-    pending: Option<PendingTiming>,
+    pending: Option<PendingLine>,
     last_prompt: Option<TimingSample>,
     last_gen: Option<TimingSample>,
     prompt_samples: VecDeque<TimingSample>,
@@ -297,11 +372,13 @@ pub struct PerfAccumulator {
     /// KVMem：本轮预处理墙钟与缓存命中率（面板小字；官方 llama.cpp 下恒为 None）。
     last_prompt_wait_ms: Option<f64>,
     last_prompt_cache_hit_pct: Option<f64>,
+    /// 官方 llama.cpp 投机解码最近一次带草稿请求的接受统计（KVMem fork 无此行，恒为 None）。
+    last_draft: Option<DraftSample>,
 }
 
 impl PerfAccumulator {
     /// 喂入一行日志；该行（或与此前折断行的拼接）产出了新样本则返回 true（前端据此刷新快照）。
-    /// KVMem 行与官方 timings 行互斥，分流后各自解析。
+    /// KVMem 行与官方 llama.cpp 度量行（timings / draft acceptance）互斥，分流后各自解析。
     pub fn feed(&mut self, line: &str) -> bool {
         match classify_kvmem(line) {
             Some(KvmemLine::RequestStart) => {
@@ -328,7 +405,7 @@ impl PerfAccumulator {
                 self.record_kvmem_turn(n_prompt, n_gen, prefill_ms, gen_ms);
                 true
             }
-            None => self.feed_timing_line(line),
+            None => self.feed_metric_line(line),
         }
     }
 
@@ -364,24 +441,57 @@ impl PerfAccumulator {
         }
     }
 
-    /// 官方 llama.cpp timings 行路径（原有逻辑，未改动）。
-    fn feed_timing_line(&mut self, line: &str) -> bool {
+    /// 官方 llama.cpp 度量行路径：timings 行与 draft acceptance 行共用折行拼接机制。
+    fn feed_metric_line(&mut self, line: &str) -> bool {
         if let Some(pending) = self.pending.take() {
-            let joined = format!("{}{}", pending.body, line);
-            if let Some(sample) = parse_timing_body(pending.is_prompt, &joined) {
-                self.record(sample);
+            let joined = format!("{}{}", pending.body(), line);
+            // 拼接后仍不完整的兜底策略（两个分支共用）：若本行自身是新的 recognized 起始
+            // （timings 或 draft acceptance），说明 pending 是坏行（如被过滤的脏值行），丢弃
+            // 并按新行处理；超长仍未拼完整同样丢弃。其余情况继续挂起等续行。
+            let keep = locate_timing(line).is_none()
+                && locate_draft(line).is_none()
+                && joined.len() <= MAX_PENDING_LEN;
+            match pending {
+                PendingLine::Timing { is_prompt, .. } => {
+                    if let Some(sample) = parse_timing_body(is_prompt, &joined) {
+                        self.record(sample);
+                        return true;
+                    }
+                    if keep {
+                        self.pending = Some(PendingLine::Timing {
+                            is_prompt,
+                            body: joined,
+                        });
+                        return false;
+                    }
+                }
+                PendingLine::Draft { .. } => {
+                    if let Some(sample) = parse_draft_body(&joined) {
+                        self.last_draft = Some(sample);
+                        return true;
+                    }
+                    if keep {
+                        self.pending = Some(PendingLine::Draft { body: joined });
+                        return false;
+                    }
+                }
+            }
+            // 落到此处：pending 已丢弃，本行落回常规处理。
+        }
+        // draft acceptance 行（投机解码接受统计；与 timings 起始互斥，故顺序无影响）。
+        if let Some(body) = locate_draft(line) {
+            let body = body.trim_start();
+            if let Some(sample) = parse_draft_body(body) {
+                self.last_draft = Some(sample);
                 return true;
             }
-            // 拼接后仍不完整。若本行自身是新的 timings 起始，说明 pending 是坏行
-            // （如被过滤的 0 tokens / inf 行），丢弃并按新行处理；否则继续等续行。
-            if locate_timing(line).is_none() && joined.len() <= MAX_PENDING_LEN {
-                self.pending = Some(PendingTiming {
-                    is_prompt: pending.is_prompt,
-                    body: joined,
+            // 起始行自身不完整（PTY 折断）：挂起等续行。
+            if body.len() <= MAX_PENDING_LEN {
+                self.pending = Some(PendingLine::Draft {
+                    body: body.to_string(),
                 });
-                return false;
             }
-            // 超长仍未拼完整：同样丢弃 pending，本行落回常规处理。
+            return false;
         }
         let Some((is_prompt, body)) = locate_timing(line) else {
             return false;
@@ -393,7 +503,7 @@ impl PerfAccumulator {
         }
         // 起始行自身不完整（PTY 折断）：挂起等续行。
         if body.len() <= MAX_PENDING_LEN {
-            self.pending = Some(PendingTiming {
+            self.pending = Some(PendingLine::Timing {
                 is_prompt,
                 body: body.to_string(),
             });
@@ -442,6 +552,10 @@ impl PerfAccumulator {
             requests: self.requests,
             last_prompt_wait_ms: self.last_prompt_wait_ms,
             last_prompt_cache_hit_pct: self.last_prompt_cache_hit_pct,
+            last_draft_accepted: self.last_draft.map(|d| d.accepted),
+            last_draft_total: self.last_draft.map(|d| d.total),
+            last_draft_accept_rate: self.last_draft.map(|d| d.accepted as f64 / d.total as f64),
+            last_draft_mean_len: self.last_draft.and_then(|d| d.mean_len),
         }
     }
 
@@ -455,6 +569,7 @@ impl PerfAccumulator {
 /// （下限包络拟合的斜率倒数，对并发挤占/卡顿等「只变慢」噪声稳健；拟合未就绪为 null）。
 /// last_prompt_wait_ms / last_prompt_cache_hit_pct 仅 KVMem fork 有值：本轮预处理墙钟
 /// 与缓存命中率（面板小字；官方 llama.cpp 无对应日志，恒为 null）。
+/// last_draft_* 仅官方 llama.cpp 投机解码有值（KVMem fork 与无草稿请求恒为 null）。
 #[derive(Debug, Clone, Default, PartialEq, Serialize)]
 pub struct PerfSnapshot {
     pub last_prompt_tokens: Option<u64>,
@@ -468,6 +583,13 @@ pub struct PerfSnapshot {
     pub requests: u64,
     pub last_prompt_wait_ms: Option<f64>,
     pub last_prompt_cache_hit_pct: Option<f64>,
+    /// 官方 llama.cpp 投机解码（含 MTP `draft-mtp`）最近一次带草稿请求的接受统计
+    /// （`draft acceptance` 日志行；rate = accepted/total）。KVMem fork 无此行，恒为 None。
+    pub last_draft_accepted: Option<u64>,
+    pub last_draft_total: Option<u64>,
+    pub last_draft_accept_rate: Option<f64>,
+    /// 平均每验证步接受长度（新版日志的 mean len）；旧版无此字段为 None。
+    pub last_draft_mean_len: Option<f64>,
 }
 
 /// 消费线程每收到一行日志调用：命中 timings 行则累计并向前端推送快照。

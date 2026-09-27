@@ -3163,6 +3163,111 @@ enabled_advanced_params = ["ctx_size"]
     }
 
     #[test]
+    fn parse_draft_acceptance_lines() {
+        // 新版格式（带时间戳前缀，用户实测格式）：draft acceptance = <rate> ( <a> accepted /
+        // <t> generated), mean len = <m>。接受率一律按 a/t 现算，不采信行内 rate 字段。
+        let mut acc = perf::PerfAccumulator::default();
+        assert!(acc.feed(
+            "0.45.539.510 I slot print_timing: id  0 | task 0 | draft acceptance = 0.36667 (   44 accepted /  120 generated), mean len =  1.37",
+        ));
+        let snap = acc.snapshot();
+        assert_eq!(snap.last_draft_accepted, Some(44));
+        assert_eq!(snap.last_draft_total, Some(120));
+        assert!((snap.last_draft_accept_rate.unwrap() - 44.0 / 120.0).abs() < 1e-9);
+        assert!((snap.last_draft_mean_len.unwrap() - 1.37).abs() < 1e-9);
+        // 草稿统计不进拟合窗口、不计请求数（请求数仍只按 eval 行计）。
+        assert_eq!(snap.requests, 0);
+        assert_eq!(snap.gen_tps_est, None);
+
+        // 行内 rate 与 a/t 不一致时仍按 a/t（0..1）——刻意不采信行内该字段。
+        assert!(acc.feed(
+            "0.45.539.515 I slot print_timing: id  0 | task 0 | draft acceptance = 0.90000 (   44 accepted /  120 generated), mean len =  1.37",
+        ));
+        let snap = acc.snapshot();
+        assert!((snap.last_draft_accept_rate.unwrap() - 44.0 / 120.0).abs() < 1e-9);
+
+        // 旧版格式（子串同为 "draft acceptance"、无 mean len）：mean_len 留空、其余照常。
+        // 只保留最近一次（同 last_* 口径）：后一条覆盖前一条。
+        assert!(acc.feed("draft acceptance rate = 0.57576 (  171 accepted /  297 generated)"));
+        let snap = acc.snapshot();
+        assert_eq!(snap.last_draft_accepted, Some(171));
+        assert_eq!(snap.last_draft_total, Some(297));
+        assert!((snap.last_draft_accept_rate.unwrap() - 171.0 / 297.0).abs() < 1e-9);
+        assert_eq!(snap.last_draft_mean_len, None);
+    }
+
+    #[test]
+    fn parse_wrapped_draft_acceptance_lines_rejoined() {
+        // draft acceptance 行同样会被 ConPTY 按 80 列折断（数字从中间断开），
+        // 必须与 timings 行一样拼回续行再解析。
+        let mut acc = perf::PerfAccumulator::default();
+        assert!(!acc.feed(
+            "0.45.539.510 I slot print_timing: id  0 | task 0 | draft acceptance = 0.36667 (   44 accepted /  12",
+        ));
+        assert!(acc.feed("0 generated), mean len =  1.37"));
+        let snap = acc.snapshot();
+        assert_eq!(snap.last_draft_accepted, Some(44));
+        assert_eq!(snap.last_draft_total, Some(120));
+        assert!((snap.last_draft_accept_rate.unwrap() - 44.0 / 120.0).abs() < 1e-9);
+        assert!((snap.last_draft_mean_len.unwrap() - 1.37).abs() < 1e-9);
+
+        // 断在 mean len 小数中间：半截数值不当完整数认，靠续行拼接后解析。
+        let mut acc = perf::PerfAccumulator::default();
+        assert!(!acc.feed(
+            "0.45.539.510 I slot print_timing: id  0 | task 0 | draft acceptance = 0.36667 (   44 accepted /  120 generated), mean len =  1.",
+        ));
+        assert!(acc.feed("37"));
+        let snap = acc.snapshot();
+        assert_eq!(snap.last_draft_accepted, Some(44));
+        assert_eq!(snap.last_draft_total, Some(120));
+        assert!((snap.last_draft_mean_len.unwrap() - 1.37).abs() < 1e-9);
+    }
+
+    #[test]
+    fn draft_acceptance_requires_valid_counts_and_clears_on_reset() {
+        // 无草稿的请求（普通 timings 行）不产生草稿样本，四字段全空。
+        let mut acc = perf::PerfAccumulator::default();
+        assert!(acc.feed(
+            "eval time =   17398.56 ms /   506 tokens (   34.39 ms per token,    29.08 tokens per second)",
+        ));
+        let snap = acc.snapshot();
+        assert_eq!(snap.last_draft_accepted, None);
+        assert_eq!(snap.last_draft_total, None);
+        assert_eq!(snap.last_draft_accept_rate, None);
+        assert_eq!(snap.last_draft_mean_len, None);
+
+        // 脏值不产生样本：t=0 / 括号残缺 / 数值残缺 / mean len 非有限。
+        for line in [
+            "draft acceptance = 0.00000 (    0 accepted /    0 generated)",
+            "draft acceptance = 0.00000 (   44 accepted /    0 generated)",
+            "draft acceptance = 0.36667 (   44 accepted /  120 generated",
+            "draft acceptance = 0.36667    44 accepted /  120 generated)",
+            "draft acceptance = 0.36667 (   4x accepted /  120 generated)",
+            "draft acceptance = 0.36667 (   44 accepted /  120 generated), mean len =  inf",
+        ] {
+            let mut acc = perf::PerfAccumulator::default();
+            assert!(!acc.feed(line), "{line}");
+            let snap = acc.snapshot();
+            assert_eq!(snap.last_draft_accepted, None, "{line}");
+            assert_eq!(snap.last_draft_total, None, "{line}");
+            assert_eq!(snap.last_draft_accept_rate, None, "{line}");
+            assert_eq!(snap.last_draft_mean_len, None, "{line}");
+        }
+
+        // 有过样本后 reset() 清空（服务进程启动/退出同口径）。
+        let mut acc = perf::PerfAccumulator::default();
+        assert!(acc.feed(
+            "draft acceptance = 0.36667 (   44 accepted /  120 generated), mean len =  1.37",
+        ));
+        acc.reset();
+        let snap = acc.snapshot();
+        assert_eq!(snap.last_draft_accepted, None);
+        assert_eq!(snap.last_draft_total, None);
+        assert_eq!(snap.last_draft_accept_rate, None);
+        assert_eq!(snap.last_draft_mean_len, None);
+    }
+
+    #[test]
     fn parse_kvmem_fork_prefill_and_turn_lines() {
         // KVMem fork（llama-kvmem-server）不打印 timings 行，度量取自 KVMEM_* 行（以下均为
         // 2026-09-18 实测日志原文，llama-server_20260918_225938.log 第 2、3 轮）。预处理取算力
