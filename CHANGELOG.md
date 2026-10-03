@@ -4,6 +4,18 @@
 
 > 本文件为**详细改动历史**（含涉及的文件与实现机制）；GitHub Release 页面为对应版本的**总结性**说明。
 
+## [0.2.8] - 2026-10-03
+
+### 新增功能
+- **度量面板解析草稿接受率（官方投机解码 / MTP）**：`src-tauri/src/lib.rs` 解析官方 llama.cpp 的 `draft acceptance` 日志行（含 MTP draft-mtp），`src-tauri/src/perf.rs` 的 `PerfSnapshot` 增 `last_draft_accepted` / `last_draft_total` / `last_draft_accept_rate` / `last_draft_mean_len`（无投机解码 / KVMem fork 时均 `null`、整行不渲染，不显示 0% 占位）；`src/types.ts` 同步四字段；`src/components/MetricsPanel.tsx` 展开态新增「草稿接受率」指标卡（接受数/验证数 + 均长小字），收起态追加「草稿」百分比；`src/i18n/messages.ts` 补 `metrics.draft` / `metrics.draftAccept` / `metrics.draftMeanLen` 中英键。
+
+### 功能优化
+- 无
+
+### Bug 修复
+- **运行中改端口 / 换配置不再误报「已停止」**：`src-tauri/src/lib.rs` 重构状态推进契约——「运行中」改以配置 host:port 上 `GET /health` 返回 200 为准（模型已加载、可服务），不再依赖裸 TCP 连接；受管态 `managed` 与 `running` 解耦（进程存活即 `managed=true`、Stop 始终可用，外部服务 `running=true` 但 `managed=false`、Stop 禁用）。运行中切换端口 / 地址、或外部服务被本应用接管时，不再错误翻成「llama-server 已停止」或误挂「外部服务」徽章；`mod tests` 新增 `advance_status_*` / `align_display_*` / `stop_grace_addr_*` 等单测固化上述行为。
+- **一键传参正确剥离 PowerShell 续接符并归位位置模型**：`src/lib/parseArgs.ts` 的 `tokenize` 续接符正则由 `/\\+$/` 扩为 `/[\\`]+$/`，覆盖 PowerShell 行尾反引号 `` ` ``（此前孤立成 token 污染 `extra_args`，并会粘在前一个 flag 上被当成取值，如 `--no-mmproj` 误存 `["--no-mmproj", "`"]`）；位置参数（无 `-m` 的模型文件）按 `MODEL_FILE_RE` 归位 `model` 字段并推导 `model_dir`，双模型第二次出现降级 `positional` 并标黄；`isExeToken` 与位置模型归位共用同一后缀真源。存量脏数据重新粘贴一次干净命令即由 `applyPlan` 整份重算覆盖。详见 `docs/parse-args-powershell-backtick-2026-10-03.md`。
+
 ## [0.2.7] - 2026-09-21
 
 ### 新增功能
