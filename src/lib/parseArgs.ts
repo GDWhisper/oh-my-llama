@@ -352,19 +352,27 @@ function tokenize(input: string): string[] {
     }
   }
   if (cur) tokens.push(cur);
-  // 剥离 shell 行续接符：粘贴多行命令时行尾的 `\` 仅用于换行续接，不是参数内容。
-  // 若直接丢弃 token 末尾的反斜杠（如 `cmd\` 紧贴换行、或独立成 token 的 `\`），
-  // 可避免它被当成「自定义参数」污染启动命令行。
-  // 注意：Windows 路径中的 `\` 位于 token 中间（如 F:\foo\bar.exe），不会位于末尾，不受影响。
-  return tokens.map((t) => t.replace(/\\+$/, '')).filter((t) => t !== '');
+  // 剥离行续接符：把一条命令拆成多行书写的标记，行尾出现仅用于换行续接，不是参数内容。
+  // 覆盖两种 shell 方言——'\'（Unix shell / 常见命令行）与 '`'（PowerShell：从 PowerShell
+  // 脚本或文档里复制长命令时的典型形态）。漏剥的续接符会独立成 token 被当成位置参数、
+  // 污染 extra_args；或粘在 flag / 取值尾部被吞进参数值（如 `--no-mmproj` 吃到反引号）。
+  // 注意：Windows 路径中的 '\' 位于 token 中间（如 F:\foo\bar.exe），不会位于末尾，不受影响。
+  return tokens.map((t) => t.replace(LINE_CONTINUATION, '')).filter((t) => t !== '');
 }
+
+// 行续接符：token 末尾的连续 '\' 或 '`'（含二者混排，如 \`）。合法性论证见 tokenize 内注释。
+const LINE_CONTINUATION = /[\\`]+$/;
+
+// 模型文件后缀（GGUF 及 ggml 时代的其它常见格式）：既用于排除「反斜杠紧贴 exe 名」
+// 误判（llama-server-model.gguf），也用于把位置参数传入的模型归位到 -m。
+const MODEL_FILE_RE = /\.(gguf|bin|safetensors|pth|pt|ggml)$/i;
 
 // 判断某个非 flag token 是否为「llama-server 启动器」本体：
 // - 以 .exe 结尾（Windows 最常见，含绝对路径如 F:\llama-turbo\llama-server.exe）；
 // - 或裸名为 llama-server（类 Unix 无扩展名），但需排除形如 llama-server-model.gguf 的模型文件。
 function isExeToken(tok: string): boolean {
   if (/\.exe$/i.test(tok)) return true;
-  if (/llama-server/i.test(tok) && !/\.(gguf|bin|safetensors|pth|pt|ggml)$/i.test(tok)) return true;
+  if (/llama-server/i.test(tok) && !MODEL_FILE_RE.test(tok)) return true;
   return false;
 }
 
@@ -439,7 +447,17 @@ export function parseLlamaArgs(input: string): ParsedArg[] {
         out.push({ flag: tok, kind: 'unknown', value });
       }
     } else {
-      out.push({ flag: '', kind: 'positional', value: tok });
+      // 位置参数（无 flag）分两类：
+      // ① 模型文件 → 归位到 model 字段。llama-server 的位置参数即模型路径，与 -m 等价，
+      //    直接当自定义参数照发会让 model 字段为空、下拉框失焦。
+      //    已出现过模型（-m 或更早的位置模型）时不归位——llama-server 只认第一个位置
+      //    模型，再给只是噪音；按普通位置参数留待下方重复检测标黄即可。
+      // ② 其余 → 位置参数，原样进 extra_args 照发。
+      if (MODEL_FILE_RE.test(tok) && !out.some((a) => a.kind === 'model')) {
+        out.push({ flag: '', kind: 'model', field: 'model', value: tok });
+      } else {
+        out.push({ flag: '', kind: 'positional', value: tok });
+      }
     }
   }
   return out;
@@ -553,9 +571,11 @@ export function buildPlan(args: ParsedArg[], t: Translator, registry: ParamSpec[
   const specByKey = new Map(registry.map((spec) => [spec.key, spec]));
 
   for (const arg of args) {
-    // 归一该 arg 的身份：value/bool/model → 'field:<field>'；
+    // 归一该 arg 的身份：value/bool/model → 'field:<field>'（model 含 -m 与归位的位置
+    // 模型，二者同落 model 字段，重复即标黄提醒）；
     // known → 'structured:<key>'（labelKey 缺失时按 flag 原文计）；
-    // unknown → 'extra:<flag>'（透传参数精确同名才算重复）；exe / positional → null（不参与判定）。
+    // unknown → 'extra:<flag>'（透传参数精确同名才算重复）；
+    // positional 中模型文件 → 'field:model'（与 -m 重复时标黄）；其余 positional / exe → null。
     let identity: string | null = null;
     if (arg.kind === 'value' || arg.kind === 'bool' || arg.kind === 'model') {
       identity = `field:${arg.field}`;
@@ -564,6 +584,10 @@ export function buildPlan(args: ParsedArg[], t: Translator, registry: ParamSpec[
       identity = key ? `structured:${key}` : `extra:${arg.flag}`;
     } else if (arg.kind === 'unknown') {
       identity = `extra:${arg.flag}`;
+    } else if (arg.kind === 'positional' && arg.value && MODEL_FILE_RE.test(arg.value)) {
+      // 未归位的位置模型（已有 -m 之后又粘了一个）：与 -m 同落 model 字段，
+      // 两行都标黄，提醒用户多给了一个模型路径。
+      identity = 'field:model';
     }
     // 行推送统一入口：同步登记身份与 flag 原文，避免 rows / rowIds 错位。
     const pushRow = (text: string, custom: boolean) => {
