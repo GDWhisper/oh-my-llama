@@ -49,4 +49,7 @@ tmp/
 /promo-video-kit/
 /promo-material/
 
+# UX style mockups (local design scratch, not project source) — never commit
+/ux-mockups/
+
 # Whole .codebuddy/ is foreign AI-tool scaffolding (not project source) — fully ignored, do not track or push.
