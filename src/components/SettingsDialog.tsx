@@ -2,13 +2,33 @@ import { useEffect, useState } from 'react';
 import { getVersion } from '@tauri-apps/api/app';
 import { openUrl } from '@tauri-apps/plugin-opener';
 import { invoke } from '@tauri-apps/api/core';
-import { useI18n } from '../i18n';
+import { useI18n, type MessageKey } from '../i18n';
 import { REPO_URL } from '../lib/repo';
 import { LangSwitch } from './LangSwitch';
 import { Button } from './Button';
 import type { AppSettings, UiTheme } from '../types';
 import type { PendingUpdate } from '../hooks/useUpdater';
 import { applyUiTheme, normalizeUiTheme } from '../lib/uiTheme';
+
+// 任务栏小窗的可勾选参数：键与后端 taskbar_widget::ITEM_KEYS 对齐，顺序即小窗显示顺序。
+const TASKBAR_ITEMS: Array<{ key: string; label: MessageKey }> = [
+  { key: 'cpu', label: 'settings.taskbarMetricsCpu' },
+  { key: 'mem', label: 'settings.taskbarMetricsMem' },
+  { key: 'gpu', label: 'settings.taskbarMetricsGpu' },
+  { key: 'vram', label: 'settings.taskbarMetricsVram' },
+];
+
+// 小窗样式与排列选项：键字符串与后端 taskbar_widget 的 STYLE_* / LAYOUT_* 常量对齐
+// （后端对未知值宽松落回默认，前端选项即全部合法值）。
+const TASKBAR_STYLES: Array<{ key: string; label: MessageKey }> = [
+  { key: 'default', label: 'settings.taskbarMetricsStyleDefault' },
+  { key: 'transparent', label: 'settings.taskbarMetricsStyleTransparent' },
+];
+
+const TASKBAR_LAYOUTS: Array<{ key: string; label: MessageKey }> = [
+  { key: 'single', label: 'settings.taskbarMetricsLayoutSingle' },
+  { key: 'double', label: 'settings.taskbarMetricsLayoutDouble' },
+];
 
 // 各分组标题前的装饰小图标：stroke 风格与弹窗关闭按钮一致，仅辅助扫读，不参与语义。
 const sectionIcons = {
@@ -43,6 +63,12 @@ const sectionIcons = {
     <svg width="14" height="14" viewBox="0 0 16 16" aria-hidden="true">
       <path d="M8 1.9v5.3" />
       <path d="M12.4 4.2a5.7 5.7 0 1 1-8.8 0" />
+    </svg>
+  ),
+  taskbarMetrics: (
+    <svg width="14" height="14" viewBox="0 0 16 16" aria-hidden="true">
+      <path d="M2.2 13.4h11.6" />
+      <path d="M4.6 13.4V8.8M8 13.4V4.4M11.4 13.4v-2.6" />
     </svg>
   ),
   about: (
@@ -89,6 +115,16 @@ export function SettingsDialog({
   const [autostartError, setAutostartError] = useState('');
   // 界面风格：null = 未设置（按羊皮纸渲染），'default' | 'parchment' = 用户选过。
   const [uiTheme, setUiTheme] = useState<UiTheme | null>(null);
+  // 任务栏性能小窗：null = 本平台不支持（整张卡片不渲染，同 autostart 模式）。
+  const [taskbarMetrics, setTaskbarMetrics] = useState<{
+    enabled: boolean;
+    items: string[];
+    style: string;
+    layout: string;
+    detailed: boolean;
+  } | null>(null);
+  const [taskbarSupported, setTaskbarSupported] = useState(false);
+  const [taskbarMetricsError, setTaskbarMetricsError] = useState('');
 
   useEffect(() => {
     if (!open) return;
@@ -118,19 +154,51 @@ export function SettingsDialog({
     if (!open) return;
     setProxySaved(false);
     setProxyError('');
+    setTaskbarMetricsError('');
     invoke<AppSettings>('read_settings')
       .then((s) => {
         setProxy(s.update_proxy ?? '');
         setAutoCheck(Boolean(s.auto_check_updates));
         setClosePref(s.minimize_to_tray ?? null);
         setUiTheme(normalizeUiTheme(s.ui_theme));
+        setTaskbarMetrics({
+          enabled: Boolean(s.taskbar_metrics_enabled),
+          items: s.taskbar_metrics_items ?? [],
+          // 旧 settings.json 无这几个字段时后端已给出缺省，?? 兜底仅防异常载荷。
+          style: s.taskbar_metrics_style ?? 'default',
+          layout: s.taskbar_metrics_layout ?? 'single',
+          detailed: Boolean(s.taskbar_metrics_detailed),
+        });
       })
       .catch(() => {
         setProxy('');
         setAutoCheck(false);
         setClosePref(null);
         setUiTheme('parchment');
+        setTaskbarMetrics({
+          enabled: false,
+          items: [],
+          style: 'default',
+          layout: 'single',
+          detailed: false,
+        });
       });
+  }, [open]);
+
+  // 打开时实查本平台是否支持任务栏小窗（仅 Windows）。不支持则整卡不渲染。
+  useEffect(() => {
+    if (!open) return;
+    let alive = true;
+    invoke<boolean>('get_taskbar_widget_support')
+      .then((supported) => {
+        if (alive) setTaskbarSupported(Boolean(supported));
+      })
+      .catch(() => {
+        if (alive) setTaskbarSupported(false);
+      });
+    return () => {
+      alive = false;
+    };
   }, [open]);
 
   // 打开时实查系统侧的自启状态。真源是系统（注册表），不是 settings.json——用户手工
@@ -201,6 +269,77 @@ export function SettingsDialog({
     } catch (e) {
       setProxyError(String(e));
     }
+  };
+
+  // 保存任务栏小窗全部五项（开关 + 勾选 + 样式 + 排列 + 详细数据）：乐观回填，再以后端
+  // 返回值校准（与其它设置一致）。勾选全空时后端会按关闭落盘，前端同步把开关关掉，
+  // 保持 UI 与落盘一致。
+  const saveTaskbarMetrics = (next: {
+    enabled: boolean;
+    items: string[];
+    style: string;
+    layout: string;
+    detailed: boolean;
+  }) => {
+    const prev = taskbarMetrics;
+    const applied = { ...next, enabled: next.enabled && next.items.length > 0 };
+    setTaskbarMetrics(applied);
+    setTaskbarMetricsError('');
+    invoke<AppSettings>('set_taskbar_metrics', {
+      enabled: applied.enabled,
+      items: applied.items,
+      style: applied.style,
+      layout: applied.layout,
+      detailed: applied.detailed,
+    })
+      .then((s) =>
+        setTaskbarMetrics({
+          enabled: Boolean(s.taskbar_metrics_enabled),
+          items: s.taskbar_metrics_items ?? [],
+          style: s.taskbar_metrics_style ?? 'default',
+          layout: s.taskbar_metrics_layout ?? 'single',
+          detailed: Boolean(s.taskbar_metrics_detailed),
+        }),
+      )
+      .catch((e) => {
+        setTaskbarMetrics(prev);
+        setTaskbarMetricsError(String(e));
+      });
+  };
+
+  // 开启时若勾选为空（此前被全部取消过），回到四项全选——否则开关会因「无内容」被后端立刻关回。
+  const onToggleTaskbarEnabled = (enabled: boolean) => {
+    if (!taskbarMetrics) return;
+    const items = taskbarMetrics.items.length
+      ? taskbarMetrics.items
+      : TASKBAR_ITEMS.map((item) => item.key);
+    saveTaskbarMetrics({ ...taskbarMetrics, enabled, items });
+  };
+
+  const onToggleTaskbarItem = (key: string, checked: boolean) => {
+    if (!taskbarMetrics) return;
+    const items = checked
+      ? [...taskbarMetrics.items, key]
+      : taskbarMetrics.items.filter((item) => item !== key);
+    saveTaskbarMetrics({ ...taskbarMetrics, items });
+  };
+
+  // 样式 / 排列为单选组：改动即时落盘；后端广播设置事件让小窗立刻重绘，
+  // 排列变化引起的高度差由小窗 ResizeObserver 重报尺寸、定位线程跟随。
+  const onSelectTaskbarStyle = (style: string) => {
+    if (!taskbarMetrics) return;
+    saveTaskbarMetrics({ ...taskbarMetrics, style });
+  };
+
+  const onSelectTaskbarLayout = (layout: string) => {
+    if (!taskbarMetrics) return;
+    saveTaskbarMetrics({ ...taskbarMetrics, layout });
+  };
+
+  // 详细数据开关：内存/显存项在百分比后追加「已用/总量 GB」。
+  const onToggleTaskbarDetailed = (detailed: boolean) => {
+    if (!taskbarMetrics) return;
+    saveTaskbarMetrics({ ...taskbarMetrics, detailed });
   };
 
   if (!open) return null;
@@ -418,6 +557,93 @@ export function SettingsDialog({
                 <span className="settings-check-label">{t('settings.autostartLabel')}</span>
               </label>
               {autostartError && <div className="settings-proxy-err">{autostartError}</div>}
+            </div>
+          )}
+
+          {/* 仅 Windows 渲染（后端 get_taskbar_widget_support 为假时整卡不出现）：
+              开关 + 要显示的参数复选 + 样式/排列单选。各项随时可改（关闭状态下也持久化），
+              勾选全空会自动把开关关掉。 */}
+          {taskbarSupported && taskbarMetrics && (
+            <div className="settings-section">
+              <div className="settings-section-head">
+                <span className="settings-label">
+                  {sectionIcons.taskbarMetrics}
+                  {t('settings.taskbarMetrics')}
+                </span>
+                <span className="settings-hint">{t('settings.taskbarMetricsHint')}</span>
+              </div>
+              <label className="settings-option-row">
+                <input
+                  type="checkbox"
+                  className="settings-checkbox"
+                  checked={taskbarMetrics.enabled}
+                  onChange={(event) => onToggleTaskbarEnabled(event.target.checked)}
+                />
+                <span className="settings-check-label">{t('settings.taskbarMetricsEnable')}</span>
+              </label>
+              <div className="settings-section-head">
+                <span className="settings-sublabel">{t('settings.taskbarMetricsItems')}</span>
+                <span className="settings-hint">{t('settings.taskbarMetricsItemsHint')}</span>
+              </div>
+              {TASKBAR_ITEMS.map((item) => (
+                <label className="settings-option-row" key={item.key}>
+                  <input
+                    type="checkbox"
+                    className="settings-checkbox"
+                    checked={taskbarMetrics.items.includes(item.key)}
+                    onChange={(event) => onToggleTaskbarItem(item.key, event.target.checked)}
+                  />
+                  <span className="settings-check-label">{t(item.label)}</span>
+                </label>
+              ))}
+              <div className="settings-section-head">
+                <span className="settings-sublabel">{t('settings.taskbarMetricsDetails')}</span>
+                <span className="settings-hint">{t('settings.taskbarMetricsDetailsHint')}</span>
+              </div>
+              <label className="settings-option-row">
+                <input
+                  type="checkbox"
+                  className="settings-checkbox"
+                  checked={taskbarMetrics.detailed}
+                  onChange={(event) => onToggleTaskbarDetailed(event.target.checked)}
+                />
+                <span className="settings-check-label">{t('settings.taskbarMetricsDetailed')}</span>
+              </label>
+              <div className="settings-section-head">
+                <span className="settings-sublabel">{t('settings.taskbarMetricsStyle')}</span>
+                <span className="settings-hint">{t('settings.taskbarMetricsStyleHint')}</span>
+              </div>
+              {TASKBAR_STYLES.map((item) => (
+                <label className="settings-option-row" key={item.key}>
+                  <input
+                    type="radio"
+                    name="taskbar-metrics-style"
+                    className="settings-checkbox"
+                    checked={taskbarMetrics.style === item.key}
+                    onChange={() => onSelectTaskbarStyle(item.key)}
+                  />
+                  <span className="settings-check-label">{t(item.label)}</span>
+                </label>
+              ))}
+              <div className="settings-section-head">
+                <span className="settings-sublabel">{t('settings.taskbarMetricsLayout')}</span>
+                <span className="settings-hint">{t('settings.taskbarMetricsLayoutHint')}</span>
+              </div>
+              {TASKBAR_LAYOUTS.map((item) => (
+                <label className="settings-option-row" key={item.key}>
+                  <input
+                    type="radio"
+                    name="taskbar-metrics-layout"
+                    className="settings-checkbox"
+                    checked={taskbarMetrics.layout === item.key}
+                    onChange={() => onSelectTaskbarLayout(item.key)}
+                  />
+                  <span className="settings-check-label">{t(item.label)}</span>
+                </label>
+              ))}
+              {taskbarMetricsError && (
+                <div className="settings-proxy-err">{taskbarMetricsError}</div>
+              )}
             </div>
           )}
 

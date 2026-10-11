@@ -40,6 +40,10 @@ use perf::{get_perf_stats, record_log_line, reset_perf};
 // 各 DPI 档位下 shell 实际请求的图标尺寸（原始 RGBA），由 scripts/gen_app_icons.py 生成
 mod icon_assets;
 
+// 任务栏常驻性能小窗（TrafficMonitor 风格；仅 Windows 提供，其余平台设置卡片不渲染）
+mod taskbar_widget;
+use taskbar_widget::{get_taskbar_widget_support, set_taskbar_metrics, taskbar_widget_ready};
+
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
 pub struct ServerConfig {
     pub llama_server_path: String,
@@ -183,7 +187,7 @@ pub struct ServerLogLine {
 }
 
 // ── 应用级设置（与服务器启动配置 ServerConfig 解耦）────────────────────
-// 当前含七项：
+// 当前含九项：
 //  - update_proxy：留空 = 更新直连（不读任何代理环境变量）；填写 = 仅走用户显式指定的代理地址。
 //  - auto_check_updates：启动时是否自动检查更新（不打扰：仅弹右上提示+版本旁 NEW 徽标，
 //    绝不静默下载/安装；安装仍需用户在弹窗里显式确认）。
@@ -196,11 +200,16 @@ pub struct ServerLogLine {
 //    （前端 ?? true 兜底，保持原观感）；Some(true/false) = 用户在日志工具栏主动切换过。
 //  - ui_theme：界面风格。None = 未设置（前端按羊皮纸 parchment 渲染，保持当前默认观感）；
 //    Some("default"|"parchment") = 用户在设置界面选择过，前端据此写 html[data-theme]。
+//  - taskbar_metrics_enabled / taskbar_metrics_items / taskbar_metrics_style /
+//    taskbar_metrics_layout / taskbar_metrics_detailed：任务栏常驻性能小窗（仅 Windows）。
+//    默认关闭；items 是 taskbar_widget::ITEM_KEYS 的子集，缺省 = 全选四项；
+//    style = "default"|"transparent"、layout = "single"|"double"（常量真源在
+//    taskbar_widget）；detailed = 内存/显存是否额外显示已用/总量（GB），默认关。
 // 仅持久化到 APPDATA/OhMyLlama/settings.json，不污染 configs.toml，
 // 也不干预用户代理客户端的全局/规则模式。
 // 注意：本结构是「整体读-改-写」落盘的，任何写 settings.json 的命令都必须先 load_settings
 // 再改动自己的字段（见 save_settings_json）——直接新建 AppSettings 字面量会把其它字段清空。
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AppSettings {
     #[serde(default)]
     pub update_proxy: String,
@@ -216,13 +225,63 @@ pub struct AppSettings {
     pub show_log_times: Option<bool>,
     #[serde(default)]
     pub ui_theme: Option<String>,
+    #[serde(default)]
+    pub taskbar_metrics_enabled: bool,
+    #[serde(default = "default_taskbar_metrics_items")]
+    pub taskbar_metrics_items: Vec<String>,
+    #[serde(default = "default_taskbar_metrics_style")]
+    pub taskbar_metrics_style: String,
+    #[serde(default = "default_taskbar_metrics_layout")]
+    pub taskbar_metrics_layout: String,
+    #[serde(default)]
+    pub taskbar_metrics_detailed: bool,
+}
+
+/// 勾选项缺省 = 全选四项（与设置卡片里四项默认勾选一致）。
+fn default_taskbar_metrics_items() -> Vec<String> {
+    taskbar_widget::ITEM_KEYS
+        .iter()
+        .map(|key| (*key).to_string())
+        .collect()
+}
+
+/// 小窗样式缺省 = 默认（近黑圆角底）；与 taskbar_widget::normalize_style 的兜底同源。
+fn default_taskbar_metrics_style() -> String {
+    taskbar_widget::STYLE_DEFAULT.to_string()
+}
+
+/// 小窗排列缺省 = 单行；与 taskbar_widget::normalize_layout 的兜底同源。
+fn default_taskbar_metrics_layout() -> String {
+    taskbar_widget::LAYOUT_SINGLE.to_string()
+}
+
+// 手写 Default 而非 derive：derive 会把 items 默成空数组，与 serde 的「缺省=全选」
+// 不一致——没有 settings.json 的新装（load_settings 返回 AppSettings::default()）
+// 会得到空勾选，设置卡片四项全不勾。两处缺省必须同源。
+impl Default for AppSettings {
+    fn default() -> Self {
+        Self {
+            update_proxy: String::new(),
+            auto_check_updates: false,
+            recent_servers: Vec::new(),
+            recent_model_dirs: Vec::new(),
+            minimize_to_tray: None,
+            show_log_times: None,
+            ui_theme: None,
+            taskbar_metrics_enabled: false,
+            taskbar_metrics_items: default_taskbar_metrics_items(),
+            taskbar_metrics_style: default_taskbar_metrics_style(),
+            taskbar_metrics_layout: default_taskbar_metrics_layout(),
+            taskbar_metrics_detailed: false,
+        }
+    }
 }
 
 fn settings_path(app_data: &std::path::Path) -> std::path::PathBuf {
     app_data.join("OhMyLlama").join("settings.json")
 }
 
-fn load_settings(app_data: &std::path::Path) -> AppSettings {
+pub(crate) fn load_settings(app_data: &std::path::Path) -> AppSettings {
     let path = settings_path(app_data);
     if path.exists() {
         if let Ok(text) = std::fs::read_to_string(&path) {
@@ -236,7 +295,10 @@ fn load_settings(app_data: &std::path::Path) -> AppSettings {
 
 // 整体落盘 settings.json：调用方一律先 load_settings 取出当前全量、只改自己负责的字段，
 // 再交给这里写回——避免任何单一功能的保存动作把其它字段（含 llama-server 注册表）清空。
-fn save_settings_json(app_data: &std::path::Path, settings: &AppSettings) -> Result<(), String> {
+pub(crate) fn save_settings_json(
+    app_data: &std::path::Path,
+    settings: &AppSettings,
+) -> Result<(), String> {
     let path = settings_path(app_data);
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent).map_err(|err| format!("创建设置目录失败: {err}"))?;
@@ -608,6 +670,9 @@ pub fn run() {
             resolve_close_choice,
             set_tray_labels,
             get_system_metrics,
+            set_taskbar_metrics,
+            taskbar_widget_ready,
+            get_taskbar_widget_support,
             get_perf_stats,
             get_param_registry
         ])
@@ -647,6 +712,9 @@ pub fn run() {
 
             // 覆盖 icon.ico 首帧那份兜底图：按当前 DPI 换成精确尺寸，避免 shell 双线性缩放
             apply_dpi_icons(app.handle());
+
+            // 任务栏性能小窗：设置里开着就随启动恢复（失败仅打日志，不拦启动）。
+            taskbar_widget::init_on_startup(app.handle());
 
             // 开机自启条目自愈：已开启自启、但条目指向的不是当前这个可执行文件
             // （便携版挪了目录 / 换了安装位置）时静默改指——否则开机会去拉起一个不存在的
@@ -902,7 +970,7 @@ struct ConfigsState {
     active: String,
 }
 
-fn resolve_app_data() -> Result<std::path::PathBuf, String> {
+pub(crate) fn resolve_app_data() -> Result<std::path::PathBuf, String> {
     let dir = env::var("APPDATA")
         .or_else(|_| env::var("LOCALAPPDATA"))
         .map_err(|_| "无法定位应用数据目录。".to_string())?;
@@ -3157,6 +3225,11 @@ enabled_advanced_params = ["ctx_size"]
             minimize_to_tray: None,
             show_log_times: None,
             ui_theme: None,
+            taskbar_metrics_enabled: false,
+            taskbar_metrics_items: default_taskbar_metrics_items(),
+            taskbar_metrics_style: default_taskbar_metrics_style(),
+            taskbar_metrics_layout: default_taskbar_metrics_layout(),
+            taskbar_metrics_detailed: false,
         };
         save_settings_json(&dir, &settings).expect("save settings");
         let loaded = load_settings(&dir);
@@ -3261,6 +3334,55 @@ enabled_advanced_params = ["ctx_size"]
             save_settings_json(&dir, &settings).expect("save settings");
             assert_eq!(load_settings(&dir).ui_theme.as_deref(), Some(theme));
         }
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn taskbar_metrics_round_trip_and_legacy_default() {
+        // 旧 settings.json 没有任务栏小窗字段：解析成功、默认关闭、勾选项缺省 = 全选四项、
+        // 样式/排列缺省 = default/single（serde 缺省与 AppSettings::default() 必须同源，
+        // 见 Default 手写实现的注释）。
+        let legacy: AppSettings =
+            serde_json::from_str(r#"{"update_proxy":"","auto_check_updates":false}"#)
+                .expect("parse legacy settings");
+        assert!(!legacy.taskbar_metrics_enabled);
+        assert_eq!(
+            legacy.taskbar_metrics_items,
+            default_taskbar_metrics_items()
+        );
+        assert_eq!(legacy.taskbar_metrics_style, "default");
+        assert_eq!(legacy.taskbar_metrics_layout, "single");
+        assert!(!legacy.taskbar_metrics_detailed);
+        assert_eq!(
+            AppSettings::default().taskbar_metrics_items,
+            default_taskbar_metrics_items()
+        );
+        assert_eq!(AppSettings::default().taskbar_metrics_style, "default");
+        assert_eq!(AppSettings::default().taskbar_metrics_layout, "single");
+        assert!(!AppSettings::default().taskbar_metrics_detailed);
+
+        // 用户选择（开着 + 子集勾选 + 透明样式 + 两行 + 详细数据）落盘后原样读回。
+        let dir = std::env::temp_dir().join(format!("llama_taskbar_test_{}", std::process::id()));
+        let _ = std::fs::create_dir_all(dir.join("OhMyLlama"));
+        let settings = AppSettings {
+            taskbar_metrics_enabled: true,
+            taskbar_metrics_items: vec!["cpu".into(), "gpu".into()],
+            taskbar_metrics_style: "transparent".into(),
+            taskbar_metrics_layout: "double".into(),
+            taskbar_metrics_detailed: true,
+            ..AppSettings::default()
+        };
+        save_settings_json(&dir, &settings).expect("save settings");
+        let loaded = load_settings(&dir);
+        assert!(loaded.taskbar_metrics_enabled);
+        assert_eq!(
+            loaded.taskbar_metrics_items,
+            vec!["cpu".to_string(), "gpu".to_string()]
+        );
+        assert_eq!(loaded.taskbar_metrics_style, "transparent");
+        assert_eq!(loaded.taskbar_metrics_layout, "double");
+        assert!(loaded.taskbar_metrics_detailed);
 
         let _ = std::fs::remove_dir_all(&dir);
     }

@@ -6,11 +6,12 @@ import { I18nContext } from './useI18n';
 // 语言持久化到 localStorage（应用级、跨配置生效）；首次启动（无保存偏好）跟随系统语言，zh 系 → 中文，其余 → English。
 
 const DICTS: Record<Lang, Record<MessageKey, string>> = { zh, en };
-const STORAGE_KEY = 'oh-my-llama:lang';
+// 导出供任务栏小窗（独立窗口）监听 storage 事件同步语言——同源 localStorage 共享。
+export const LANG_STORAGE_KEY = 'oh-my-llama:lang';
 
 function detectLang(): Lang {
   try {
-    const saved = localStorage.getItem(STORAGE_KEY);
+    const saved = localStorage.getItem(LANG_STORAGE_KEY);
     if (saved === 'zh' || saved === 'en') {
       return saved;
     }
@@ -31,7 +32,7 @@ export function I18nProvider({ children }: { children: ReactNode }) {
   const setLang = useCallback((next: Lang) => {
     setLangState(next);
     try {
-      localStorage.setItem(STORAGE_KEY, next);
+      localStorage.setItem(LANG_STORAGE_KEY, next);
     } catch {
       // 忽略持久化失败，仅内存生效
     }
