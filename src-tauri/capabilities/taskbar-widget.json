@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "taskbar-widget",
+  "description": "Capability for the taskbar metrics overlay window (custom commands need no permission; only core events are used)",
+  "windows": ["taskbar-metrics"],
+  "permissions": ["core:event:default"]
+}

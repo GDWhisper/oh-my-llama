@@ -123,6 +123,9 @@ export interface AppSettings {
   minimize_to_tray: boolean | null;
   show_log_times: boolean | null;
   ui_theme: string | null;
+  // 任务栏常驻性能小窗（仅 Windows）：开关 + 勾选参数（taskbar_widget::ITEM_KEYS 子集）。
+  taskbar_metrics_enabled: boolean;
+  taskbar_metrics_items: string[];
 }
 
 export type UiTheme = 'default' | 'parchment';
