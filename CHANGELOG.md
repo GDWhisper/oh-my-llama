@@ -4,6 +4,20 @@
 
 > 本文件为**详细改动历史**（含涉及的文件与实现机制）；GitHub Release 页面为对应版本的**总结性**说明。
 
+## [0.2.9] - 2026-10-12
+
+### 新增功能
+- **任务栏常驻系统性能小窗（TrafficMonitor 风格，仅 Windows）**：新增 `src-tauri/src/taskbar_widget.rs`——无边框、透明、置顶、点击穿透、不抢焦点的独立 WebView2 小窗贴在托盘区左侧（竖任务栏贴托盘上方），按勾选显示 CPU / 内存 / GPU / 显存占用。任务栏矩形取自 `Shell_TrayWnd`、托盘区取其子窗 `TrayNotifyWnd`（找不到托盘区退回任务栏右缘），1s 定位线程负责落位、任务栏自动隐藏 / 前台全屏时收起、explorer 重启自愈、DPI 自跟；几何与可见性判定为纯函数，`mod tests` 覆盖横 / 竖任务栏、托盘缺失兜底、全屏判定排除桌面 Progman / WorkerW 等。前端新增第二入口 `widget.html` + `src/widget/main.tsx` + `src/widget/TaskbarMetrics.tsx` + `src/widget/widget.css`（`vite.config.ts` 以 `rollupOptions.input` 配双 entry），量出条带尺寸经 `taskbar_widget_ready` 上报、由后端换算物理尺寸落位；新增命令 `get_taskbar_widget_support` / `set_taskbar_metrics`、`run()` 里 `taskbar_widget::init_on_startup`，权限走新建的 `src-tauri/capabilities/taskbar-widget.json`（窗口 `taskbar-metrics`，仅 `core:event:default`）。实测修正两处平台坑：tauri 的 `skip_taskbar` 不改 ex-style 且 tao 每次显隐会重写回 `WS_EX_APPWINDOW`（任务栏多按钮、漏进 Alt-Tab），定位线程每拍兜底改回 `WS_EX_TOOLWINDOW`；inline 条带基线留白把内容下推 4px 导致下半截被裁，改 block 级 flex。开销实测（托盘态 30s 进程树 CPU A/B）：小窗关 0.47% → 开 0.89% 单核，净 +0.42%。
+- **小窗样式 / 排列 / 详细数据三项设置**：`src-tauri/src/taskbar_widget.rs` 增 `STYLE_DEFAULT` / `STYLE_TRANSPARENT`、`LAYOUT_SINGLE` / `LAYOUT_DOUBLE` 与 `normalize_style` / `normalize_layout` 兜底；透明样式无底色、文字直接叠在任务栏上，任务栏明暗由后端每秒读 `HKCU\...\Themes\Personalize\SystemUsesLightTheme` 去重广播（任务栏跟随「Windows 模式」键而非应用的 `AppsUseLightTheme`，两者分开设置过时必须取前者），前端按 `theme-light` / `theme-dark` 选深浅字色并加 `text-shadow` 描边，注册表读不到时不加类、由 CSS `prefers-color-scheme` 兜底；两行为 2x2 网格（`row-gap` 压到 1px 放进常见任务栏高度），竖任务栏以 `:not(.vertical)` 忽略两列。「显示具体数据」让内存 / 显存在百分比后追加「已用 / 总量 GB」，数据取现有快照字段、采集层零改动。`AppSettings` 新增 `taskbar_metrics_style` / `taskbar_metrics_layout` / `taskbar_metrics_detailed`（均带 `#[serde(default)]`，旧 `settings.json` 回落 default / single / 关），设置事件载荷扩为 `{items, style, layout, detailed}`，改动即时热更小窗（尺寸差经 `ResizeObserver` 重报、定位线程跟随）；`src/types.ts` 同步三字段。
+- **设置面板「任务栏性能显示」卡片**：`src/components/SettingsDialog.tsx` 加总开关 + CPU / 内存 / GPU / 显存四项复选（默认全选，勾空自动关）+ 样式 / 排列单选 + 详细数据复选；非 Windows 整卡不渲染（`get_taskbar_widget_support` 为假时隐藏，`settings.json` 里开着也不建窗）；`src/types.ts` 同步 `taskbar_metrics_enabled` / `taskbar_metrics_items`；`src/i18n/messages.ts` 补 `settings.taskbarMetrics*` 中英键集，`src/i18n/I18nProvider.tsx` 配套。
+- **主窗口停表与小窗轮询解耦**：`src/components/MetricsPanel.tsx` 在「窗口不可见即完全停表」处注明例外——小窗是常驻监控，主窗口进托盘后照常轮询，属独立窗口、不经由此处停表，防止后续把两者联动（可见性事件只发 `taskbar-widget://visible`，跟随任务栏几何 / 全屏判定）。
+
+### 功能优化
+- **系统指标采集加进程内快照缓存去重**：`src-tauri/src/metrics.rs` 把原 `get_system_metrics` 的采集体拆为 `collect_snapshot()`，命令侧新增 `CACHE`（`LazyLock<Mutex<Option<(Instant, MetricsSnapshot)>>>`）与 `CACHE_TTL = 1s`——略小于两端 1.5s 轮询间隔，单端连续轮询永不被缓存截住，主面板与任务栏小窗错峰发起的重复调用被消掉（NVML 每卡多个查询是采集里最贵的一段），陈旧上限 1s 在 1.5s 粒度下无感；缓存锁在采集前释放，避免 `CACHE` / `SYSTEM` / `NVML` 三把锁嵌套。新增单测 `snapshot_cache_reuses_within_window_and_recollects_after`（注入快照标记串验证窗口内复用、拨出窗口后重新采集），`snapshot_reads_cpu_and_memory_without_process_list` 的第二次取样等待由 150ms 改为越过 1s 缓存窗口。
+
+### Bug 修复
+- **设置浮窗滚动条风格不统一**：`src/App.css` 原 `scrollbar-width` / `scrollbar-color` 与各 `::-webkit-scrollbar*` 规则只覆盖 `.column.sidebar` / `.column.main`，设置浮窗正文走系统默认粗滚动条；把 `.settings-modal .modal-body` 并入这组选择器（细、低对比、hover 略加深），并在注释固化「新增滚动区往这组加一行、别另起一套」。
+
 ## [0.2.8] - 2026-10-03
 
 ### 新增功能
