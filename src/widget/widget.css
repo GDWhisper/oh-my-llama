@@ -55,3 +55,66 @@ body {
   font-family: 'Cascadia Code', 'Cascadia Mono', Consolas, 'SF Mono', ui-monospace, monospace;
   font-weight: 600;
 }
+
+/* 详细数据（设置开启时内存/显存追加的「已用/总量」）：同数值等宽、淡一档，不抢主数值视线 */
+.taskbar-metrics-extra {
+  font-family: 'Cascadia Code', 'Cascadia Mono', Consolas, 'SF Mono', ui-monospace, monospace;
+  font-weight: 500;
+  opacity: 0.75;
+}
+
+/* ── 透明样式：无底色，文字直接叠在任务栏上 ─────────────────────────────
+   颜色由「任务栏明暗」驱动：后端每拍读 SystemUsesLightTheme 并广播，前端加
+   theme-light / theme-dark 类。取色时深浅两套都带 text-shadow 描边——任务栏开
+   亚克力/壁纸透出时底色不是纯色，没有描边细笔画会在中间调上糊掉。
+   后端读不到键时不加类，此处以 prefers-color-scheme 兜底（两套颜色与类一致，
+   类规则特异性更高，命中时覆盖媒体查询）。 */
+.taskbar-metrics.transparent {
+  background: transparent;
+  /* 深色任务栏（默认兜底）：浅字 + 深色晕影 */
+  color: rgba(255, 255, 255, 0.95);
+  text-shadow:
+    0 1px 2px rgba(0, 0, 0, 0.7),
+    0 0 6px rgba(0, 0, 0, 0.45);
+}
+
+.taskbar-metrics.transparent.theme-dark {
+  color: rgba(255, 255, 255, 0.95);
+  text-shadow:
+    0 1px 2px rgba(0, 0, 0, 0.7),
+    0 0 6px rgba(0, 0, 0, 0.45);
+}
+
+.taskbar-metrics.transparent.theme-light {
+  /* 浅色任务栏：深字 + 浅色晕影 */
+  color: rgba(16, 16, 16, 0.92);
+  text-shadow:
+    0 1px 2px rgba(255, 255, 255, 0.75),
+    0 0 6px rgba(255, 255, 255, 0.5);
+}
+
+@media (prefers-color-scheme: light) {
+  .taskbar-metrics.transparent {
+    color: rgba(16, 16, 16, 0.92);
+    text-shadow:
+      0 1px 2px rgba(255, 255, 255, 0.75),
+      0 0 6px rgba(255, 255, 255, 0.5);
+  }
+}
+
+/* 透明样式下标签/详细数据提高对比：0.62 直接叠壁纸/亚克力太淡 */
+.taskbar-metrics.transparent .taskbar-metrics-label,
+.taskbar-metrics.transparent .taskbar-metrics-extra {
+  opacity: 0.78;
+}
+
+/* ── 两行排列：每行两项（横任务栏占更少宽度）──────────────────────────
+   row-gap 压到 1px：继承的 12px 会把条带撑到约 49px 高，超出常见任务栏高度。
+   竖任务栏不做两列（:not(.vertical)）——竖栏本来就逐项成行，两列会让条带
+   宽过竖栏（约 122px vs 栏宽 40-60px）而盖住桌面。 */
+.taskbar-metrics.layout-double:not(.vertical) {
+  display: grid;
+  grid-template-columns: max-content max-content;
+  column-gap: 12px;
+  row-gap: 1px;
+}

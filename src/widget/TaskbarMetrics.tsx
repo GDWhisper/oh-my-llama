@@ -15,10 +15,16 @@ interface GpuMetrics {
 interface MetricsSnapshot {
   cpu_usage: number;
   mem_usage: number;
+  mem_total_mb: number;
+  mem_used_mb: number;
   gpus: GpuMetrics[];
 }
 
 type ItemKey = 'cpu' | 'mem' | 'gpu' | 'vram';
+type WidgetStyle = 'default' | 'transparent';
+type WidgetLayout = 'single' | 'double';
+// 任务栏明暗（后端按 SystemUsesLightTheme 广播）：仅透明样式用于选文字色。
+type WidgetTheme = 'light' | 'dark';
 
 // 与后端 taskbar_widget::ITEM_KEYS 对齐；顺序即条带内的显示顺序（后端已按此归一化）。
 const ITEM_KEYS: readonly ItemKey[] = ['cpu', 'mem', 'gpu', 'vram'];
@@ -37,6 +43,16 @@ const INTERVAL = 1500;
 function normalizeItems(raw: unknown): ItemKey[] {
   if (!Array.isArray(raw)) return [];
   return ITEM_KEYS.filter((key) => raw.includes(key));
+}
+
+/** 样式归一化：未知值落回默认（settings.json 可被手改，事件载荷同理）。 */
+function normalizeStyle(raw: unknown): WidgetStyle {
+  return raw === 'transparent' ? 'transparent' : 'default';
+}
+
+/** 排列归一化：未知值落回单行。 */
+function normalizeLayout(raw: unknown): WidgetLayout {
+  return raw === 'double' ? 'double' : 'single';
 }
 
 /** 0-100 取整百分比；非法值显示顿号占位，不让条带出现 NaN。 */
@@ -60,6 +76,28 @@ function itemText(key: ItemKey, snap: MetricsSnapshot | null): string {
   }
 }
 
+/** 紧凑容量对（GB 一位小数，单位只写一次）：如 22.1/31.9G——条带横向空间有限。 */
+function gbPair(usedMb: number, totalMb: number): string | null {
+  if (!Number.isFinite(usedMb) || !Number.isFinite(totalMb) || totalMb <= 0) return null;
+  const g = (mb: number) => (mb / 1024).toFixed(1);
+  return `${g(usedMb)}/${g(totalMb)}G`;
+}
+
+/** 详细数据（设置可关）：仅内存/显存有可展开的具体量——占用率本身即具体值；
+ *  取不到数据时返回 null，条带只显示百分比。 */
+function itemExtra(key: ItemKey, snap: MetricsSnapshot | null): string | null {
+  if (!snap) return null;
+  const gpu = snap.gpus[0];
+  switch (key) {
+    case 'mem':
+      return gbPair(snap.mem_used_mb, snap.mem_total_mb);
+    case 'vram':
+      return gpu ? gbPair(gpu.vram_used_mb, gpu.vram_total_mb) : null;
+    default:
+      return null;
+  }
+}
+
 /** 语言同步：主窗口切换语言写 localStorage，本窗口（同源）收 storage 事件跟随切换。 */
 function useLangSync() {
   const { setLang } = useI18n();
@@ -79,6 +117,13 @@ export function TaskbarMetrics() {
   const { t } = useI18n();
   // 首帧先按全选渲染，读到设置后再校准（避免空条带闪一下）。
   const [items, setItems] = useState<ItemKey[]>([...ITEM_KEYS]);
+  const [style, setStyle] = useState<WidgetStyle>('default');
+  const [layout, setLayout] = useState<WidgetLayout>('single');
+  // 详细数据：内存/显存项在百分比后追加「已用/总量 GB」（设置卡片可开关）。
+  const [detailed, setDetailed] = useState(false);
+  // 透明样式的文字色由任务栏明暗决定；null = 后端还没给出（键缺失），
+  // 由 CSS 的 prefers-color-scheme 兜底（见 widget.css）。
+  const [theme, setTheme] = useState<WidgetTheme | null>(null);
   const [snap, setSnap] = useState<MetricsSnapshot | null>(null);
   // 可见性真源在后端定位线程（任务栏自动隐藏 / 前台全屏时收条带）；WebView2 被
   // window.hide() 后不会翻 document.visibilityState，只能听事件（同主窗口的教训）。
@@ -93,7 +138,11 @@ export function TaskbarMetrics() {
     let alive = true;
     invoke<AppSettings>('read_settings')
       .then((s) => {
-        if (alive) setItems(normalizeItems(s.taskbar_metrics_items));
+        if (!alive) return;
+        setItems(normalizeItems(s.taskbar_metrics_items));
+        setStyle(normalizeStyle(s.taskbar_metrics_style));
+        setLayout(normalizeLayout(s.taskbar_metrics_layout));
+        setDetailed(Boolean(s.taskbar_metrics_detailed));
       })
       .catch(() => {});
     return () => {
@@ -101,7 +150,7 @@ export function TaskbarMetrics() {
     };
   }, []);
 
-  // 后端事件：勾选项变更 / 可见性 / 任务栏朝向（竖任务栏时条带改竖排）。
+  // 后端事件：设置变更（勾选/样式/排列/详细数据）/ 可见性 / 任务栏朝向 / 任务栏明暗。
   useEffect(() => {
     let disposed = false;
     const unlisteners: Array<() => void> = [];
@@ -114,10 +163,24 @@ export function TaskbarMetrics() {
         .catch(() => {});
     };
     track(
-      listen<string[]>('taskbar-widget://settings', (e) => setItems(normalizeItems(e.payload))),
+      listen<{ items?: unknown; style?: unknown; layout?: unknown; detailed?: unknown }>(
+        'taskbar-widget://settings',
+        (e) => {
+          const p = e.payload ?? {};
+          setItems(normalizeItems(p.items));
+          setStyle(normalizeStyle(p.style));
+          setLayout(normalizeLayout(p.layout));
+          setDetailed(Boolean(p.detailed));
+        },
+      ),
     );
     track(listen<boolean>('taskbar-widget://visible', (e) => setVisible(Boolean(e.payload))));
     track(listen<boolean>('taskbar-widget://vertical', (e) => setVertical(Boolean(e.payload))));
+    track(
+      listen<string>('taskbar-widget://theme', (e) => {
+        if (e.payload === 'light' || e.payload === 'dark') setTheme(e.payload);
+      }),
+    );
     return () => {
       disposed = true;
       unlisteners.forEach((unlisten) => unlisten());
@@ -165,14 +228,29 @@ export function TaskbarMetrics() {
     return () => observer.disconnect();
   }, []);
 
+  // 类名组合：竖排 / 透明样式 / 两行排列 / 明暗主题（缺一不可，CSS 按此选色与布局）。
+  const classes = [
+    'taskbar-metrics',
+    vertical ? 'vertical' : '',
+    style === 'transparent' ? 'transparent' : '',
+    layout === 'double' ? 'layout-double' : '',
+    theme ? `theme-${theme}` : '',
+  ]
+    .filter(Boolean)
+    .join(' ');
+
   return (
-    <div ref={stripRef} className={`taskbar-metrics${vertical ? ' vertical' : ''}`}>
-      {items.map((key) => (
-        <span key={key} className="taskbar-metrics-item">
-          <span className="taskbar-metrics-label">{t(ITEM_LABEL[key])}</span>
-          <span className="taskbar-metrics-value">{itemText(key, snap)}</span>
-        </span>
-      ))}
+    <div ref={stripRef} className={classes}>
+      {items.map((key) => {
+        const extra = detailed ? itemExtra(key, snap) : null;
+        return (
+          <span key={key} className="taskbar-metrics-item">
+            <span className="taskbar-metrics-label">{t(ITEM_LABEL[key])}</span>
+            <span className="taskbar-metrics-value">{itemText(key, snap)}</span>
+            {extra && <span className="taskbar-metrics-extra">{extra}</span>}
+          </span>
+        );
+      })}
     </div>
   );
 }

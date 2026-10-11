@@ -200,8 +200,11 @@ pub struct ServerLogLine {
 //    （前端 ?? true 兜底，保持原观感）；Some(true/false) = 用户在日志工具栏主动切换过。
 //  - ui_theme：界面风格。None = 未设置（前端按羊皮纸 parchment 渲染，保持当前默认观感）；
 //    Some("default"|"parchment") = 用户在设置界面选择过，前端据此写 html[data-theme]。
-//  - taskbar_metrics_enabled / taskbar_metrics_items：任务栏常驻性能小窗（仅 Windows）。
-//    默认关闭；items 是 taskbar_widget::ITEM_KEYS 的子集，缺省 = 全选四项。
+//  - taskbar_metrics_enabled / taskbar_metrics_items / taskbar_metrics_style /
+//    taskbar_metrics_layout / taskbar_metrics_detailed：任务栏常驻性能小窗（仅 Windows）。
+//    默认关闭；items 是 taskbar_widget::ITEM_KEYS 的子集，缺省 = 全选四项；
+//    style = "default"|"transparent"、layout = "single"|"double"（常量真源在
+//    taskbar_widget）；detailed = 内存/显存是否额外显示已用/总量（GB），默认关。
 // 仅持久化到 APPDATA/OhMyLlama/settings.json，不污染 configs.toml，
 // 也不干预用户代理客户端的全局/规则模式。
 // 注意：本结构是「整体读-改-写」落盘的，任何写 settings.json 的命令都必须先 load_settings
@@ -226,6 +229,12 @@ pub struct AppSettings {
     pub taskbar_metrics_enabled: bool,
     #[serde(default = "default_taskbar_metrics_items")]
     pub taskbar_metrics_items: Vec<String>,
+    #[serde(default = "default_taskbar_metrics_style")]
+    pub taskbar_metrics_style: String,
+    #[serde(default = "default_taskbar_metrics_layout")]
+    pub taskbar_metrics_layout: String,
+    #[serde(default)]
+    pub taskbar_metrics_detailed: bool,
 }
 
 /// 勾选项缺省 = 全选四项（与设置卡片里四项默认勾选一致）。
@@ -234,6 +243,16 @@ fn default_taskbar_metrics_items() -> Vec<String> {
         .iter()
         .map(|key| (*key).to_string())
         .collect()
+}
+
+/// 小窗样式缺省 = 默认（近黑圆角底）；与 taskbar_widget::normalize_style 的兜底同源。
+fn default_taskbar_metrics_style() -> String {
+    taskbar_widget::STYLE_DEFAULT.to_string()
+}
+
+/// 小窗排列缺省 = 单行；与 taskbar_widget::normalize_layout 的兜底同源。
+fn default_taskbar_metrics_layout() -> String {
+    taskbar_widget::LAYOUT_SINGLE.to_string()
 }
 
 // 手写 Default 而非 derive：derive 会把 items 默成空数组，与 serde 的「缺省=全选」
@@ -251,6 +270,9 @@ impl Default for AppSettings {
             ui_theme: None,
             taskbar_metrics_enabled: false,
             taskbar_metrics_items: default_taskbar_metrics_items(),
+            taskbar_metrics_style: default_taskbar_metrics_style(),
+            taskbar_metrics_layout: default_taskbar_metrics_layout(),
+            taskbar_metrics_detailed: false,
         }
     }
 }
@@ -3205,6 +3227,9 @@ enabled_advanced_params = ["ctx_size"]
             ui_theme: None,
             taskbar_metrics_enabled: false,
             taskbar_metrics_items: default_taskbar_metrics_items(),
+            taskbar_metrics_style: default_taskbar_metrics_style(),
+            taskbar_metrics_layout: default_taskbar_metrics_layout(),
+            taskbar_metrics_detailed: false,
         };
         save_settings_json(&dir, &settings).expect("save settings");
         let loaded = load_settings(&dir);
@@ -3315,8 +3340,9 @@ enabled_advanced_params = ["ctx_size"]
 
     #[test]
     fn taskbar_metrics_round_trip_and_legacy_default() {
-        // 旧 settings.json 没有任务栏小窗字段：解析成功、默认关闭、勾选项缺省 = 全选四项
-        // （serde 缺省与 AppSettings::default() 必须同源，见 Default 手写实现的注释）。
+        // 旧 settings.json 没有任务栏小窗字段：解析成功、默认关闭、勾选项缺省 = 全选四项、
+        // 样式/排列缺省 = default/single（serde 缺省与 AppSettings::default() 必须同源，
+        // 见 Default 手写实现的注释）。
         let legacy: AppSettings =
             serde_json::from_str(r#"{"update_proxy":"","auto_check_updates":false}"#)
                 .expect("parse legacy settings");
@@ -3325,17 +3351,26 @@ enabled_advanced_params = ["ctx_size"]
             legacy.taskbar_metrics_items,
             default_taskbar_metrics_items()
         );
+        assert_eq!(legacy.taskbar_metrics_style, "default");
+        assert_eq!(legacy.taskbar_metrics_layout, "single");
+        assert!(!legacy.taskbar_metrics_detailed);
         assert_eq!(
             AppSettings::default().taskbar_metrics_items,
             default_taskbar_metrics_items()
         );
+        assert_eq!(AppSettings::default().taskbar_metrics_style, "default");
+        assert_eq!(AppSettings::default().taskbar_metrics_layout, "single");
+        assert!(!AppSettings::default().taskbar_metrics_detailed);
 
-        // 用户选择（开着 + 子集勾选）落盘后原样读回。
+        // 用户选择（开着 + 子集勾选 + 透明样式 + 两行 + 详细数据）落盘后原样读回。
         let dir = std::env::temp_dir().join(format!("llama_taskbar_test_{}", std::process::id()));
         let _ = std::fs::create_dir_all(dir.join("OhMyLlama"));
         let settings = AppSettings {
             taskbar_metrics_enabled: true,
             taskbar_metrics_items: vec!["cpu".into(), "gpu".into()],
+            taskbar_metrics_style: "transparent".into(),
+            taskbar_metrics_layout: "double".into(),
+            taskbar_metrics_detailed: true,
             ..AppSettings::default()
         };
         save_settings_json(&dir, &settings).expect("save settings");
@@ -3345,6 +3380,9 @@ enabled_advanced_params = ["ctx_size"]
             loaded.taskbar_metrics_items,
             vec!["cpu".to_string(), "gpu".to_string()]
         );
+        assert_eq!(loaded.taskbar_metrics_style, "transparent");
+        assert_eq!(loaded.taskbar_metrics_layout, "double");
+        assert!(loaded.taskbar_metrics_detailed);
 
         let _ = std::fs::remove_dir_all(&dir);
     }

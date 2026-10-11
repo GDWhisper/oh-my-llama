@@ -15,6 +15,8 @@
 //!   退回任务栏右缘（可能与托盘图标重叠，属兜底）。
 //! - 点击任务栏会把 shell 提到置顶带最上层，把条带盖住；故每拍检查 z 序，被压住
 //!   才重申置顶——不做每秒无脑置顶，避免与托盘弹出面板（Wi-Fi/音量等）抢层。
+//! - 条带样式（默认/透明）、排列（单行/两行）与日/夜间取色都是前端呈现；Rust 侧只经
+//!   `taskbar-widget://settings` 转发设置、每拍广播任务栏明暗（见 `taskbar_is_light`）。
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, LazyLock, Mutex};
@@ -30,6 +32,14 @@ pub const WIDGET_LABEL: &str = "taskbar-metrics";
 
 /// 可显示的参数键：顺序即条带内显示顺序（前端复选框与设置持久化共用）。
 pub const ITEM_KEYS: [&str; 4] = ["cpu", "mem", "gpu", "vram"];
+
+/// 条带样式键（与设置卡片单选组、前端归一化对齐）：default = 近黑圆角底；
+/// transparent = 无底色，文字直接叠在任务栏上（由后端广播的任务栏明暗驱动取色）。
+pub const STYLE_DEFAULT: &str = "default";
+pub const STYLE_TRANSPARENT: &str = "transparent";
+/// 排列键：single = 单行；double = 两行（仅横任务栏生效；竖任务栏本就逐项成行，保持单列）。
+pub const LAYOUT_SINGLE: &str = "single";
+pub const LAYOUT_DOUBLE: &str = "double";
 
 /// 定位线程节拍（毫秒）：任务栏移动 / 自动隐藏 / 全屏切换都靠这一周期兜住。
 #[cfg(windows)]
@@ -57,6 +67,9 @@ struct TickState {
     pos: Option<(i32, i32)>,
     size_px: Option<(u32, u32)>,
     vertical: Option<bool>,
+    /// 任务栏是否浅色（SystemUsesLightTheme）。None = 读不到（键/值缺失），不广播，
+    /// 前端按系统 prefers-color-scheme 兜底。
+    theme_light: Option<bool>,
     shown: bool,
 }
 
@@ -68,15 +81,31 @@ static STATE: LazyLock<Shared> = LazyLock::new(|| Shared {
 
 // ── IPC 命令 ───────────────────────────────────────────────────────────
 
-/// 开关与勾选项落盘并立即生效：开启时确保小窗存在并启动定位线程，关闭时销毁小窗。
-/// 返回落盘后的全量设置（前端以后端返回值校准，与其它设置命令一致）。
+/// `taskbar-widget://settings` 事件载荷：一份设置快照。字段名是跨层契约
+/// （前端见 src/widget/TaskbarMetrics.tsx），改名须两处同步。
+#[derive(Clone, serde::Serialize)]
+struct WidgetSettings {
+    items: Vec<String>,
+    style: String,
+    layout: String,
+    detailed: bool,
+}
+
+/// 开关 / 勾选项 / 样式 / 排列 / 详细数据落盘并立即生效：开启时确保小窗存在并启动
+/// 定位线程，关闭时销毁小窗。返回落盘后的全量设置（前端以后端返回值校准，与其它设置命令一致）。
 #[tauri::command]
 pub async fn set_taskbar_metrics(
     app: AppHandle,
     enabled: bool,
     items: Vec<String>,
+    style: String,
+    layout: String,
+    detailed: bool,
 ) -> Result<AppSettings, String> {
     let items = normalize_items(&items)?;
+    // style/layout 宽松归一化（未知值落回默认）：settings.json 可被手改，也可能来自更新版本。
+    let style = normalize_style(&style).to_string();
+    let layout = normalize_layout(&layout).to_string();
     // 勾选全空 = 无内容可显示，按关闭落盘（前端在勾掉最后一项时会同步关掉开关）。
     let enabled = enabled && !items.is_empty();
 
@@ -89,16 +118,25 @@ pub async fn set_taskbar_metrics(
     }
 
     let app_data = resolve_app_data()?;
-    // 读-改-写：只动本命令负责的两个字段（见 lib.rs 的 AppSettings 注释）。
+    // 读-改-写：只动本命令负责的五个字段（见 lib.rs 的 AppSettings 注释）。
     let mut settings = load_settings(&app_data);
     settings.taskbar_metrics_enabled = enabled;
     settings.taskbar_metrics_items = items;
+    settings.taskbar_metrics_style = style;
+    settings.taskbar_metrics_layout = layout;
+    settings.taskbar_metrics_detailed = detailed;
     save_settings_json(&app_data, &settings)?;
-    // 让已打开的小窗立刻按新勾选项重绘；小窗刚被销毁时该事件无人接收，属预期。
+    // 让已打开的小窗立刻按新设置重绘（样式/排列/详细数据变更会经 ResizeObserver 触发
+    // 尺寸重报，由定位线程跟随新尺寸重新落位）；小窗刚被销毁时该事件无人接收，属预期。
     let _ = app.emit_to(
         WIDGET_LABEL,
         "taskbar-widget://settings",
-        &settings.taskbar_metrics_items,
+        WidgetSettings {
+            items: settings.taskbar_metrics_items.clone(),
+            style: settings.taskbar_metrics_style.clone(),
+            layout: settings.taskbar_metrics_layout.clone(),
+            detailed: settings.taskbar_metrics_detailed,
+        },
     );
     Ok(settings)
 }
@@ -269,6 +307,19 @@ fn step(app: &AppHandle) {
     let place = placement(lw, lh, win.scale_factor().unwrap_or(1.0));
 
     let mut tick = STATE.tick.lock().unwrap();
+    // 任务栏明暗（透明样式据此选文字色）：只在变化时广播；读不到不广播，由前端按
+    // prefers-color-scheme 兜底。放在显隐分支之前——条带被全屏压住期间也保持同步。
+    let theme = taskbar_is_light();
+    if tick.theme_light != theme {
+        if let Some(light) = theme {
+            let _ = app.emit_to(
+                WIDGET_LABEL,
+                "taskbar-widget://theme",
+                if light { "light" } else { "dark" },
+            );
+        }
+        tick.theme_light = theme;
+    }
     match place {
         Some(p) => {
             if tick.size_px != Some((p.w_px, p.h_px)) {
@@ -318,6 +369,24 @@ fn normalize_items(items: &[String]) -> Result<Vec<String>, String> {
         .filter(|key| items.iter().any(|item| item == *key))
         .map(|key| (*key).to_string())
         .collect())
+}
+
+/// 样式归一化：未知值落回默认样式（宽松——settings.json 可被手改，也可能来自更新版本）。
+fn normalize_style(style: &str) -> &'static str {
+    if style == STYLE_TRANSPARENT {
+        STYLE_TRANSPARENT
+    } else {
+        STYLE_DEFAULT
+    }
+}
+
+/// 排列归一化：未知值落回单行。
+fn normalize_layout(layout: &str) -> &'static str {
+    if layout == LAYOUT_DOUBLE {
+        LAYOUT_DOUBLE
+    } else {
+        LAYOUT_SINGLE
+    }
 }
 
 // ── 几何（纯函数；Win32 调用在下方 cfg(windows) 块）───────────────────
@@ -543,6 +612,64 @@ fn foreground_fullscreen() -> bool {
     }
 }
 
+/// 任务栏当前是否浅色：读 HKCU 的 `SystemUsesLightTheme`。任务栏与开始菜单等系统壳层
+/// 跟随的是「Windows 模式」这个键，而**不是**应用的 `AppsUseLightTheme`——两者被分开
+/// 设置过时必须取前者，否则透明样式的文字色会选反（白字贴浅色任务栏）。
+/// None = 读不到（键/值缺失或类型不对），由前端按 prefers-color-scheme 兜底。
+#[cfg(windows)]
+fn taskbar_is_light() -> Option<bool> {
+    use windows_sys::Win32::Foundation::ERROR_SUCCESS;
+    use windows_sys::Win32::System::Registry::{
+        RegCloseKey, RegOpenKeyExW, RegQueryValueExW, HKEY, HKEY_CURRENT_USER, KEY_QUERY_VALUE,
+        REG_DWORD,
+    };
+
+    let sub_key: Vec<u16> = r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize"
+        .encode_utf16()
+        .chain(std::iter::once(0))
+        .collect();
+    let name: Vec<u16> = "SystemUsesLightTheme"
+        .encode_utf16()
+        .chain(std::iter::once(0))
+        .collect();
+    let mut key: HKEY = std::ptr::null_mut();
+    // SAFETY: 两个缓冲均为 NUL 结尾的 UTF-16 且存活至调用结束；key 仅在成功时被写入。
+    let rc = unsafe {
+        RegOpenKeyExW(
+            HKEY_CURRENT_USER,
+            sub_key.as_ptr(),
+            0,
+            KEY_QUERY_VALUE,
+            &mut key,
+        )
+    };
+    if rc != ERROR_SUCCESS {
+        return None;
+    }
+    let mut kind = 0u32;
+    let mut data = 0u32;
+    let mut bytes = std::mem::size_of::<u32>() as u32;
+    // SAFETY: key 有效；name 为 NUL 结尾 UTF-16；data/bytes 如实给出缓冲容量。
+    let rc = unsafe {
+        RegQueryValueExW(
+            key,
+            name.as_ptr(),
+            std::ptr::null(),
+            &mut kind,
+            &mut data as *mut u32 as *mut u8,
+            &mut bytes,
+        )
+    };
+    // SAFETY: key 来自成功的 RegOpenKeyExW，此处释放一次。
+    unsafe { RegCloseKey(key) };
+    (rc == ERROR_SUCCESS && kind == REG_DWORD && bytes == 4).then_some(data != 0)
+}
+
+#[cfg(not(windows))]
+fn taskbar_is_light() -> Option<bool> {
+    None // 小窗仅 Windows；兜底保持编译通过且不广播
+}
+
 /// 任务栏是否压在条带上方：点击任务栏会把 shell（含托盘弹出面板）提到置顶带最上层。
 /// 从本窗口沿 z 序向上最多找 32 个窗口，命中任务栏才重申置顶——面板弹出时不与之抢层。
 #[cfg(windows)]
@@ -692,5 +819,34 @@ mod tests {
             normalize_items(&["vram".to_string(), "cpu".to_string(), "cpu".to_string()]).unwrap();
         assert_eq!(got, vec!["cpu".to_string(), "vram".to_string()]);
         assert!(normalize_items(&[]).unwrap().is_empty());
+    }
+
+    /// 样式 / 排列归一化：已知值原样返回；未知值（手改的 settings.json / 更新版本遗留）落回默认。
+    #[test]
+    fn normalize_style_and_layout_fall_back() {
+        assert_eq!(normalize_style(STYLE_TRANSPARENT), STYLE_TRANSPARENT);
+        assert_eq!(normalize_style(STYLE_DEFAULT), STYLE_DEFAULT);
+        assert_eq!(normalize_style("hologram"), STYLE_DEFAULT);
+        assert_eq!(normalize_style(""), STYLE_DEFAULT);
+        assert_eq!(normalize_layout(LAYOUT_DOUBLE), LAYOUT_DOUBLE);
+        assert_eq!(normalize_layout(LAYOUT_SINGLE), LAYOUT_SINGLE);
+        assert_eq!(normalize_layout("triple"), LAYOUT_SINGLE);
+        assert_eq!(normalize_layout(""), LAYOUT_SINGLE);
+    }
+
+    /// 广播载荷的字段名是前端契约（TaskbarMetrics.tsx 按 items / style / layout / detailed 解析）。
+    #[test]
+    fn widget_settings_payload_shape() {
+        let json = serde_json::to_value(WidgetSettings {
+            items: vec!["cpu".into()],
+            style: STYLE_TRANSPARENT.into(),
+            layout: LAYOUT_DOUBLE.into(),
+            detailed: true,
+        })
+        .unwrap();
+        assert_eq!(json["items"], serde_json::json!(["cpu"]));
+        assert_eq!(json["style"], STYLE_TRANSPARENT);
+        assert_eq!(json["layout"], LAYOUT_DOUBLE);
+        assert_eq!(json["detailed"], true);
     }
 }
