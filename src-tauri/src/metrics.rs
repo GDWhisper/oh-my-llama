@@ -5,9 +5,12 @@
 //! - GPU：经 `nvml-wrapper` 动态加载系统 `nvml.dll`（NVIDIA 驱动自带）。
 //!   无 N 卡 / 驱动未装时 `Nvml::init()` 返回 Err，降级为「无 GPU」，绝不崩。
 //! - AMD / Intel 的实时利用率与已用显存需走 Windows PDH 计数器，留作下一轮增强。
+//! - 进程内快照缓存：1s 内的重复调用复用上快照。主面板与任务栏小窗都是 1.5s 轮询、
+//!   错峰发起，NVML 每卡多个查询是采集里最贵的一段，窗口内去重省掉完整一次采集。
 
 use serde::Serialize;
 use std::sync::{LazyLock, Mutex};
+use std::time::{Duration, Instant};
 use sysinfo::{CpuRefreshKind, System};
 
 #[derive(Debug, Clone, Serialize)]
@@ -52,6 +55,15 @@ fn cpu_refresh_kind() -> CpuRefreshKind {
 /// 全局 NVML 实例（仅 NVIDIA）。初始化失败则为 None，降级处理。
 static NVML: LazyLock<Mutex<Option<nvml_wrapper::Nvml>>> =
     LazyLock::new(|| Mutex::new(nvml_wrapper::Nvml::init().ok()));
+
+/// 快照缓存窗口：略小于轮询间隔（1.5s）取 1s——单端连续轮询永不被缓存截住；
+/// 两端错峰的重复调用被消掉，额外陈旧上限 1s（两者本就 1.5s 粒度，肉眼无感）。
+const CACHE_TTL: Duration = Duration::from_millis(1000);
+
+/// 最近一次采集（时间戳 + 快照）。并发下两次同时判旧的调用会各采一次——窗口极窄
+/// 且无副作用，不为此加「采集进行中」锁。
+static CACHE: LazyLock<Mutex<Option<(Instant, MetricsSnapshot)>>> =
+    LazyLock::new(|| Mutex::new(None));
 
 /// 枚举所有 NVIDIA GPU（按索引 0..device_count）。
 fn collect_gpus() -> Vec<GpuMetrics> {
@@ -112,8 +124,8 @@ fn collect_gpus() -> Vec<GpuMetrics> {
     out
 }
 
-#[tauri::command]
-pub fn get_system_metrics() -> MetricsSnapshot {
+/// 采集一份新快照（无缓存语义；缓存复用见 [`get_system_metrics`]）。
+fn collect_snapshot() -> MetricsSnapshot {
     let mut sys = SYSTEM.lock().unwrap();
     sys.refresh_cpu_specifics(cpu_refresh_kind());
     sys.refresh_memory();
@@ -149,16 +161,37 @@ pub fn get_system_metrics() -> MetricsSnapshot {
     }
 }
 
+#[tauri::command]
+pub fn get_system_metrics() -> MetricsSnapshot {
+    // 窗口内复用上快照（去重两个消费端错峰轮询的重复采集，见 CACHE_TTL 注释）。
+    // 锁在采集前释放，避免 CACHE/SYSTEM/NVML 三把锁嵌套。
+    {
+        let guard = CACHE.lock().unwrap();
+        if let Some((at, snap)) = guard.as_ref() {
+            if at.elapsed() < CACHE_TTL {
+                return snap.clone();
+            }
+        }
+    }
+    let snap = collect_snapshot();
+    *CACHE.lock().unwrap() = Some((Instant::now(), snap.clone()));
+    snap
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
+    // 注意：CACHE / SYSTEM / NVML 都是进程级静态，测试并行跑时相互可见。断言只依赖
+    // 「注入快照的特征值」与「取值范围」，不依赖缓存的具体占用状态，互扰也成立。
+
     /// 空 System（不枚举整机进程表）+ 只刷 CPU 占用的组合，仍须产出合法快照。
-    /// 首次调用建立 PDH 计数器（首个样本的差值为 0/无意义），故以第二次为准。
+    /// 首次调用建立 PDH 计数器（首个样本的差值为 0/无意义）；第二次取样须越过缓存窗口
+    /// （CACHE_TTL），否则会直接复用首个样本。
     #[test]
     fn snapshot_reads_cpu_and_memory_without_process_list() {
         let _ = get_system_metrics();
-        std::thread::sleep(std::time::Duration::from_millis(150));
+        std::thread::sleep(std::time::Duration::from_millis(1200));
         let s = get_system_metrics();
 
         assert!(s.mem_total_mb > 0, "内存总量应可读");
@@ -172,5 +205,30 @@ mod tests {
             "CPU 占用应为 0-100 的有限值，实际 {}",
             s.cpu_usage
         );
+    }
+
+    /// 缓存去重：窗口内直接复用（注入快照的 cpu_brand 是真实采集不可能产出的串）；
+    /// 把注入时间拨到窗口之外后，必须重新采集（不再带注入特征）。
+    #[test]
+    fn snapshot_cache_reuses_within_window_and_recollects_after() {
+        let marker = MetricsSnapshot {
+            cpu_usage: 12.5,
+            cpu_brand: "cache-test-marker".into(),
+            mem_total_mb: 1,
+            mem_used_mb: 1,
+            mem_usage: 1.0,
+            gpus: Vec::new(),
+        };
+        *CACHE.lock().unwrap() = Some((Instant::now(), marker.clone()));
+        let hit = get_system_metrics();
+        assert_eq!(hit.cpu_brand, "cache-test-marker", "窗口内应复用注入快照");
+
+        *CACHE.lock().unwrap() = Some((
+            Instant::now() - CACHE_TTL - Duration::from_millis(100),
+            marker,
+        ));
+        // 拨旧后先清掉标记快照的来源：直接重新采集必然不含注入特征。
+        let fresh = get_system_metrics();
+        assert_ne!(fresh.cpu_brand, "cache-test-marker", "窗口外应重新采集");
     }
 }
