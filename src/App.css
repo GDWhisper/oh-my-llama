@@ -2214,8 +2214,6 @@ button:disabled {
   overflow: auto;
   /* 滚动条常驻占位：出现/消失时内容不再左右位移、不挤压空间 */
   scrollbar-gutter: stable;
-  scrollbar-width: thin;
-  scrollbar-color: var(--line) transparent;
 }
 
 .column.main {
@@ -2226,28 +2224,39 @@ button:disabled {
   overflow: auto;
   /* 不设 scrollbar-gutter: stable：右侧日志在终端面板内部滚动，右栏容器本身无溢出；
      若常驻预留槽位会导致系统性能与日志卡片右边缘向内缩进约 8px，无法与标题卡片对齐。 */
+}
+
+/* 可滚动区统一风格：细、低对比、hover 时略加深（WebView2/Chromium 走 webkit 伪元素）。
+   设置浮窗正文与左右两栏同属滚动容器，新增滚动区把选择器加进这组，别另起一套。 */
+.column.sidebar,
+.column.main,
+.settings-modal .modal-body {
   scrollbar-width: thin;
   scrollbar-color: var(--line) transparent;
 }
-/* 细滚动条：低调不突兀，hover 时略加深（WebView2/Chromium 走 webkit 伪元素） */
+
 .column.sidebar::-webkit-scrollbar,
-.column.main::-webkit-scrollbar {
+.column.main::-webkit-scrollbar,
+.settings-modal .modal-body::-webkit-scrollbar {
   width: 8px;
 }
 
 .column.sidebar::-webkit-scrollbar-track,
-.column.main::-webkit-scrollbar-track {
+.column.main::-webkit-scrollbar-track,
+.settings-modal .modal-body::-webkit-scrollbar-track {
   background: transparent;
 }
 
 .column.sidebar::-webkit-scrollbar-thumb,
-.column.main::-webkit-scrollbar-thumb {
+.column.main::-webkit-scrollbar-thumb,
+.settings-modal .modal-body::-webkit-scrollbar-thumb {
   background: var(--line);
   border-radius: 4px;
 }
 
 .column.sidebar::-webkit-scrollbar-thumb:hover,
-.column.main::-webkit-scrollbar-thumb:hover {
+.column.main::-webkit-scrollbar-thumb:hover,
+.settings-modal .modal-body::-webkit-scrollbar-thumb:hover {
   background: var(--ink-3);
 }
 
