@@ -79,6 +79,28 @@ static STATE: LazyLock<Shared> = LazyLock::new(|| Shared {
     tick: Mutex::new(TickState::default()),
 });
 
+/// `step()` 是否正在主线程上执行（可重入守卫）。
+///
+/// 窗口操作会**同步**回调到本线程（`SetWindowPos` → 窗口过程），而 `step()` 自身又是由
+/// IPC（`taskbar_widget_ready`）触发的，二者叠加就可能让 `step()` 在主线程上二次进入。
+/// `std::sync::Mutex` 不可重入，二次进入即主线程自锁死（整应用 hung、托盘点不动）。
+/// 挡掉即可：本拍的活由外层那次做完，被挡的这次下一拍自会补上。
+static STEPPING: AtomicBool = AtomicBool::new(false);
+
+/// 已排进主线程队列但尚未开跑的 `step()` 数量上限——最多一个。
+/// 主线程繁忙（长任务 / 系统挂起）时若每拍都追加，队列会无界增长；而多排几次也没有
+/// 额外收益（第二拍看到的仍是同一份状态），故已有排队就直接跳过本拍。
+static STEP_QUEUED: AtomicBool = AtomicBool::new(false);
+
+/// RAII：离开 `step()` 时清除「执行中」标记（panic 路径同样生效，不留死标记）。
+struct StepGuard;
+
+impl Drop for StepGuard {
+    fn drop(&mut self) {
+        STEPPING.store(false, Ordering::SeqCst);
+    }
+}
+
 // ── IPC 命令 ───────────────────────────────────────────────────────────
 
 /// `taskbar-widget://settings` 事件载荷：一份设置快照。字段名是跨层契约
@@ -151,7 +173,29 @@ pub fn taskbar_widget_ready(app: AppHandle, width: f64, height: f64) {
     }
     *STATE.size.lock().unwrap() = Some((width, height));
     // 不等下一拍：立即定位 + 显示，避免开启后约 1 秒空窗。
-    step(&app);
+    // 本命令跑在 tokio worker 上（同步命令），故经主线程排队执行——窗口 API 必须在
+    // 事件循环线程上调用（见 `spawn_supervisor` 的注释）。
+    queue_step(&app);
+}
+
+/// 把一拍 `step()` 排到主线程上执行。**所有调用点都必须走这里**，不能直调 `step()`。
+///
+/// 经 `run_on_main_thread`（wry 侧 PostThreadMessage 投递 `Message::Task`）排队，由事件
+/// 循环线程取走执行。已有排队未跑时跳过本拍：主线程繁忙（长任务 / 系统挂起）期间每拍
+/// 都追加会让队列无界增长，而多排一次也没有额外收益（第二拍看到的仍是同一份状态）。
+fn queue_step(app: &AppHandle) {
+    if STEP_QUEUED.swap(true, Ordering::SeqCst) {
+        return;
+    }
+    let handle = app.clone();
+    let run = move || {
+        STEP_QUEUED.store(false, Ordering::SeqCst);
+        step(&handle);
+    };
+    if app.run_on_main_thread(run).is_err() {
+        // 主线程已不可用（应用正在退出）：清掉标记，让下一次调用还能正常排队。
+        STEP_QUEUED.store(false, Ordering::SeqCst);
+    }
 }
 
 /// 本平台是否支持任务栏小窗（前端据此决定设置卡片是否渲染）。目前仅 Windows。
@@ -218,14 +262,20 @@ fn stop_thread() {
     }
 }
 
-/// 定位线程：每秒核对任务栏几何，按需挪位 / 显示 / 收起；disabled 后一拍内退出。
+/// 定位线程：每秒唤醒主线程核对一次任务栏几何，按需挪位 / 显示 / 收起；disabled 后一拍内退出。
 /// 可见性只由任务栏几何与前台全屏驱动——**与主窗口是否隐藏到托盘无关**：主窗口托盘
 /// 常驻时主面板停表（省 CPU 的既有优化），而本小窗是常驻监控，继续显示与刷新。
+///
+/// 本线程**不做任何窗口操作**，只把一拍 `step()` 排到主线程（见 `queue_step`）：
+/// tao 的窗口 API 会在调用方线程上同步取窗口自己的 `window_state` 锁，而主线程另有路径
+/// （IPC / 窗口过程回调）也来取这把锁与 `STATE.tick`——两边跨线程反向取锁即 AB-BA 死锁
+/// （2026-10-13 休眠唤醒后实测：两线程互等，整应用 hung、托盘点不动）。
+/// 统一到主线程后，所有窗口操作与 `STATE.tick` 都在同一线程串行发生，锁序天然一致。
 #[cfg(windows)]
 fn spawn_supervisor(app: AppHandle, stop: Arc<AtomicBool>) {
     std::thread::spawn(move || {
         while !stop.load(Ordering::Relaxed) {
-            step(&app);
+            queue_step(&app);
             std::thread::sleep(std::time::Duration::from_millis(TICK_MS));
         }
     });
@@ -299,64 +349,149 @@ fn mark_tool_window(win: &tauri::WebviewWindow) {
 
 // ── 每拍核对 ───────────────────────────────────────────────────────────
 
-fn step(app: &AppHandle) {
+/// 本拍要施加到窗口上的动作（纯数据，不含任何窗口/事件调用）。
+///
+/// 先由 `plan_step` 在**持 `STATE.tick` 锁期间**算出，再由 `apply_step` 在**完全释放该锁之后**
+/// 执行。这条分层是死锁修复的关键：窗口 API 与事件广播会同步去取别的锁（tao 的
+/// `window_state`、tauri 的事件系统），而主线程另有路径（`taskbar_widget_ready` 的 IPC、
+/// 窗口过程回调）会来取 `STATE.tick`——持锁调窗口 API 会与主线程的反向取锁构成 AB-BA 死锁
+/// （2026-10-13 休眠唤醒后实测：主线程与定位线程互等，整应用 hung、托盘点不动）。
+struct StepPlan {
+    /// 要广播的任务栏明暗；None = 本拍不广播。
+    theme: Option<&'static str>,
+    size_px: Option<(u32, u32)>,
+    pos: Option<(i32, i32)>,
+    vertical: Option<bool>,
+    /// Some(true)/Some(false) = 要求显示/隐藏；None = 维持现状（已显示时不重复 show）。
+    place: Option<bool>,
+    /// 是否重申置顶 + 纠正工具窗样式：条带在任务栏上有位置时每拍都要做（点击任务栏会
+    /// 把 shell 提到置顶带最上层、tao 每次显隐又重写 ex-style），与是否需要 show 无关。
+    fixups: bool,
+}
+
+impl StepPlan {
+    /// 与本拍几何和上一拍记账比对，得出要施加的动作，并把记账推进到「已生效」。
+    ///
+    /// 记账在这里就推进（不等 `apply_step` 返回）：执行失败只丢一拍，下一拍仍会按新几何
+    /// 纠正；反过来等执行成功再记账，则要在锁外再写一次 `STATE.tick`，多一次取锁。
+    /// 纯逻辑（不碰窗口、不算几何），故可直接单测。
+    fn decide(tick: &mut TickState, place: Option<Placement>, theme: Option<bool>) -> Self {
+        let mut plan = match place {
+            Some(p) => Self {
+                theme: None,
+                size_px: (tick.size_px != Some((p.w_px, p.h_px))).then_some((p.w_px, p.h_px)),
+                pos: (tick.pos != Some((p.x, p.y))).then_some((p.x, p.y)),
+                vertical: (tick.vertical != Some(p.vertical)).then_some(p.vertical),
+                place: (!tick.shown).then_some(true),
+                fixups: true,
+            },
+            // 任务栏不可用（自动隐藏 / 全屏 / explorer 重启间隙）：收起条带。
+            None => Self {
+                theme: None,
+                size_px: None,
+                pos: None,
+                vertical: None,
+                place: tick.shown.then_some(false),
+                fixups: false,
+            },
+        };
+        // 只有**读到**且翻转才广播：读不到（None）时不广播，由前端按系统 prefers-color-scheme
+        // 兜底——不能拿「读不到」去推翻上一次结论，否则明暗会来回跳。
+        plan.theme = match (tick.theme_light, theme) {
+            (None, Some(true)) | (Some(false), Some(true)) => Some("light"),
+            (None, Some(false)) | (Some(true), Some(false)) => Some("dark"),
+            _ => None,
+        };
+        tick.theme_light = theme;
+        if let Some(v) = plan.size_px {
+            tick.size_px = Some(v);
+        }
+        if let Some(v) = plan.pos {
+            tick.pos = Some(v);
+        }
+        if let Some(v) = plan.vertical {
+            tick.vertical = Some(v);
+        }
+        if let Some(show) = plan.place {
+            tick.shown = show;
+        }
+        plan
+    }
+}
+
+/// 读任务栏几何与上一拍状态，算出本拍动作（持 `STATE.tick` 锁，不做任何窗口调用）。
+fn plan_step(app: &AppHandle) -> Option<(tauri::WebviewWindow, StepPlan)> {
     let Some(win) = app.get_webview_window(WIDGET_LABEL) else {
-        return; // 已禁用（窗口被销毁）；定位线程将在一拍内自行退出
+        return None; // 已禁用（窗口被销毁）；定位线程将在一拍内自行退出
     };
     let Some((lw, lh)) = *STATE.size.lock().unwrap() else {
-        return; // 前端还没上报尺寸：窗口保持隐藏
+        return None; // 前端还没上报尺寸：窗口保持隐藏
     };
     let place = placement(lw, lh, win.scale_factor().unwrap_or(1.0));
 
     let mut tick = STATE.tick.lock().unwrap();
     // 任务栏明暗（透明样式据此选文字色）：只在变化时广播；读不到不广播，由前端按
     // prefers-color-scheme 兜底。放在显隐分支之前——条带被全屏压住期间也保持同步。
-    let theme = taskbar_is_light();
-    if tick.theme_light != theme {
-        if let Some(light) = theme {
-            let _ = app.emit_to(
-                WIDGET_LABEL,
-                "taskbar-widget://theme",
-                if light { "light" } else { "dark" },
-            );
-        }
-        tick.theme_light = theme;
+    let theme = {
+        let _t = crate::diag::cmd("widget_theme_read");
+        taskbar_is_light()
+    };
+    Some((win, StepPlan::decide(&mut tick, place, theme)))
+}
+
+/// 施加本拍动作（**不持任何 STATE 锁**）。
+fn apply_step(app: &AppHandle, win: &tauri::WebviewWindow, plan: StepPlan) {
+    if let Some(payload) = plan.theme {
+        let _ = app.emit_to(WIDGET_LABEL, "taskbar-widget://theme", payload);
     }
-    match place {
-        Some(p) => {
-            if tick.size_px != Some((p.w_px, p.h_px)) {
-                let _ = win.set_size(PhysicalSize::new(p.w_px, p.h_px));
-                tick.size_px = Some((p.w_px, p.h_px));
-            }
-            if tick.pos != Some((p.x, p.y)) {
-                let _ = win.set_position(PhysicalPosition::new(p.x, p.y));
-                tick.pos = Some((p.x, p.y));
-            }
-            if tick.vertical != Some(p.vertical) {
-                let _ = app.emit_to(WIDGET_LABEL, "taskbar-widget://vertical", p.vertical);
-                tick.vertical = Some(p.vertical);
-            }
-            if !tick.shown {
-                let _ = win.show();
-                let _ = app.emit_to(WIDGET_LABEL, "taskbar-widget://visible", true);
-                tick.shown = true;
-            }
-            // show()/hide() 都经 tao 整段重写 ex-style，置顶与工具窗纠正必须放在其后
-            // （刚显示完就把 APPWINDOW 摘掉，不给 Alt-Tab 留窗口期）。
-            #[cfg(windows)]
-            {
-                reassert_topmost(&win);
-                mark_tool_window(&win);
-            }
-        }
-        None => {
-            if tick.shown {
-                let _ = win.hide();
-                let _ = app.emit_to(WIDGET_LABEL, "taskbar-widget://visible", false);
-                tick.shown = false;
-            }
-        }
+    if let Some((w, h)) = plan.size_px {
+        let _w = crate::diag::cmd("widget_set_size");
+        let _ = win.set_size(PhysicalSize::new(w, h));
     }
+    if let Some((x, y)) = plan.pos {
+        let _w = crate::diag::cmd("widget_set_position");
+        let _ = win.set_position(PhysicalPosition::new(x, y));
+    }
+    if let Some(vertical) = plan.vertical {
+        let _ = app.emit_to(WIDGET_LABEL, "taskbar-widget://vertical", vertical);
+    }
+    match plan.place {
+        Some(true) => {
+            let _w = crate::diag::cmd("widget_show");
+            let _ = win.show();
+            let _ = app.emit_to(WIDGET_LABEL, "taskbar-widget://visible", true);
+        }
+        Some(false) => {
+            let _w = crate::diag::cmd("widget_hide");
+            let _ = win.hide();
+            let _ = app.emit_to(WIDGET_LABEL, "taskbar-widget://visible", false);
+        }
+        None => {}
+    }
+    // show()/hide() 都经 tao 整段重写 ex-style，置顶与工具窗纠正必须放在其后
+    // （刚显示完就把 APPWINDOW 摘掉，不给 Alt-Tab 留窗口期）。
+    #[cfg(windows)]
+    if plan.fixups {
+        let _w = crate::diag::cmd("widget_topmost_toolwindow");
+        reassert_topmost(win);
+        mark_tool_window(win);
+    }
+}
+
+/// 一拍核对。**只能在主线程上调用**（见 `spawn_supervisor`）；入口处挡掉重入。
+fn step(app: &AppHandle) {
+    let _g = crate::diag::cmd("widget_step");
+    // 重入守卫：窗口操作会同步回调到本线程，可能再经 IPC 进到这里。挡掉即可——
+    // 本拍的活由外层那次做完，被挡的这次下一拍自会补上。
+    if STEPPING.swap(true, Ordering::SeqCst) {
+        return;
+    }
+    let _guard = StepGuard;
+
+    let Some((win, plan)) = plan_step(app) else {
+        return;
+    };
+    apply_step(app, &win, plan);
 }
 
 /// 校验并归一化勾选项：未知键报错（IPC 边界），顺序固定为 ITEM_KEYS（与显示顺序一致）。
@@ -481,6 +616,20 @@ struct Placement {
     w_px: u32,
     h_px: u32,
     vertical: bool,
+}
+
+/// 测试替身：非 Windows 上 `placement()` 恒为 None，单测要造一份「有位置」的几何。
+#[cfg(test)]
+impl Placement {
+    fn at(x: i32, y: i32, w_px: u32, h_px: u32, vertical: bool) -> Self {
+        Self {
+            x,
+            y,
+            w_px,
+            h_px,
+            vertical,
+        }
+    }
 }
 
 #[cfg(windows)]
@@ -850,5 +999,73 @@ mod tests {
         assert_eq!(json["style"], STYLE_TRANSPARENT);
         assert_eq!(json["layout"], LAYOUT_DOUBLE);
         assert_eq!(json["detailed"], true);
+    }
+
+    /// 首拍（全新状态 + 任务栏有位置）：尺寸 / 位置 / 竖排 / 显示 / 置顶纠正全都要做。
+    #[test]
+    fn plan_first_tick_does_everything() {
+        let mut tick = TickState::default();
+        let plan = StepPlan::decide(&mut tick, Some(Placement::at(10, 20, 300, 40, false)), None);
+        assert_eq!(plan.size_px, Some((300, 40)));
+        assert_eq!(plan.pos, Some((10, 20)));
+        assert_eq!(plan.vertical, Some(false));
+        assert_eq!(plan.place, Some(true));
+        assert!(plan.fixups, "有位置时每拍都要重申置顶/纠正样式");
+    }
+
+    /// 次拍（几何未变、已显示）：除置顶纠正外全部去重为空——不重复 set_size/set_position/show。
+    #[test]
+    fn plan_repeat_tick_is_all_noop_except_fixups() {
+        let mut tick = TickState::default();
+        let place = || Some(Placement::at(10, 20, 300, 40, false));
+        let _ = StepPlan::decide(&mut tick, place(), None);
+        let plan = StepPlan::decide(&mut tick, place(), None);
+        assert_eq!(plan.size_px, None, "尺寸未变则不再 set_size");
+        assert_eq!(plan.pos, None, "位置未变则不再 set_position");
+        assert_eq!(plan.vertical, None);
+        assert_eq!(plan.place, None, "已显示则不重复 show");
+        assert!(plan.fixups, "置顶纠正每拍都做（防被 shell 压住）");
+    }
+
+    /// 任务栏不可用（自动隐藏 / 全屏 / explorer 重启间隙）：要求收起，且不做置顶纠正。
+    /// 收起后再次不可用 → `place` 为 None（已隐藏，不重复 hide）。
+    #[test]
+    fn plan_without_placement_hides_once() {
+        let mut tick = TickState::default();
+        let _ = StepPlan::decide(&mut tick, Some(Placement::at(10, 20, 300, 40, false)), None);
+        let hidden = StepPlan::decide(&mut tick, None, None);
+        assert_eq!(hidden.place, Some(false));
+        assert!(!hidden.fixups, "已收起时无需再动 z 序");
+        assert_eq!(StepPlan::decide(&mut tick, None, None).place, None);
+    }
+
+    /// 任务栏明暗只在翻转时广播一次；读不到（None）不广播，由前端按系统配色兜底。
+    #[test]
+    fn plan_broadcasts_theme_only_on_flip() {
+        let mut tick = TickState::default();
+        assert_eq!(
+            StepPlan::decide(&mut tick, None, Some(false)).theme,
+            Some("dark"),
+            "首次读到即广播一次"
+        );
+        assert_eq!(StepPlan::decide(&mut tick, None, Some(false)).theme, None);
+        assert_eq!(
+            StepPlan::decide(&mut tick, None, Some(true)).theme,
+            Some("light"),
+            "翻转才再广播"
+        );
+        // 读不到：不广播（保留上一次结论，不做无依据的翻转）。
+        assert_eq!(StepPlan::decide(&mut tick, None, None).theme, None);
+    }
+
+    /// 记账在 `decide` 内即推进：几何再回到原值时仍能重新纠正（不因「已记账」而永远不发）。
+    #[test]
+    fn plan_accounting_advances_so_later_drift_is_corrected() {
+        let mut tick = TickState::default();
+        let _ = StepPlan::decide(&mut tick, Some(Placement::at(10, 20, 300, 40, false)), None);
+        let moved = StepPlan::decide(&mut tick, Some(Placement::at(11, 20, 300, 40, false)), None);
+        assert_eq!(moved.pos, Some((11, 20)), "位置漂了一像素也要纠正");
+        let back = StepPlan::decide(&mut tick, Some(Placement::at(10, 20, 300, 40, false)), None);
+        assert_eq!(back.pos, Some((10, 20)), "回来时同样纠正");
     }
 }
