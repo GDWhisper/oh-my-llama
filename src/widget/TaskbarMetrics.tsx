@@ -38,6 +38,10 @@ const ITEM_LABEL: Record<ItemKey, MessageKey> = {
 
 // 与主窗口 MetricsPanel 同频，避免同一个采集器被两处不同节奏地刷新。
 const INTERVAL = 1500;
+// 整机 CPU 高负载时放慢轮询（快照自带全局占用，判定零成本）：负载越高压在监控上的
+// CPU 越添乱，5s 一拍仍够看趋势；占用回落后自动回到常速。阈值按显示值口径取 90。
+const BUSY_PCT = 90;
+const SLOW_INTERVAL = 5000;
 
 /** 勾选项归一化：过滤未知键、按固定顺序排列（事件载荷可能带旧设置留下的脏值）。 */
 function normalizeItems(raw: unknown): ItemKey[] {
@@ -200,22 +204,27 @@ export function TaskbarMetrics() {
   }, []);
 
   // 指标轮询：条带被收起时完全停表（没人看就不刷，同主面板的门控思路）。
+  // 自调度 setTimeout（而非固定 setInterval）：下一拍间隔由本次快照的整机 CPU 占用
+  // 决定——≥90% 降到 5s，其余 1.5s；占用越过阈值时节奏跟着变，无需重建 effect。
+  // 采集异常保留旧值，按常速重试（后端已按平台降级，此处只兜 IPC 异常）。
   useEffect(() => {
     if (!visible) return;
     let alive = true;
+    let timer = 0;
     const tick = async () => {
       try {
         const next = await invoke<MetricsSnapshot>('get_system_metrics');
-        if (alive) setSnap(next);
+        if (!alive) return;
+        setSnap(next);
+        timer = window.setTimeout(tick, next.cpu_usage >= BUSY_PCT ? SLOW_INTERVAL : INTERVAL);
       } catch {
-        // 采集异常保留旧值，下一拍重试（后端已按平台降级，此处只兜 IPC 异常）。
+        if (alive) timer = window.setTimeout(tick, INTERVAL);
       }
     };
-    const id = window.setInterval(tick, INTERVAL);
     tick();
     return () => {
       alive = false;
-      window.clearInterval(id);
+      window.clearTimeout(timer);
     };
   }, [visible]);
 

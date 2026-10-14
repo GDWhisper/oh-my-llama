@@ -47,6 +47,14 @@ pub const LAYOUT_DOUBLE: &str = "double";
 /// 定位线程节拍（毫秒）：任务栏移动 / 自动隐藏 / 全屏切换都靠这一周期兜住。
 #[cfg(windows)]
 const TICK_MS: u64 = 1000;
+/// 条带收起期间（任务栏自动隐藏 / 前台全屏 / explorer 重启间隙）的完整拍节拍：
+/// 没人看就放慢几何核对，恢复检测 2s 一次足够（条带不在屏上，落位精度无感）。
+#[cfg(windows)]
+const HIDDEN_TICK_MS: u64 = 2000;
+/// 条带收起期间的循环睡眠：被压检测无从做起（条带不在屏上，任务栏压不到它），
+/// 不必 50ms 醒一次；200ms 醒来看是否该排下一拍即可。
+#[cfg(windows)]
+const HIDDEN_SLEEP_MS: u64 = 200;
 /// 高频检测节拍（毫秒）：只做「任务栏是否压在条带上」的只读 z 序检查，命中即排队
 /// 顶回。比完整拍快一个量级，把点击任务栏后条带被盖住的时间压到人眼难辨。
 #[cfg(windows)]
@@ -73,6 +81,10 @@ struct Shared {
     /// 不变，故只在未缓存时写一次；窗口销毁（disable）时清空，防拿失效句柄乱找。
     #[cfg(windows)]
     hwnd: Mutex<Option<isize>>,
+    /// 条带当前是否收起（由 `apply_step` 的显隐分支维护，定位线程只读）：收起期间
+    /// 核对降频、被压检测停跑（见 `spawn_supervisor`）。
+    #[cfg(windows)]
+    hidden: AtomicBool,
 }
 
 #[derive(Default)]
@@ -92,6 +104,8 @@ static STATE: LazyLock<Shared> = LazyLock::new(|| Shared {
     tick: Mutex::new(TickState::default()),
     #[cfg(windows)]
     hwnd: Mutex::new(None),
+    #[cfg(windows)]
+    hidden: AtomicBool::new(false),
 });
 
 /// `step()` 是否正在主线程上执行（可重入守卫）。
@@ -273,6 +287,8 @@ fn disable(app: &AppHandle) {
     #[cfg(windows)]
     {
         *STATE.hwnd.lock().unwrap() = None;
+        // 复位「收起」标志：下次启用的首个完整拍会重新判定，不停在降频分支。
+        STATE.hidden.store(false, Ordering::Relaxed);
     }
 }
 
@@ -282,10 +298,12 @@ fn stop_thread() {
     }
 }
 
-/// 定位线程：完整核对（落位 / 显隐 / 主题）每秒一次；另以 50ms 轻量检测盯着「任务栏
-/// 是否压在条带上」——点击任务栏（托盘区收展 / 任务栏空白）时 Windows 把任务栏提到
-/// 条带之上盖住它，等下一完整拍才顶回的话，实测被盖住 0.3~0.5s，肉眼就是一下闪烁。
+/// 定位线程：完整核对（落位 / 显隐 / 主题）可见时每秒一次；另以 50ms 轻量检测盯着
+/// 「任务栏是否压在条带上」——点击任务栏（托盘区收展 / 任务栏空白）时 Windows 把任务栏
+/// 提到条带之上盖住它，等下一完整拍才顶回的话，实测被盖住 0.3~0.5s，肉眼就是一下闪烁。
 /// 检测命中即排队顶回，把被盖时间压到人眼难辨。disabled 后一拍内退出。
+/// 条带收起期间（任务栏自动隐藏 / 前台全屏 / explorer 重启间隙）没人看：完整核对降频到
+/// 2s 一拍，被压检测停跑（条带不在屏上，任务栏压不到它），循环睡眠放到 200ms。
 /// 可见性只由任务栏几何与前台全屏驱动——**与主窗口是否隐藏到托盘无关**：主窗口托盘
 /// 常驻时主面板停表（省 CPU 的既有优化），而本小窗是常驻监控，继续显示与刷新。
 ///
@@ -301,14 +319,22 @@ fn spawn_supervisor(app: AppHandle, stop: Arc<AtomicBool>) {
         // 初始值拨到「已到点」：进线程立即做一次完整核对（同原行为）。
         let mut next_full = std::time::Instant::now() - std::time::Duration::from_millis(TICK_MS);
         while !stop.load(Ordering::Relaxed) {
-            if next_full.elapsed() >= std::time::Duration::from_millis(TICK_MS) {
-                next_full = std::time::Instant::now();
-                queue_step(&app);
+            if STATE.hidden.load(Ordering::Relaxed) {
+                if next_full.elapsed() >= std::time::Duration::from_millis(HIDDEN_TICK_MS) {
+                    next_full = std::time::Instant::now();
+                    queue_step(&app);
+                }
+                std::thread::sleep(std::time::Duration::from_millis(HIDDEN_SLEEP_MS));
+            } else {
+                if next_full.elapsed() >= std::time::Duration::from_millis(TICK_MS) {
+                    next_full = std::time::Instant::now();
+                    queue_step(&app);
+                }
+                if pressed_by_taskbar() {
+                    queue_step(&app);
+                }
+                std::thread::sleep(std::time::Duration::from_millis(PRESS_CHECK_MS));
             }
-            if pressed_by_taskbar() {
-                queue_step(&app);
-            }
-            std::thread::sleep(std::time::Duration::from_millis(PRESS_CHECK_MS));
         }
     });
 }
@@ -512,11 +538,13 @@ fn apply_step(app: &AppHandle, win: &tauri::WebviewWindow, plan: StepPlan) {
             let _w = crate::diag::cmd("widget_show");
             let _ = win.show();
             let _ = app.emit_to(WIDGET_LABEL, "taskbar-widget://visible", true);
+            STATE.hidden.store(false, Ordering::Relaxed);
         }
         Some(false) => {
             let _w = crate::diag::cmd("widget_hide");
             let _ = win.hide();
             let _ = app.emit_to(WIDGET_LABEL, "taskbar-widget://visible", false);
+            STATE.hidden.store(true, Ordering::Relaxed);
         }
         None => {}
     }
