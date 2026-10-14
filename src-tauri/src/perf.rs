@@ -618,6 +618,7 @@ pub fn reset_perf(app: &AppHandle) {
 
 #[tauri::command]
 pub fn get_perf_stats(app: AppHandle) -> PerfSnapshot {
+    let _g = crate::diag::cmd("cmd_get_perf_stats");
     let state = app.state::<PerfState>();
     let guard = state.lock().unwrap_or_else(|e| e.into_inner());
     guard.snapshot()

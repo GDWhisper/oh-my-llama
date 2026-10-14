@@ -27,9 +27,11 @@ use windows_sys::Win32::System::JobObjects::{
 
 mod metrics;
 use metrics::get_system_metrics;
-
 // 开机自启：Windows 的 HKCU\...\Run 注册表项读写（非 Windows 一律视为不支持）
 mod autostart;
+
+// 假死诊断探针：低开销埋点 + 看门狗，假死时把「最后进入未离开」的标记落盘（见 diag.rs）
+mod diag;
 
 mod params;
 use params::{find_spec, get_param_registry};
@@ -713,6 +715,13 @@ pub fn run() {
             // 覆盖 icon.ico 首帧那份兜底图：按当前 DPI 换成精确尺寸，避免 shell 双线性缩放
             apply_dpi_icons(app.handle());
 
+            // 假死诊断看门狗：先于小窗启动恢复注册，确保启动阶段卡死也能被探到。
+            if let (Some(hwnd), Ok(app_data)) = (main_window_hwnd(app.handle()), resolve_app_data())
+            {
+                diag::register_main_window(hwnd);
+                diag::spawn_watchdog(app_data);
+            }
+
             // 任务栏性能小窗：设置里开着就随启动恢复（失败仅打日志，不拦启动）。
             taskbar_widget::init_on_startup(app.handle());
 
@@ -939,6 +948,13 @@ fn show_main_window(app: &AppHandle) {
         let _ = win.set_focus();
         emit_window_visible(app, true);
     }
+}
+
+/// 主窗口原生句柄（诊断看门狗的探测目标）；取不到返回 None。
+fn main_window_hwnd(app: &AppHandle) -> Option<isize> {
+    app.get_webview_window("main")
+        .and_then(|win| win.hwnd().ok())
+        .map(|hwnd| hwnd.0 as isize)
 }
 
 // 唯一退出路径：先停受管服务再退出（与旧 tauri://close-requested 行为一致）。
@@ -1309,6 +1325,7 @@ fn stop_grace_addr(status: &ServerStatus) -> (&str, u16) {
 
 #[tauri::command]
 async fn get_status(app: AppHandle, config: ServerConfig) -> Result<ServerStatus, String> {
+    let _g = diag::cmd("cmd_get_status");
     let state = app.state::<tauri::async_runtime::Mutex<ServerStatus>>();
 
     // 观察目标选定 + 探测都放锁外做：probe_health 同步阻塞最长约 2.3s（连接超时 800ms +
@@ -1790,6 +1807,7 @@ async fn open_logs_dir(app: AppHandle) -> Result<(), String> {
 
 #[tauri::command]
 async fn read_logs(app: AppHandle) -> Result<Vec<ServerLogLine>, String> {
+    let _g = diag::cmd("cmd_read_logs");
     let state = app.state::<std::sync::Mutex<Vec<ServerLogLine>>>();
     let logs = state.lock().unwrap_or_else(|e| e.into_inner()).clone();
     Ok(logs)
@@ -2147,6 +2165,7 @@ fn prune_log_files(dir: &std::path::Path, keep: usize) {
 
 /// 把一行日志正文追加写入运行日志文件（无活动文件或写失败时静默跳过）。
 fn write_log_file(app: &AppHandle, text: &str) {
+    let _g = diag::cmd("log_file_write");
     if let Some(state) = app.try_state::<LogFileState>() {
         let mut guard = state.lock().unwrap_or_else(|e| e.into_inner());
         if let Some(file) = guard.as_mut() {

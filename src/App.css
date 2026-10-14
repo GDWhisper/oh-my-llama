@@ -1178,9 +1178,9 @@ body {
   color: var(--ink);
 }
 
-/* 设置浮窗：分组多，比通用弹窗更宽、限高可滚动，组间留白也收得更紧 */
+/* 设置浮窗：分组多，比通用弹窗更宽（两列摆放以压平总高度）、限高可滚动，组间留白也收得更紧 */
 .settings-modal {
-  width: min(420px, 90vw);
+  width: min(760px, 92vw);
   max-height: calc(100vh - 48px);
   padding: 16px 20px;
 }
@@ -1188,6 +1188,22 @@ body {
 .settings-modal .modal-body {
   gap: 10px;
   overflow-y: auto;
+}
+
+/* 两列容器：列宽按 flex-basis 300px 计算，弹窗窄到放不下两列时整体换行退回单列，
+   无需断点（换行判定发生在收缩之前，min-width:0 只用于让长内容可缩）。 */
+.settings-columns {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.settings-column {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  flex: 1 1 300px;
+  min-width: 0;
 }
 
 /* 分组卡片：设置项增多后靠卡片边界与统一留白区分组，替代纯文本堆叠 */

@@ -163,6 +163,7 @@ fn collect_snapshot() -> MetricsSnapshot {
 
 #[tauri::command]
 pub fn get_system_metrics() -> MetricsSnapshot {
+    let _g = crate::diag::cmd("cmd_get_system_metrics");
     // 窗口内复用上快照（去重两个消费端错峰轮询的重复采集，见 CACHE_TTL 注释）。
     // 锁在采集前释放，避免 CACHE/SYSTEM/NVML 三把锁嵌套。
     {
@@ -173,7 +174,10 @@ pub fn get_system_metrics() -> MetricsSnapshot {
             }
         }
     }
-    let snap = collect_snapshot();
+    let snap = {
+        let _c = crate::diag::cmd("metrics_collect");
+        collect_snapshot()
+    };
     *CACHE.lock().unwrap() = Some((Instant::now(), snap.clone()));
     snap
 }

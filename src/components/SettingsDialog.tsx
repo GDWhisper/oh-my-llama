@@ -373,296 +373,305 @@ export function SettingsDialog({
           </button>
         </div>
         <div className="modal-body">
-          <div className="settings-section">
-            <div className="settings-section-head">
-              <span className="settings-label">
-                {sectionIcons.language}
-                {t('settings.language')}
-              </span>
-              <span className="settings-hint">{t('settings.languageHint')}</span>
-            </div>
-            <LangSwitch variant="list" />
-          </div>
-
-          <div className="settings-section">
-            <div className="settings-section-head">
-              <span className="settings-label">
-                {sectionIcons.theme}
-                {t('settings.theme')}
-              </span>
-              <span className="settings-hint">{t('settings.themeHint')}</span>
-            </div>
-            <label className="settings-option-row">
-              <input
-                type="radio"
-                name="ui-theme"
-                className="settings-checkbox"
-                checked={uiTheme === 'default'}
-                onChange={() => saveUiTheme('default')}
-              />
-              <span className="settings-check-label">{t('settings.themeDefault')}</span>
-            </label>
-            <label className="settings-option-row">
-              <input
-                type="radio"
-                name="ui-theme"
-                className="settings-checkbox"
-                checked={uiTheme === 'parchment'}
-                onChange={() => saveUiTheme('parchment')}
-              />
-              <span className="settings-check-label">{t('settings.themeParchment')}</span>
-            </label>
-          </div>
-
-          <div className="settings-section">
-            <div className="settings-section-head">
-              <span className="settings-label">
-                {sectionIcons.update}
-                {t('settings.update')}
-              </span>
-              <span className="settings-hint">{t('settings.updateHint')}</span>
-            </div>
-            <div className="settings-meta-row">
-              <span className="settings-hint">{t('about.version')}</span>
-              <span className="settings-meta">
-                <span className="settings-meta-value">{version}</span>
-                {pendingUpdate && (
-                  <button
-                    type="button"
-                    className="update-badge"
-                    title={t('update.badgeTitle')}
-                    aria-label={t('update.badgeTitle')}
-                    onClick={() => {
-                      onClose();
-                      onOpenUpdate();
-                    }}
-                  >
-                    {t('update.badgeNew')}
-                  </button>
-                )}
-                <Button
-                  variant="secondary"
-                  type="button"
-                  onClick={onCheckUpdate}
-                  disabled={checking}
-                >
-                  {checking ? t('update.checking') : t('update.check')}
-                </Button>
-              </span>
-            </div>
-            <label className="settings-option-row">
-              <input
-                type="checkbox"
-                className="settings-checkbox"
-                checked={autoCheck}
-                onChange={(event) => {
-                  setAutoCheck(event.target.checked);
-                  // 立即落盘（含当前代理值），无需点「保存」也能记住开关。
-                  invoke<AppSettings>('save_settings', {
-                    updateProxy: proxy,
-                    autoCheckUpdates: event.target.checked,
-                  })
-                    .then((s) => {
-                      setProxy(s.update_proxy);
-                      setAutoCheck(Boolean(s.auto_check_updates));
-                    })
-                    .catch(() => {});
-                }}
-              />
-              <span className="settings-check-label">{t('settings.autoCheck')}</span>
-            </label>
-            <div className="settings-section-head">
-              <span className="settings-sublabel">{t('settings.updateProxy')}</span>
-              <span className="settings-hint">{t('settings.updateProxyHint')}</span>
-            </div>
-            <div className="settings-proxy-row">
-              <input
-                className="settings-proxy-input"
-                type="text"
-                placeholder="http://127.0.0.1:7897"
-                value={proxy}
-                onChange={(event) => {
-                  setProxy(event.target.value);
-                  setProxySaved(false);
-                }}
-              />
-              <Button variant="secondary" type="button" onClick={onSaveProxy}>
-                {t('common.save')}
-              </Button>
-            </div>
-            {proxySaved && (
-              <div className="settings-proxy-ok">{t('settings.updateProxySaved')}</div>
-            )}
-            {proxyError && <div className="settings-proxy-err">{proxyError}</div>}
-          </div>
-
-          <div className="settings-section">
-            <div className="settings-section-head">
-              <span className="settings-label">
-                {sectionIcons.windowClose}
-                {t('settings.windowClose')}
-              </span>
-              <span className="settings-hint">{t('settings.windowCloseHint')}</span>
-            </div>
-            <label className="settings-option-row">
-              <input
-                type="radio"
-                name="close-pref"
-                className="settings-checkbox"
-                checked={closePref === null}
-                onChange={() => saveClosePref(null)}
-              />
-              <span className="settings-check-label">{t('settings.windowCloseAsk')}</span>
-            </label>
-            <label className="settings-option-row">
-              <input
-                type="radio"
-                name="close-pref"
-                className="settings-checkbox"
-                checked={closePref === true}
-                onChange={() => saveClosePref(true)}
-              />
-              <span className="settings-check-label">{t('settings.windowCloseTray')}</span>
-            </label>
-            <label className="settings-option-row">
-              <input
-                type="radio"
-                name="close-pref"
-                className="settings-checkbox"
-                checked={closePref === false}
-                onChange={() => saveClosePref(false)}
-              />
-              <span className="settings-check-label">{t('settings.windowCloseQuit')}</span>
-            </label>
-          </div>
-
-          {/* 仅在本平台支持时渲染：不支持时后端返回 null，宁可不出卡片，
-              也不给一个点了必然报错的开关。默认关闭 = 从未勾选过时注册表无条目。 */}
-          {autostart !== null && (
-            <div className="settings-section">
-              <div className="settings-section-head">
-                <span className="settings-label">
-                  {sectionIcons.autostart}
-                  {t('settings.autostart')}
-                </span>
-                <span className="settings-hint">{t('settings.autostartHint')}</span>
+          <div className="settings-columns">
+            <div className="settings-column">
+              <div className="settings-section">
+                <div className="settings-section-head">
+                  <span className="settings-label">
+                    {sectionIcons.language}
+                    {t('settings.language')}
+                  </span>
+                  <span className="settings-hint">{t('settings.languageHint')}</span>
+                </div>
+                <LangSwitch variant="list" />
               </div>
-              <label className="settings-option-row">
-                <input
-                  type="checkbox"
-                  className="settings-checkbox"
-                  checked={autostart}
-                  onChange={(event) => saveAutostart(event.target.checked)}
-                />
-                <span className="settings-check-label">{t('settings.autostartLabel')}</span>
-              </label>
-              {autostartError && <div className="settings-proxy-err">{autostartError}</div>}
-            </div>
-          )}
 
-          {/* 仅 Windows 渲染（后端 get_taskbar_widget_support 为假时整卡不出现）：
-              开关 + 要显示的参数复选 + 样式/排列单选。各项随时可改（关闭状态下也持久化），
-              勾选全空会自动把开关关掉。 */}
-          {taskbarSupported && taskbarMetrics && (
-            <div className="settings-section">
-              <div className="settings-section-head">
-                <span className="settings-label">
-                  {sectionIcons.taskbarMetrics}
-                  {t('settings.taskbarMetrics')}
-                </span>
-                <span className="settings-hint">{t('settings.taskbarMetricsHint')}</span>
+              <div className="settings-section">
+                <div className="settings-section-head">
+                  <span className="settings-label">
+                    {sectionIcons.theme}
+                    {t('settings.theme')}
+                  </span>
+                  <span className="settings-hint">{t('settings.themeHint')}</span>
+                </div>
+                <label className="settings-option-row">
+                  <input
+                    type="radio"
+                    name="ui-theme"
+                    className="settings-checkbox"
+                    checked={uiTheme === 'default'}
+                    onChange={() => saveUiTheme('default')}
+                  />
+                  <span className="settings-check-label">{t('settings.themeDefault')}</span>
+                </label>
+                <label className="settings-option-row">
+                  <input
+                    type="radio"
+                    name="ui-theme"
+                    className="settings-checkbox"
+                    checked={uiTheme === 'parchment'}
+                    onChange={() => saveUiTheme('parchment')}
+                  />
+                  <span className="settings-check-label">{t('settings.themeParchment')}</span>
+                </label>
               </div>
-              <label className="settings-option-row">
-                <input
-                  type="checkbox"
-                  className="settings-checkbox"
-                  checked={taskbarMetrics.enabled}
-                  onChange={(event) => onToggleTaskbarEnabled(event.target.checked)}
-                />
-                <span className="settings-check-label">{t('settings.taskbarMetricsEnable')}</span>
-              </label>
-              <div className="settings-section-head">
-                <span className="settings-sublabel">{t('settings.taskbarMetricsItems')}</span>
-                <span className="settings-hint">{t('settings.taskbarMetricsItemsHint')}</span>
-              </div>
-              {TASKBAR_ITEMS.map((item) => (
-                <label className="settings-option-row" key={item.key}>
+
+              <div className="settings-section">
+                <div className="settings-section-head">
+                  <span className="settings-label">
+                    {sectionIcons.update}
+                    {t('settings.update')}
+                  </span>
+                  <span className="settings-hint">{t('settings.updateHint')}</span>
+                </div>
+                <div className="settings-meta-row">
+                  <span className="settings-hint">{t('about.version')}</span>
+                  <span className="settings-meta">
+                    <span className="settings-meta-value">{version}</span>
+                    {pendingUpdate && (
+                      <button
+                        type="button"
+                        className="update-badge"
+                        title={t('update.badgeTitle')}
+                        aria-label={t('update.badgeTitle')}
+                        onClick={() => {
+                          onClose();
+                          onOpenUpdate();
+                        }}
+                      >
+                        {t('update.badgeNew')}
+                      </button>
+                    )}
+                    <Button
+                      variant="secondary"
+                      type="button"
+                      onClick={onCheckUpdate}
+                      disabled={checking}
+                    >
+                      {checking ? t('update.checking') : t('update.check')}
+                    </Button>
+                  </span>
+                </div>
+                <label className="settings-option-row">
                   <input
                     type="checkbox"
                     className="settings-checkbox"
-                    checked={taskbarMetrics.items.includes(item.key)}
-                    onChange={(event) => onToggleTaskbarItem(item.key, event.target.checked)}
+                    checked={autoCheck}
+                    onChange={(event) => {
+                      setAutoCheck(event.target.checked);
+                      // 立即落盘（含当前代理值），无需点「保存」也能记住开关。
+                      invoke<AppSettings>('save_settings', {
+                        updateProxy: proxy,
+                        autoCheckUpdates: event.target.checked,
+                      })
+                        .then((s) => {
+                          setProxy(s.update_proxy);
+                          setAutoCheck(Boolean(s.auto_check_updates));
+                        })
+                        .catch(() => {});
+                    }}
                   />
-                  <span className="settings-check-label">{t(item.label)}</span>
+                  <span className="settings-check-label">{t('settings.autoCheck')}</span>
                 </label>
-              ))}
-              <div className="settings-section-head">
-                <span className="settings-sublabel">{t('settings.taskbarMetricsDetails')}</span>
-                <span className="settings-hint">{t('settings.taskbarMetricsDetailsHint')}</span>
-              </div>
-              <label className="settings-option-row">
-                <input
-                  type="checkbox"
-                  className="settings-checkbox"
-                  checked={taskbarMetrics.detailed}
-                  onChange={(event) => onToggleTaskbarDetailed(event.target.checked)}
-                />
-                <span className="settings-check-label">{t('settings.taskbarMetricsDetailed')}</span>
-              </label>
-              <div className="settings-section-head">
-                <span className="settings-sublabel">{t('settings.taskbarMetricsStyle')}</span>
-                <span className="settings-hint">{t('settings.taskbarMetricsStyleHint')}</span>
-              </div>
-              {TASKBAR_STYLES.map((item) => (
-                <label className="settings-option-row" key={item.key}>
+                <div className="settings-section-head">
+                  <span className="settings-sublabel">{t('settings.updateProxy')}</span>
+                  <span className="settings-hint">{t('settings.updateProxyHint')}</span>
+                </div>
+                <div className="settings-proxy-row">
                   <input
-                    type="radio"
-                    name="taskbar-metrics-style"
-                    className="settings-checkbox"
-                    checked={taskbarMetrics.style === item.key}
-                    onChange={() => onSelectTaskbarStyle(item.key)}
+                    className="settings-proxy-input"
+                    type="text"
+                    placeholder="http://127.0.0.1:7897"
+                    value={proxy}
+                    onChange={(event) => {
+                      setProxy(event.target.value);
+                      setProxySaved(false);
+                    }}
                   />
-                  <span className="settings-check-label">{t(item.label)}</span>
-                </label>
-              ))}
-              <div className="settings-section-head">
-                <span className="settings-sublabel">{t('settings.taskbarMetricsLayout')}</span>
-                <span className="settings-hint">{t('settings.taskbarMetricsLayoutHint')}</span>
+                  <Button variant="secondary" type="button" onClick={onSaveProxy}>
+                    {t('common.save')}
+                  </Button>
+                </div>
+                {proxySaved && (
+                  <div className="settings-proxy-ok">{t('settings.updateProxySaved')}</div>
+                )}
+                {proxyError && <div className="settings-proxy-err">{proxyError}</div>}
               </div>
-              {TASKBAR_LAYOUTS.map((item) => (
-                <label className="settings-option-row" key={item.key}>
-                  <input
-                    type="radio"
-                    name="taskbar-metrics-layout"
-                    className="settings-checkbox"
-                    checked={taskbarMetrics.layout === item.key}
-                    onChange={() => onSelectTaskbarLayout(item.key)}
-                  />
-                  <span className="settings-check-label">{t(item.label)}</span>
-                </label>
-              ))}
-              {taskbarMetricsError && (
-                <div className="settings-proxy-err">{taskbarMetricsError}</div>
-              )}
-            </div>
-          )}
 
-          <div className="settings-section">
-            <div className="settings-section-head">
-              <span className="settings-label">
-                {sectionIcons.about}
-                {t('about.title')}
-              </span>
+              <div className="settings-section">
+                <div className="settings-section-head">
+                  <span className="settings-label">
+                    {sectionIcons.windowClose}
+                    {t('settings.windowClose')}
+                  </span>
+                  <span className="settings-hint">{t('settings.windowCloseHint')}</span>
+                </div>
+                <label className="settings-option-row">
+                  <input
+                    type="radio"
+                    name="close-pref"
+                    className="settings-checkbox"
+                    checked={closePref === null}
+                    onChange={() => saveClosePref(null)}
+                  />
+                  <span className="settings-check-label">{t('settings.windowCloseAsk')}</span>
+                </label>
+                <label className="settings-option-row">
+                  <input
+                    type="radio"
+                    name="close-pref"
+                    className="settings-checkbox"
+                    checked={closePref === true}
+                    onChange={() => saveClosePref(true)}
+                  />
+                  <span className="settings-check-label">{t('settings.windowCloseTray')}</span>
+                </label>
+                <label className="settings-option-row">
+                  <input
+                    type="radio"
+                    name="close-pref"
+                    className="settings-checkbox"
+                    checked={closePref === false}
+                    onChange={() => saveClosePref(false)}
+                  />
+                  <span className="settings-check-label">{t('settings.windowCloseQuit')}</span>
+                </label>
+              </div>
             </div>
-            <p className="settings-about-desc">{t('about.desc')}</p>
-            <div className="settings-repo-row">
-              <Button
-                variant="secondary"
-                type="button"
-                onClick={() => openUrl(REPO_URL).catch(() => {})}
-              >
-                {t('about.repo')}
-              </Button>
+            <div className="settings-column">
+              {/* 仅在本平台支持时渲染：不支持时后端返回 null，宁可不出卡片，
+              也不给一个点了必然报错的开关。默认关闭 = 从未勾选过时注册表无条目。 */}
+              {autostart !== null && (
+                <div className="settings-section">
+                  <div className="settings-section-head">
+                    <span className="settings-label">
+                      {sectionIcons.autostart}
+                      {t('settings.autostart')}
+                    </span>
+                    <span className="settings-hint">{t('settings.autostartHint')}</span>
+                  </div>
+                  <label className="settings-option-row">
+                    <input
+                      type="checkbox"
+                      className="settings-checkbox"
+                      checked={autostart}
+                      onChange={(event) => saveAutostart(event.target.checked)}
+                    />
+                    <span className="settings-check-label">{t('settings.autostartLabel')}</span>
+                  </label>
+                  {autostartError && <div className="settings-proxy-err">{autostartError}</div>}
+                </div>
+              )}
+
+              {/* 仅 Windows 渲染（后端 get_taskbar_widget_support 为假时整卡不出现）：
+              开关 + 要显示的参数复选 + 样式/排列单选。各项随时可改（关闭状态下也持久化），
+              勾选全空会自动把开关关掉。 */}
+              {taskbarSupported && taskbarMetrics && (
+                <div className="settings-section">
+                  <div className="settings-section-head">
+                    <span className="settings-label">
+                      {sectionIcons.taskbarMetrics}
+                      {t('settings.taskbarMetrics')}
+                    </span>
+                    <span className="settings-hint">{t('settings.taskbarMetricsHint')}</span>
+                  </div>
+                  <label className="settings-option-row">
+                    <input
+                      type="checkbox"
+                      className="settings-checkbox"
+                      checked={taskbarMetrics.enabled}
+                      onChange={(event) => onToggleTaskbarEnabled(event.target.checked)}
+                    />
+                    <span className="settings-check-label">
+                      {t('settings.taskbarMetricsEnable')}
+                    </span>
+                  </label>
+                  <div className="settings-section-head">
+                    <span className="settings-sublabel">{t('settings.taskbarMetricsItems')}</span>
+                    <span className="settings-hint">{t('settings.taskbarMetricsItemsHint')}</span>
+                  </div>
+                  {TASKBAR_ITEMS.map((item) => (
+                    <label className="settings-option-row" key={item.key}>
+                      <input
+                        type="checkbox"
+                        className="settings-checkbox"
+                        checked={taskbarMetrics.items.includes(item.key)}
+                        onChange={(event) => onToggleTaskbarItem(item.key, event.target.checked)}
+                      />
+                      <span className="settings-check-label">{t(item.label)}</span>
+                    </label>
+                  ))}
+                  <div className="settings-section-head">
+                    <span className="settings-sublabel">{t('settings.taskbarMetricsDetails')}</span>
+                    <span className="settings-hint">{t('settings.taskbarMetricsDetailsHint')}</span>
+                  </div>
+                  <label className="settings-option-row">
+                    <input
+                      type="checkbox"
+                      className="settings-checkbox"
+                      checked={taskbarMetrics.detailed}
+                      onChange={(event) => onToggleTaskbarDetailed(event.target.checked)}
+                    />
+                    <span className="settings-check-label">
+                      {t('settings.taskbarMetricsDetailed')}
+                    </span>
+                  </label>
+                  <div className="settings-section-head">
+                    <span className="settings-sublabel">{t('settings.taskbarMetricsStyle')}</span>
+                    <span className="settings-hint">{t('settings.taskbarMetricsStyleHint')}</span>
+                  </div>
+                  {TASKBAR_STYLES.map((item) => (
+                    <label className="settings-option-row" key={item.key}>
+                      <input
+                        type="radio"
+                        name="taskbar-metrics-style"
+                        className="settings-checkbox"
+                        checked={taskbarMetrics.style === item.key}
+                        onChange={() => onSelectTaskbarStyle(item.key)}
+                      />
+                      <span className="settings-check-label">{t(item.label)}</span>
+                    </label>
+                  ))}
+                  <div className="settings-section-head">
+                    <span className="settings-sublabel">{t('settings.taskbarMetricsLayout')}</span>
+                    <span className="settings-hint">{t('settings.taskbarMetricsLayoutHint')}</span>
+                  </div>
+                  {TASKBAR_LAYOUTS.map((item) => (
+                    <label className="settings-option-row" key={item.key}>
+                      <input
+                        type="radio"
+                        name="taskbar-metrics-layout"
+                        className="settings-checkbox"
+                        checked={taskbarMetrics.layout === item.key}
+                        onChange={() => onSelectTaskbarLayout(item.key)}
+                      />
+                      <span className="settings-check-label">{t(item.label)}</span>
+                    </label>
+                  ))}
+                  {taskbarMetricsError && (
+                    <div className="settings-proxy-err">{taskbarMetricsError}</div>
+                  )}
+                </div>
+              )}
+
+              <div className="settings-section">
+                <div className="settings-section-head">
+                  <span className="settings-label">
+                    {sectionIcons.about}
+                    {t('about.title')}
+                  </span>
+                </div>
+                <p className="settings-about-desc">{t('about.desc')}</p>
+                <div className="settings-repo-row">
+                  <Button
+                    variant="secondary"
+                    type="button"
+                    onClick={() => openUrl(REPO_URL).catch(() => {})}
+                  >
+                    {t('about.repo')}
+                  </Button>
+                </div>
+              </div>
             </div>
           </div>
         </div>

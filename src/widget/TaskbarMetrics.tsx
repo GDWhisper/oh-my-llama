@@ -55,24 +55,36 @@ function normalizeLayout(raw: unknown): WidgetLayout {
   return raw === 'double' ? 'double' : 'single';
 }
 
-/** 0-100 取整百分比；非法值显示顿号占位，不让条带出现 NaN。 */
-function pct(value: number): string {
-  if (!Number.isFinite(value)) return '—';
-  return `${Math.round(Math.max(0, Math.min(100, value)))}%`;
+/** 高占用告警线：显示值达到即染红。取 80 而非主面板占用条的 70/90 两档——
+ *  条带只有一格字号，两档分不出主次，一档够传达「该看一眼」。 */
+const HOT_PCT = 80;
+
+interface PctText {
+  text: string;
+  hot: boolean;
 }
 
-function itemText(key: ItemKey, snap: MetricsSnapshot | null): string {
-  if (!snap) return '—';
-  const gpu = snap.gpus[0]; // 多卡时取第一张，与设置卡片/主面板口径一致
+/** 0-100 取整百分比 + 是否触线；非法/缺值显示顿号占位，不让条带出现 NaN。
+ *  触线判定用四舍五入后的显示值，红色与看到的数字一致（79.6 显示 80% 即红）。 */
+function pct(value: number | null): PctText {
+  if (value === null || !Number.isFinite(value)) return { text: '—', hot: false };
+  const rounded = Math.round(Math.max(0, Math.min(100, value)));
+  return { text: `${rounded}%`, hot: rounded >= HOT_PCT };
+}
+
+function itemPct(key: ItemKey, snap: MetricsSnapshot | null): PctText {
+  const gpu = snap?.gpus[0]; // 多卡时取第一张，与设置卡片/主面板口径一致
   switch (key) {
     case 'cpu':
-      return pct(snap.cpu_usage);
+      return pct(snap?.cpu_usage ?? null);
     case 'mem':
-      return pct(snap.mem_usage);
+      return pct(snap?.mem_usage ?? null);
     case 'gpu':
-      return gpu ? pct(gpu.usage) : '—';
+      return pct(gpu?.usage ?? null);
     case 'vram':
-      return gpu && gpu.vram_total_mb > 0 ? pct((gpu.vram_used_mb / gpu.vram_total_mb) * 100) : '—';
+      return pct(
+        gpu && gpu.vram_total_mb > 0 ? (gpu.vram_used_mb / gpu.vram_total_mb) * 100 : null,
+      );
   }
 }
 
@@ -242,11 +254,12 @@ export function TaskbarMetrics() {
   return (
     <div ref={stripRef} className={classes}>
       {items.map((key) => {
+        const { text, hot } = itemPct(key, snap);
         const extra = detailed ? itemExtra(key, snap) : null;
         return (
           <span key={key} className="taskbar-metrics-item">
             <span className="taskbar-metrics-label">{t(ITEM_LABEL[key])}</span>
-            <span className="taskbar-metrics-value">{itemText(key, snap)}</span>
+            <span className={`taskbar-metrics-value${hot ? ' hot' : ''}`}>{text}</span>
             {extra && <span className="taskbar-metrics-extra">{extra}</span>}
           </span>
         );

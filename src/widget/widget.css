@@ -33,6 +33,14 @@ body {
   /* 数字等宽：数值抖动不引起条带宽度变化，避免频繁重报尺寸 */
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
+  /* 高占用红：条带底色近黑，用亮红；透明样式落在浅色任务栏上时换深红（见下方主题规则） */
+  --hot: #ff6b6b;
+  /* 三档横向节奏（一律用片段的 padding-left 表达，理由见文件末尾的两行排列注释）：
+     标签↔百分比 4px 成一组，百分比↔「已用/总量」宽一档——两位/三位数字与 GB 对
+     挤在 4px 下会连成一片；两行排列的项间 12px。 */
+  --part-gap: 4px;
+  --extra-gap: 8px;
+  --item-gap: 12px;
 }
 
 .taskbar-metrics.vertical {
@@ -41,10 +49,11 @@ body {
   gap: 6px;
 }
 
+/* 片段间距交给上面的变量，不用 flex gap（否则与 padding 叠加，档位调不准） */
 .taskbar-metrics-item {
   display: inline-flex;
   align-items: baseline;
-  gap: 4px;
+  gap: 0;
 }
 
 .taskbar-metrics-label {
@@ -52,12 +61,19 @@ body {
 }
 
 .taskbar-metrics-value {
+  padding-left: var(--part-gap);
   font-family: 'Cascadia Code', 'Cascadia Mono', Consolas, 'SF Mono', ui-monospace, monospace;
   font-weight: 600;
 }
 
+/* 占用达到告警线的百分比染红：只染数字，不染标签与详细数据，免得整项变红失去主次 */
+.taskbar-metrics-value.hot {
+  color: var(--hot);
+}
+
 /* 详细数据（设置开启时内存/显存追加的「已用/总量」）：同数值等宽、淡一档，不抢主数值视线 */
 .taskbar-metrics-extra {
+  padding-left: var(--extra-gap);
   font-family: 'Cascadia Code', 'Cascadia Mono', Consolas, 'SF Mono', ui-monospace, monospace;
   font-weight: 500;
   opacity: 0.75;
@@ -91,6 +107,8 @@ body {
   text-shadow:
     0 1px 2px rgba(255, 255, 255, 0.75),
     0 0 6px rgba(255, 255, 255, 0.5);
+  /* 亮红压在浅色底上发飘，换深红 */
+  --hot: #b42318;
 }
 
 @media (prefers-color-scheme: light) {
@@ -99,6 +117,7 @@ body {
     text-shadow:
       0 1px 2px rgba(255, 255, 255, 0.75),
       0 0 6px rgba(255, 255, 255, 0.5);
+    --hot: #b42318;
   }
 }
 
@@ -117,4 +136,39 @@ body {
   grid-template-columns: max-content max-content;
   column-gap: 12px;
   row-gap: 1px;
+}
+
+/* 上下行逐位对齐：每项的三个片段（标签 / 百分比 / 详细数据）各占一条列轨道，
+   同一列轨道由上下两行共用，数字再右对齐——于是位数不同（9% 与 25%、9.9/15.9G
+   与 50.3/63.6G）、标签宽窄不同（CPU 与 GPU、en 下 Memory 与 CPU）都不会错开。
+   每项固定跨 3 轨（无详细数据时末轨留空），6 轨即每行 2 项。
+   横向间距一律走片段的 padding-left（文件开头的三个变量）而非网格 gap：空轨道在
+   gap 下会白吃左右两个间距（cpu/gpu 无详细数据 → 项间距被撑成 16px），
+   padding 则随空轨道一起消失。
+   旧 WebView2 不认 subgrid：整块跳过，落回上面的两项网格（即本条规则之前的表现）。 */
+@supports (grid-template-columns: subgrid) {
+  .taskbar-metrics.layout-double:not(.vertical) {
+    grid-template-columns: repeat(6, max-content);
+    column-gap: 0;
+  }
+
+  .taskbar-metrics.layout-double:not(.vertical) .taskbar-metrics-item {
+    /* Chromium 丢弃 `display: subgrid`（CSS.supports 也报 false），只认
+       `display: grid` + 子轴 `subgrid` 这一种写法，故两者分开写。 */
+    display: grid;
+    grid-template-columns: subgrid;
+    grid-column: span 3;
+  }
+
+  .taskbar-metrics.layout-double:not(.vertical) .taskbar-metrics-value,
+  .taskbar-metrics.layout-double:not(.vertical) .taskbar-metrics-extra {
+    text-align: right;
+  }
+
+  /* 行内第二项（偶数项）落在第 4 轨，由它的标签补出项间距 */
+  .taskbar-metrics.layout-double:not(.vertical)
+    .taskbar-metrics-item:nth-child(even)
+    .taskbar-metrics-label {
+    padding-left: var(--item-gap);
+  }
 }
