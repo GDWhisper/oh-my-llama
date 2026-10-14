@@ -50,7 +50,9 @@ const GAP_LOGICAL: f64 = 6.0;
 /// 任务栏与其所在显示器的可见交叠低于该值（物理像素）视为「已自动隐藏」。
 #[cfg(any(windows, test))]
 const VISIBLE_MIN_PX: i32 = 8;
-/// 前端上报真实尺寸前的窗口粗尺寸（逻辑像素）。
+/// 前端上报真实尺寸前的窗口粗尺寸（逻辑像素）。仅 Windows 建窗用；非 Windows 上
+/// 整个文件不进构建路径的门控区，留着就是 dead_code（clippy -D warnings 会拦）。
+#[cfg(windows)]
 const INITIAL_LOGICAL: (f64, f64) = (240.0, 32.0);
 
 struct Shared {
@@ -366,6 +368,8 @@ struct StepPlan {
     place: Option<bool>,
     /// 是否重申置顶 + 纠正工具窗样式：条带在任务栏上有位置时每拍都要做（点击任务栏会
     /// 把 shell 提到置顶带最上层、tao 每次显隐又重写 ex-style），与是否需要 show 无关。
+    /// 仅 Windows 有读者（`apply_step` 的纠正块）；非 Windows 无 z 序可纠正，字段不构建。
+    #[cfg(windows)]
     fixups: bool,
 }
 
@@ -383,6 +387,7 @@ impl StepPlan {
                 pos: (tick.pos != Some((p.x, p.y))).then_some((p.x, p.y)),
                 vertical: (tick.vertical != Some(p.vertical)).then_some(p.vertical),
                 place: (!tick.shown).then_some(true),
+                #[cfg(windows)]
                 fixups: true,
             },
             // 任务栏不可用（自动隐藏 / 全屏 / explorer 重启间隙）：收起条带。
@@ -392,6 +397,7 @@ impl StepPlan {
                 pos: None,
                 vertical: None,
                 place: tick.shown.then_some(false),
+                #[cfg(windows)]
                 fixups: false,
             },
         };
@@ -1010,6 +1016,7 @@ mod tests {
         assert_eq!(plan.pos, Some((10, 20)));
         assert_eq!(plan.vertical, Some(false));
         assert_eq!(plan.place, Some(true));
+        #[cfg(windows)]
         assert!(plan.fixups, "有位置时每拍都要重申置顶/纠正样式");
     }
 
@@ -1024,6 +1031,7 @@ mod tests {
         assert_eq!(plan.pos, None, "位置未变则不再 set_position");
         assert_eq!(plan.vertical, None);
         assert_eq!(plan.place, None, "已显示则不重复 show");
+        #[cfg(windows)]
         assert!(plan.fixups, "置顶纠正每拍都做（防被 shell 压住）");
     }
 
@@ -1035,6 +1043,7 @@ mod tests {
         let _ = StepPlan::decide(&mut tick, Some(Placement::at(10, 20, 300, 40, false)), None);
         let hidden = StepPlan::decide(&mut tick, None, None);
         assert_eq!(hidden.place, Some(false));
+        #[cfg(windows)]
         assert!(!hidden.fixups, "已收起时无需再动 z 序");
         assert_eq!(StepPlan::decide(&mut tick, None, None).place, None);
     }
