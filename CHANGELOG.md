@@ -4,6 +4,19 @@
 
 > 本文件为**详细改动历史**（含涉及的文件与实现机制）；GitHub Release 页面为对应版本的**总结性**说明。
 
+## [0.2.10] - 2026-10-14
+
+### 新增功能
+- **假死诊断探针（默认关闭，设 `OML_DIAG=1` 启用）**：新增 `src-tauri/src/diag.rs`——定长环形缓冲（256 条，标签全为 `&'static str`、热路径零分配，内存上界恒定约 20KB）记录各线程的命令进出与自定义标记；RAII 守卫 `diag::cmd()` 在 `get_status` / `read_logs` / `get_system_metrics` / `get_perf_stats` / `set_taskbar_metrics` / `taskbar_widget_ready` / `write_log_file` 及任务栏小窗定位每拍（`widget_step` / `widget_theme_read` / `widget_set_size` 等）埋点，`lib.rs` 的 `run()` setup 阶段经 `main_window_hwnd` 注入主窗口句柄并 `spawn_watchdog`；看门狗线程每 2s 用 `SendMessageTimeout(WM_NULL)`（3s 超时）探主窗口，连续 2 次超时判定假死，把探针缓冲与「有进入无离开」的未配对标记写入 `%APPDATA%/OhMyLlama/diag-hang_<ts>.log`，事后看最后一条未离开标记即卡点。启用闸门读环境变量缓存，禁用时每次调用只读一个缓存值、零分配零锁；探针任何情况下不参与业务逻辑。单测覆盖进入/离开配对检测、环形缓冲写满覆盖最旧且容量封顶、缓冲锁缺失时 dump 仍可读。
+
+### 功能优化
+- **设置浮窗改两列摆放**：`src/components/SettingsDialog.tsx` 的 `modal-body` 分组按语义分包进 `.settings-columns` / `.settings-column`（语言 / 主题 / 更新与代理归左列，关闭偏好 / 开机自启 / 任务栏小窗 / 关于归右列）；`src/App.css` 的 `.settings-modal` 宽由 `min(420px, 90vw)` 改 `min(760px, 92vw)`，列容器 `flex-wrap: wrap` + 列 `flex: 1 1 300px`、`min-width: 0`，弹窗窄到放不下两列时整体换行回落单列，无需断点；总高度压平、少滚动。
+- **dev-server 脚本 stop 改杀整个 dev 会话**：`scripts/dev-server.ps1` 原 `stop` 只杀端口占用者的进程树（vite 只是会话叶子，cargo 与 app 挂在另一分支，实测整条漏杀），改为从端口占用者沿祖先链找最顶端带 `tauri dev` 的会话根，连祖先链 / 后代链整树杀（自建进程快照表反查后代，不用 `taskkill /T` 逐层杀——父死子被改父会漏分支）；端口已无监听时按「命令行含 `tauri dev` + 本仓库目录」直接找出会话根兜底；`-Dir` 默认值从调用方当前目录改脚本所在仓库根（全路径调用不再在错误目录跑 npm）；补 UTF-8 BOM（无 BOM 时 Windows PowerShell 5.1 按 GBK 解码中文注释、合并行号，实测报 `CimInstance 不包含 op_Addition`）；`start` 前预检 package.json 与 `tauri` script，失败时子窗口 `|| pause` 保持打开可读；杀掉调用方终端自身及其祖先的进程一律排除。
+- **智能体规范外置三篇常驻文档**：`agents.md` 精简改写（净减 22 行），git 安全操作（`-c gc.auto=0`、`origin/*` 陈旧、worktree 结构、gh 代理）、开发机与运行期环境约束、IPC / 配置 / 参数 / 设置 / 文案五类改动流程分别外置为 `AGENTS/git-safety.md` / `AGENTS/environment.md` / `AGENTS/recipes.md`，文件头建索引表登记「何时读取 / 何时维护」。
+
+### Bug 修复
+- **任务栏小窗休眠唤醒后整应用卡死**：根因是定位线程每秒直接调 `set_size` / `set_position` / `show` / `hide` 与事件广播——tao 窗口 API 在调用方线程同步取 `window_state` 锁，与主线程路径（IPC `taskbar_widget_ready`、窗口过程回调）构成 AB-BA 死锁（2026-10-13 休眠唤醒实测：两线程互等，整应用 hung、托盘点不动）。修复（`src-tauri/src/taskbar_widget.rs`）：`step()` 拆为 `plan_step`（持 `STATE.tick` 锁期间算出纯数据 `StepPlan`，不碰任何窗口调用）与 `apply_step`（完全释放该锁后执行窗口操作与广播），锁序天然一致；所有 `step()` 入口改经 `queue_step` 用 `run_on_main_thread` 排到事件循环线程串行执行，已有排队未跑时跳过本拍（`STEP_QUEUED`，防主线程繁忙时队列无界增长），`taskbar_widget_ready` 不再直调；`step()` 入口加 `STEPPING` 可重入守卫（`StepGuard` RAII，panic 路径同样清标记），挡掉窗口操作同步回调经 IPC 二次进入导致的主线程自锁。新增 5 个 `StepPlan::decide` 单测固化行为（首拍尺寸 / 位置 / 竖排 / 显示 / 置顶纠正全做；重复拍除置顶纠正外全部去重；任务栏不可用时收起一次、不重复 hide；明暗只在翻转时广播、读不到不广播；记账在 decide 内推进，几何漂移后回来仍能纠正）与 `Placement::at` 测试替身。
+
 ## [0.2.9] - 2026-10-12
 
 ### 新增功能
