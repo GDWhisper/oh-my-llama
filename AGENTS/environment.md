@@ -27,6 +27,14 @@ powershell scripts/dev-server.ps1 -Action start|stop|restart   # 三个动作三
 
 两个脚本都不在 `package.json` 与 CI 里，是纯开发期手工脚本，均在仓库根目录执行。
 
+## 开发机：非 Windows 编译错误只有 CI 能抓
+
+本机 Rust 工具链只装 Windows target，`npm run check` 的 clippy 也只在 Windows 上跑。Linux / macOS 专属问题——平台 API 不存在（如 `WebviewWindow::hwnd()` 仅 Windows 有）、非 Windows 下的 dead_code——本地门禁一律放行，只由 CI 的 `build-check.yml` / `release.yml` 三平台暴露。改到平台相关代码（`cfg` 分支、窗口 API、平台专属常量）时，本机过完 Windows 门禁就推 dev 让 CI 验，别指望本地复现。
+
+本机补验非 Windows 走不通，不要浪费时间：`rustup target add` 的镜像源缺 rust-std 组件（404），即便从官方源手动下载解压进工具链 sysroot，Linux target 也会在 `dbus-sys` 上要系统的 libdbus、macOS target 在 `ring` 上要 `cc`，Windows host 两者皆无，编不到本项目代码就断。
+
+另注意分工：`release.yml` 不跑 clippy `-D warnings`，dead_code 在 release 构建里只是 warning——非 Windows 的死代码能带着发布出去，只有 `build-check.yml` 拦得住（v0.2.9 的 `INITIAL_LOGICAL` 即此情况：release 三平台绿、build-check 红）。
+
 ## 运行期数据：`%APPDATA%/OhMyLlama/` 下有什么
 
 目录取 `APPDATA`，缺失时回落 `LOCALAPPDATA`（`src-tauri/src/lib.rs:989`）。三个各管一件事：
