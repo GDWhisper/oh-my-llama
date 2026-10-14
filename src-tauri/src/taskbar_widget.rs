@@ -102,6 +102,7 @@ pub async fn set_taskbar_metrics(
     layout: String,
     detailed: bool,
 ) -> Result<AppSettings, String> {
+    let _g = crate::diag::cmd("cmd_set_taskbar_metrics");
     let items = normalize_items(&items)?;
     // style/layout 宽松归一化（未知值落回默认）：settings.json 可被手改，也可能来自更新版本。
     let style = normalize_style(&style).to_string();
@@ -144,6 +145,7 @@ pub async fn set_taskbar_metrics(
 /// 前端量出的条带逻辑尺寸（CSS px）：窗口尺寸与位置到此才校准并首次显示。
 #[tauri::command]
 pub fn taskbar_widget_ready(app: AppHandle, width: f64, height: f64) {
+    let _g = crate::diag::cmd("cmd_taskbar_widget_ready");
     if !(width.is_finite() && height.is_finite() && width > 0.0 && height > 0.0) {
         return;
     }
