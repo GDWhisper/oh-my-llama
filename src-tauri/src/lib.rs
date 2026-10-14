@@ -951,10 +951,17 @@ fn show_main_window(app: &AppHandle) {
 }
 
 /// 主窗口原生句柄（诊断看门狗的探测目标）；取不到返回 None。
+#[cfg(windows)]
 fn main_window_hwnd(app: &AppHandle) -> Option<isize> {
     app.get_webview_window("main")
         .and_then(|win| win.hwnd().ok())
         .map(|hwnd| hwnd.0 as isize)
+}
+
+/// 非 Windows 无从取原生句柄：句柄为 None 时看门狗整体不启动（该平台探测原语本就不存在）。
+#[cfg(not(windows))]
+fn main_window_hwnd(_app: &AppHandle) -> Option<isize> {
+    None
 }
 
 // 唯一退出路径：先停受管服务再退出（与旧 tauri://close-requested 行为一致）。
