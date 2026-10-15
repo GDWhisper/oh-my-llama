@@ -4,6 +4,17 @@
 
 > 本文件为**详细改动历史**（含涉及的文件与实现机制）；GitHub Release 页面为对应版本的**总结性**说明。
 
+## [0.2.11] - 2026-10-15
+
+### 新增功能
+- 无
+
+### 功能优化
+- **任务栏小窗收起期核对降频 + 整机 CPU 高负载前端轮询降速**：`src-tauri/src/taskbar_widget.rs` 的定位线程按 `STATE.hidden`（`Shared` 新增 `#[cfg(windows)] hidden: AtomicBool`，由 `apply_step` 的显隐分支 `show` / `hide` 后维护，`disable` 时复位）分两支——条带可见时完整核对 1s 一拍 + 50ms 被压检测（原 `TICK_MS` / `PRESS_CHECK_MS` 路径不变）；收起期间（任务栏自动隐藏 / 前台全屏 / explorer 重启间隙）完整核对降到 2s 一拍（`HIDDEN_TICK_MS`）、停跑被压检测（条带不在屏上，任务栏压不到它）、循环睡眠放到 200ms（`HIDDEN_SLEEP_MS`）。实测全屏出现后 1.3s 收起、退出后 1.2s 恢复。`src/widget/TaskbarMetrics.tsx` 的指标轮询从固定 `setInterval` 改为自调度 `setTimeout`，下一拍间隔由本次快照的整机 CPU 占用（`global_cpu_info` 全局口径，判定零成本）决定——≥90%（`BUSY_PCT`）降到 5s（`SLOW_INTERVAL`），其余 1.5s，占用回落后自动恢复常速；采集异常保留旧值、按常速重试。主面板轮询不受影响（不可见时本已停表）。
+
+### Bug 修复
+- **点击任务栏条带被盖住致闪烁**：根因是点击任务栏（托盘区收展 / 任务栏空白均然）时 Windows 激活 shell 把 `Shell_TrayWnd` 提到条带之上盖住它，定位线程 1s 才核对一次，实测被盖住 0.3~0.5s 才由 `reassert_topmost` 顶回。修复（`src-tauri/src/taskbar_widget.rs`）：定位线程在每秒完整核对之外另挂 50ms 轻量检测（`PRESS_CHECK_MS` / `pressed_by_taskbar`），只读 z 序、不碰任何 tao 窗口 API（v0.2.10 AB-BA 死锁修复的锁序约束不变；句柄缓存 `STATE.hwnd` 为独立锁，`cache_hwnd` 在任何 `STATE` 锁之外调用），命中即排队顶回，实测被盖时间从 0.3~0.5s 压到 30ms 内。同时把 z 序查找从 `reassert_topmost` 抽为 `taskbar_above`，与高频检测共用同一「被压住」判据，防两处理解漂移。
+
 ## [0.2.10] - 2026-10-14
 
 ### 新增功能
