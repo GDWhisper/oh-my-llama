@@ -15,6 +15,9 @@
 //!   退回任务栏右缘（可能与托盘图标重叠，属兜底）。
 //! - 点击任务栏会把 shell 提到置顶带最上层，把条带盖住；故每拍检查 z 序，被压住
 //!   才重申置顶——不做每秒无脑置顶，避免与托盘弹出面板（Wi-Fi/音量等）抢层。
+//!   完整核对 1s 一拍太慢：实测点击任务栏（托盘区收展 / 任务栏空白均然）后条带被
+//!   盖住 0.3~0.5s，肉眼就是一下闪烁。故定位线程另挂一个 50ms 轻量检测（只读 z 序，
+//!   不碰任何 tao 窗口 API），发现任务栏压在条带上就立即排队顶回，不等下一完整拍。
 //! - 条带样式（默认/透明）、排列（单行/两行）与日/夜间取色都是前端呈现；Rust 侧只经
 //!   `taskbar-widget://settings` 转发设置、每拍广播任务栏明暗（见 `taskbar_is_light`）。
 
@@ -44,6 +47,18 @@ pub const LAYOUT_DOUBLE: &str = "double";
 /// 定位线程节拍（毫秒）：任务栏移动 / 自动隐藏 / 全屏切换都靠这一周期兜住。
 #[cfg(windows)]
 const TICK_MS: u64 = 1000;
+/// 条带收起期间（任务栏自动隐藏 / 前台全屏 / explorer 重启间隙）的完整拍节拍：
+/// 没人看就放慢几何核对，恢复检测 2s 一次足够（条带不在屏上，落位精度无感）。
+#[cfg(windows)]
+const HIDDEN_TICK_MS: u64 = 2000;
+/// 条带收起期间的循环睡眠：被压检测无从做起（条带不在屏上，任务栏压不到它），
+/// 不必 50ms 醒一次；200ms 醒来看是否该排下一拍即可。
+#[cfg(windows)]
+const HIDDEN_SLEEP_MS: u64 = 200;
+/// 高频检测节拍（毫秒）：只做「任务栏是否压在条带上」的只读 z 序检查，命中即排队
+/// 顶回。比完整拍快一个量级，把点击任务栏后条带被盖住的时间压到人眼难辨。
+#[cfg(windows)]
+const PRESS_CHECK_MS: u64 = 50;
 /// 条带与托盘区之间的间隙（逻辑像素，按 DPI 换算为物理像素）。
 #[cfg(windows)]
 const GAP_LOGICAL: f64 = 6.0;
@@ -62,6 +77,14 @@ struct Shared {
     size: Mutex<Option<(f64, f64)>>,
     /// 上一拍已生效的窗口状态（去重用，避免重复落位 / 重复发事件）。
     tick: Mutex<TickState>,
+    /// 小窗原生句柄（isize）缓存：供定位线程做只读 z 序检测。句柄在窗口生命周期内
+    /// 不变，故只在未缓存时写一次；窗口销毁（disable）时清空，防拿失效句柄乱找。
+    #[cfg(windows)]
+    hwnd: Mutex<Option<isize>>,
+    /// 条带当前是否收起（由 `apply_step` 的显隐分支维护，定位线程只读）：收起期间
+    /// 核对降频、被压检测停跑（见 `spawn_supervisor`）。
+    #[cfg(windows)]
+    hidden: AtomicBool,
 }
 
 #[derive(Default)]
@@ -79,6 +102,10 @@ static STATE: LazyLock<Shared> = LazyLock::new(|| Shared {
     stop: Mutex::new(None),
     size: Mutex::new(None),
     tick: Mutex::new(TickState::default()),
+    #[cfg(windows)]
+    hwnd: Mutex::new(None),
+    #[cfg(windows)]
+    hidden: AtomicBool::new(false),
 });
 
 /// `step()` 是否正在主线程上执行（可重入守卫）。
@@ -235,6 +262,7 @@ fn enable(app: &AppHandle) -> Result<(), String> {
         // 换了新窗口：等前端重新上报尺寸，并清掉旧的落位记录。
         *STATE.size.lock().unwrap() = None;
         *STATE.tick.lock().unwrap() = TickState::default();
+        *STATE.hwnd.lock().unwrap() = None;
     }
     let stop = Arc::new(AtomicBool::new(false));
     *STATE.stop.lock().unwrap() = Some(stop.clone());
@@ -256,6 +284,12 @@ fn disable(app: &AppHandle) {
     }
     *STATE.size.lock().unwrap() = None;
     *STATE.tick.lock().unwrap() = TickState::default();
+    #[cfg(windows)]
+    {
+        *STATE.hwnd.lock().unwrap() = None;
+        // 复位「收起」标志：下次启用的首个完整拍会重新判定，不停在降频分支。
+        STATE.hidden.store(false, Ordering::Relaxed);
+    }
 }
 
 fn stop_thread() {
@@ -264,7 +298,12 @@ fn stop_thread() {
     }
 }
 
-/// 定位线程：每秒唤醒主线程核对一次任务栏几何，按需挪位 / 显示 / 收起；disabled 后一拍内退出。
+/// 定位线程：完整核对（落位 / 显隐 / 主题）可见时每秒一次；另以 50ms 轻量检测盯着
+/// 「任务栏是否压在条带上」——点击任务栏（托盘区收展 / 任务栏空白）时 Windows 把任务栏
+/// 提到条带之上盖住它，等下一完整拍才顶回的话，实测被盖住 0.3~0.5s，肉眼就是一下闪烁。
+/// 检测命中即排队顶回，把被盖时间压到人眼难辨。disabled 后一拍内退出。
+/// 条带收起期间（任务栏自动隐藏 / 前台全屏 / explorer 重启间隙）没人看：完整核对降频到
+/// 2s 一拍，被压检测停跑（条带不在屏上，任务栏压不到它），循环睡眠放到 200ms。
 /// 可见性只由任务栏几何与前台全屏驱动——**与主窗口是否隐藏到托盘无关**：主窗口托盘
 /// 常驻时主面板停表（省 CPU 的既有优化），而本小窗是常驻监控，继续显示与刷新。
 ///
@@ -273,12 +312,29 @@ fn stop_thread() {
 /// （IPC / 窗口过程回调）也来取这把锁与 `STATE.tick`——两边跨线程反向取锁即 AB-BA 死锁
 /// （2026-10-13 休眠唤醒后实测：两线程互等，整应用 hung、托盘点不动）。
 /// 统一到主线程后，所有窗口操作与 `STATE.tick` 都在同一线程串行发生，锁序天然一致。
+/// 高频检测因此也只做只读 user32 调用（`pressed_by_taskbar`），不碰 tao 窗口 API。
 #[cfg(windows)]
 fn spawn_supervisor(app: AppHandle, stop: Arc<AtomicBool>) {
     std::thread::spawn(move || {
+        // 初始值拨到「已到点」：进线程立即做一次完整核对（同原行为）。
+        let mut next_full = std::time::Instant::now() - std::time::Duration::from_millis(TICK_MS);
         while !stop.load(Ordering::Relaxed) {
-            queue_step(&app);
-            std::thread::sleep(std::time::Duration::from_millis(TICK_MS));
+            if STATE.hidden.load(Ordering::Relaxed) {
+                if next_full.elapsed() >= std::time::Duration::from_millis(HIDDEN_TICK_MS) {
+                    next_full = std::time::Instant::now();
+                    queue_step(&app);
+                }
+                std::thread::sleep(std::time::Duration::from_millis(HIDDEN_SLEEP_MS));
+            } else {
+                if next_full.elapsed() >= std::time::Duration::from_millis(TICK_MS) {
+                    next_full = std::time::Instant::now();
+                    queue_step(&app);
+                }
+                if pressed_by_taskbar() {
+                    queue_step(&app);
+                }
+                std::thread::sleep(std::time::Duration::from_millis(PRESS_CHECK_MS));
+            }
         }
     });
 }
@@ -425,11 +481,27 @@ impl StepPlan {
     }
 }
 
+/// 缓存小窗原生句柄（供定位线程只读 z 序检测用）：句柄在窗口生命周期内不变，只在
+/// 未缓存时写一次。放在任何 `STATE` 锁之外调用——持锁写缓存会把锁序搞成嵌套。
+#[cfg(windows)]
+fn cache_hwnd(win: &tauri::WebviewWindow) {
+    let mut cached = STATE.hwnd.lock().unwrap();
+    if cached.is_none() {
+        if let Ok(hwnd) = win.hwnd() {
+            *cached = Some(hwnd.0 as isize);
+        }
+    }
+}
+
 /// 读任务栏几何与上一拍状态，算出本拍动作（持 `STATE.tick` 锁，不做任何窗口调用）。
 fn plan_step(app: &AppHandle) -> Option<(tauri::WebviewWindow, StepPlan)> {
     let Some(win) = app.get_webview_window(WIDGET_LABEL) else {
         return None; // 已禁用（窗口被销毁）；定位线程将在一拍内自行退出
     };
+    #[cfg(windows)]
+    {
+        cache_hwnd(&win);
+    }
     let Some((lw, lh)) = *STATE.size.lock().unwrap() else {
         return None; // 前端还没上报尺寸：窗口保持隐藏
     };
@@ -466,11 +538,13 @@ fn apply_step(app: &AppHandle, win: &tauri::WebviewWindow, plan: StepPlan) {
             let _w = crate::diag::cmd("widget_show");
             let _ = win.show();
             let _ = app.emit_to(WIDGET_LABEL, "taskbar-widget://visible", true);
+            STATE.hidden.store(false, Ordering::Relaxed);
         }
         Some(false) => {
             let _w = crate::diag::cmd("widget_hide");
             let _ = win.hide();
             let _ = app.emit_to(WIDGET_LABEL, "taskbar-widget://visible", false);
+            STATE.hidden.store(true, Ordering::Relaxed);
         }
         None => {}
     }
@@ -827,14 +901,53 @@ fn taskbar_is_light() -> Option<bool> {
     None // 小窗仅 Windows；兜底保持编译通过且不广播
 }
 
-/// 任务栏是否压在条带上方：点击任务栏会把 shell（含托盘弹出面板）提到置顶带最上层。
-/// 从本窗口沿 z 序向上最多找 32 个窗口，命中任务栏才重申置顶——面板弹出时不与之抢层。
+/// 任务栏是否压在条带之上：从本窗口沿 z 序向上最多找 32 个窗口，命中任务栏即算
+/// 「被压住」。托盘弹出面板（Wi-Fi/音量等）弹出时面板自身是直接上层、任务栏不在
+/// 近处，故不命中、不抢层。
+///
+/// 「被压住」的唯一定义处：`reassert_topmost`（完整拍里重申置顶）与
+/// `pressed_by_taskbar`（50ms 高频检测）共用同一判据，两处理解必须一致。
+#[cfg(windows)]
+fn taskbar_above(our: windows_sys::Win32::Foundation::HWND) -> bool {
+    use windows_sys::Win32::UI::WindowsAndMessaging::{FindWindowW, GetWindow, GW_HWNDPREV};
+
+    unsafe {
+        let bar = FindWindowW(windows_sys::w!("Shell_TrayWnd"), std::ptr::null_mut());
+        if bar.is_null() || bar == our {
+            return false;
+        }
+        let mut cur = our;
+        for _ in 0..32 {
+            let prev = GetWindow(cur, GW_HWNDPREV);
+            if prev.is_null() {
+                return false; // 已到顶：任务栏不在上方
+            }
+            if prev == bar {
+                return true;
+            }
+            cur = prev;
+        }
+        false
+    }
+}
+
+/// 50ms 高频检测用：任务栏此刻是否压在条带上（点击任务栏激活 shell 后的瞬时状态）。
+/// **只读** z 序、只碰 `STATE.hwnd` 一把独立锁，不调任何 tao 窗口 API——跨线程取
+/// 窗口锁会 AB-BA 死锁（见 `spawn_supervisor` 注释）。句柄未缓存（首拍未到）时跳过。
+#[cfg(windows)]
+fn pressed_by_taskbar() -> bool {
+    let Some(hwnd) = *STATE.hwnd.lock().unwrap() else {
+        return false;
+    };
+    taskbar_above(hwnd as windows_sys::Win32::Foundation::HWND)
+}
+
+/// 条带被任务栏压住时重申置顶（点击任务栏会把 shell 提到置顶带最上层）。
 #[cfg(windows)]
 fn reassert_topmost(win: &tauri::WebviewWindow) {
     use windows_sys::Win32::Foundation::HWND;
     use windows_sys::Win32::UI::WindowsAndMessaging::{
-        FindWindowW, GetWindow, SetWindowPos, GW_HWNDPREV, HWND_TOPMOST, SWP_NOACTIVATE,
-        SWP_NOMOVE, SWP_NOSIZE,
+        SetWindowPos, HWND_TOPMOST, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE,
     };
 
     let Ok(hwnd) = win.hwnd() else {
@@ -842,29 +955,16 @@ fn reassert_topmost(win: &tauri::WebviewWindow) {
     };
     let our = hwnd.0 as HWND;
     unsafe {
-        let bar = FindWindowW(windows_sys::w!("Shell_TrayWnd"), std::ptr::null());
-        if bar.is_null() || bar == our {
-            return;
-        }
-        let mut cur = our;
-        for _ in 0..32 {
-            let prev = GetWindow(cur, GW_HWNDPREV);
-            if prev.is_null() {
-                return; // 已到顶：无需处理
-            }
-            if prev == bar {
-                SetWindowPos(
-                    our,
-                    HWND_TOPMOST,
-                    0,
-                    0,
-                    0,
-                    0,
-                    SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE,
-                );
-                return;
-            }
-            cur = prev;
+        if taskbar_above(our) {
+            SetWindowPos(
+                our,
+                HWND_TOPMOST,
+                0,
+                0,
+                0,
+                0,
+                SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE,
+            );
         }
     }
 }
