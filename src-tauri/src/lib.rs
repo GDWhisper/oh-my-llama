@@ -189,7 +189,7 @@ pub struct ServerLogLine {
 }
 
 // ── 应用级设置（与服务器启动配置 ServerConfig 解耦）────────────────────
-// 当前含九项：
+// 包含以下各项：
 //  - update_proxy：留空 = 更新直连（不读任何代理环境变量）；填写 = 仅走用户显式指定的代理地址。
 //  - auto_check_updates：启动时是否自动检查更新（不打扰：仅弹右上提示+版本旁 NEW 徽标，
 //    绝不静默下载/安装；安装仍需用户在弹窗里显式确认）。
@@ -202,6 +202,9 @@ pub struct ServerLogLine {
 //    （前端 ?? true 兜底，保持原观感）；Some(true/false) = 用户在日志工具栏主动切换过。
 //  - ui_theme：界面风格。None = 未设置（前端按羊皮纸 parchment 渲染，保持当前默认观感）；
 //    Some("default"|"parchment") = 用户在设置界面选择过，前端据此写 html[data-theme]。
+//  - start_minimized：应用每次启动时主窗口是否以最小化状态打开。默认 false = 正常显示；
+//    true = run() 的 setup 阶段把主窗置为最小化（适合配合开机自启，不抢登录后的屏幕焦点）。
+//    真源就在本字段（与开机自启不同——那个的注册表才是真源），改动下次启动生效。
 //  - taskbar_metrics_enabled / taskbar_metrics_items / taskbar_metrics_style /
 //    taskbar_metrics_layout / taskbar_metrics_detailed：任务栏常驻性能小窗（仅 Windows）。
 //    默认关闭；items 是 taskbar_widget::ITEM_KEYS 的子集，缺省 = 全选四项；
@@ -227,6 +230,8 @@ pub struct AppSettings {
     pub show_log_times: Option<bool>,
     #[serde(default)]
     pub ui_theme: Option<String>,
+    #[serde(default)]
+    pub start_minimized: bool,
     #[serde(default)]
     pub taskbar_metrics_enabled: bool,
     #[serde(default = "default_taskbar_metrics_items")]
@@ -270,6 +275,7 @@ impl Default for AppSettings {
             minimize_to_tray: None,
             show_log_times: None,
             ui_theme: None,
+            start_minimized: false,
             taskbar_metrics_enabled: false,
             taskbar_metrics_items: default_taskbar_metrics_items(),
             taskbar_metrics_style: default_taskbar_metrics_style(),
@@ -380,6 +386,20 @@ async fn set_autostart(enabled: bool) -> Result<bool, String> {
     let exe = std::env::current_exe().map_err(|err| format!("无法定位应用路径: {err}"))?;
     autostart::set_enabled(enabled, &exe)?;
     Ok(autostart::is_enabled()?.unwrap_or(enabled))
+}
+
+// ── 启动时最小化 ────────────────────────────────────────────────────────
+// settings.json 里的普通持久化偏好（默认 false = 正常显示），本命令只负责落盘；
+// 真正的「最小化」动作在 run() 的 setup 阶段执行——启动时读一次，为真则把主窗置为
+// 最小化。故本命令无「立即生效」语义，改动下次启动生效。
+// 返回落盘后的完整设置，前端用它校准乐观回填（与 set_log_show_times 同款读-改-写）。
+#[tauri::command]
+async fn set_start_minimized(enabled: bool) -> Result<AppSettings, String> {
+    let app_data = resolve_app_data()?;
+    let mut settings = load_settings(&app_data);
+    settings.start_minimized = enabled;
+    save_settings_json(&app_data, &settings)?;
+    Ok(settings)
 }
 
 // ── 窗口关闭行为（最小化到托盘）────────────────────────────────────────
@@ -669,6 +689,7 @@ pub fn run() {
             set_ui_theme,
             get_autostart,
             set_autostart,
+            set_start_minimized,
             resolve_close_choice,
             set_tray_labels,
             get_system_metrics,
@@ -724,6 +745,18 @@ pub fn run() {
 
             // 任务栏性能小窗：设置里开着就随启动恢复（失败仅打日志，不拦启动）。
             taskbar_widget::init_on_startup(app.handle());
+
+            // 启动时最小化：读一次 settings.json（默认关闭），为真则把主窗置为最小化——
+            // 适合配合开机自启，不让随系统拉起的实例抢登录后的屏幕焦点。托盘「显示主窗口」
+            // 或任务栏点击均可还原；默认关闭时不动任何窗口状态。
+            let start_minimized = resolve_app_data()
+                .map(|dir| load_settings(&dir).start_minimized)
+                .unwrap_or(false);
+            if start_minimized {
+                if let Some(win) = app.get_webview_window("main") {
+                    let _ = win.minimize();
+                }
+            }
 
             // 开机自启条目自愈：已开启自启、但条目指向的不是当前这个可执行文件
             // （便携版挪了目录 / 换了安装位置）时静默改指——否则开机会去拉起一个不存在的
@@ -3251,6 +3284,7 @@ enabled_advanced_params = ["ctx_size"]
             minimize_to_tray: None,
             show_log_times: None,
             ui_theme: None,
+            start_minimized: false,
             taskbar_metrics_enabled: false,
             taskbar_metrics_items: default_taskbar_metrics_items(),
             taskbar_metrics_style: default_taskbar_metrics_style(),
@@ -3409,6 +3443,31 @@ enabled_advanced_params = ["ctx_size"]
         assert_eq!(loaded.taskbar_metrics_style, "transparent");
         assert_eq!(loaded.taskbar_metrics_layout, "double");
         assert!(loaded.taskbar_metrics_detailed);
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn start_minimized_round_trip_and_legacy_default() {
+        // 旧 settings.json 没有 start_minimized 字段：必须解析为 false（默认关闭 = 启动时正常
+        // 显示），不得因新增字段把已有设置整体丢掉。
+        let legacy: AppSettings =
+            serde_json::from_str(r#"{"update_proxy":"","auto_check_updates":false}"#)
+                .expect("parse legacy settings");
+        assert!(!legacy.start_minimized);
+        assert!(!AppSettings::default().start_minimized);
+
+        // true/false 落盘后原样读回（run() 的 setup 阶段读它决定启动时是否最小化主窗）。
+        let dir = std::env::temp_dir().join(format!("llama_startmin_test_{}", std::process::id()));
+        let _ = std::fs::create_dir_all(dir.join("OhMyLlama"));
+        for enabled in [true, false] {
+            let settings = AppSettings {
+                start_minimized: enabled,
+                ..AppSettings::default()
+            };
+            save_settings_json(&dir, &settings).expect("save settings");
+            assert_eq!(load_settings(&dir).start_minimized, enabled);
+        }
 
         let _ = std::fs::remove_dir_all(&dir);
     }

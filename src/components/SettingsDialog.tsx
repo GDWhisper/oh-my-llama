@@ -59,7 +59,7 @@ const sectionIcons = {
       <path d="M6.4 6.7l3.2 2.6M9.6 6.7l-3.2 2.6" />
     </svg>
   ),
-  autostart: (
+  startup: (
     <svg width="14" height="14" viewBox="0 0 16 16" aria-hidden="true">
       <path d="M8 1.9v5.3" />
       <path d="M12.4 4.2a5.7 5.7 0 1 1-8.8 0" />
@@ -92,7 +92,7 @@ interface Props {
 }
 
 // 设置浮窗：居中弹层，承载语言、界面风格、更新（版本 / 自动检查 / 代理）、关闭窗口行为、
-// 开机自启与关于六组设置。
+// 启动设置（开机自启 / 启动时最小化）与关于六组设置。
 // 复用公共 modal 遮罩与样式。
 export function SettingsDialog({
   open,
@@ -110,12 +110,15 @@ export function SettingsDialog({
   const [proxyError, setProxyError] = useState('');
   // 窗口关闭行为三态：null = 每次询问（未选择过的默认），true = 最小化到托盘，false = 直接退出。
   const [closePref, setClosePref] = useState<boolean | null>(null);
-  // 开机自启：true/false = 系统侧实况，null = 当前平台不支持（整张卡片不渲染）。
+  // 开机自启：true/false = 系统侧实况，null = 当前平台不支持（该行不渲染）。
   const [autostart, setAutostart] = useState<boolean | null>(null);
   const [autostartError, setAutostartError] = useState('');
+  // 启动时最小化：settings.json 里的布尔偏好，默认关闭（执行在后端启动阶段，下次启动生效）。
+  const [startMinimized, setStartMinimized] = useState(false);
+  const [startMinimizedError, setStartMinimizedError] = useState('');
   // 界面风格：null = 未设置（按羊皮纸渲染），'default' | 'parchment' = 用户选过。
   const [uiTheme, setUiTheme] = useState<UiTheme | null>(null);
-  // 任务栏性能小窗：null = 本平台不支持（整张卡片不渲染，同 autostart 模式）。
+  // 任务栏性能小窗：null = 本平台不支持（整张卡片不渲染）。
   const [taskbarMetrics, setTaskbarMetrics] = useState<{
     enabled: boolean;
     items: string[];
@@ -155,12 +158,14 @@ export function SettingsDialog({
     setProxySaved(false);
     setProxyError('');
     setTaskbarMetricsError('');
+    setStartMinimizedError('');
     invoke<AppSettings>('read_settings')
       .then((s) => {
         setProxy(s.update_proxy ?? '');
         setAutoCheck(Boolean(s.auto_check_updates));
         setClosePref(s.minimize_to_tray ?? null);
         setUiTheme(normalizeUiTheme(s.ui_theme));
+        setStartMinimized(Boolean(s.start_minimized));
         setTaskbarMetrics({
           enabled: Boolean(s.taskbar_metrics_enabled),
           items: s.taskbar_metrics_items ?? [],
@@ -175,6 +180,7 @@ export function SettingsDialog({
         setAutoCheck(false);
         setClosePref(null);
         setUiTheme('parchment');
+        setStartMinimized(false);
         setTaskbarMetrics({
           enabled: false,
           items: [],
@@ -237,6 +243,20 @@ export function SettingsDialog({
       .catch((e) => {
         setAutostart(prev);
         setAutostartError(String(e));
+      });
+  };
+
+  // 切换「启动时最小化」：乐观回填，再以后端返回值校准；写失败则回滚并就地提示。
+  // 本命令只落盘偏好，真正的最小化发生在下次启动（后端 setup 阶段读取执行）。
+  const saveStartMinimized = (enabled: boolean) => {
+    const prev = startMinimized;
+    setStartMinimized(enabled);
+    setStartMinimizedError('');
+    invoke<AppSettings>('set_start_minimized', { enabled })
+      .then((s) => setStartMinimized(Boolean(s.start_minimized)))
+      .catch((e) => {
+        setStartMinimized(prev);
+        setStartMinimizedError(String(e));
       });
   };
 
@@ -539,17 +559,18 @@ export function SettingsDialog({
               </div>
             </div>
             <div className="settings-column">
-              {/* 仅在本平台支持时渲染：不支持时后端返回 null，宁可不出卡片，
-              也不给一个点了必然报错的开关。默认关闭 = 从未勾选过时注册表无条目。 */}
-              {autostart !== null && (
-                <div className="settings-section">
-                  <div className="settings-section-head">
-                    <span className="settings-label">
-                      {sectionIcons.autostart}
-                      {t('settings.autostart')}
-                    </span>
-                    <span className="settings-hint">{t('settings.autostartHint')}</span>
-                  </div>
+              {/* 启动设置：开机自启仅在本平台支持时渲染该行（不支持时后端返回 null，
+              宁可不出这一行，也不给一个点了必然报错的开关；默认关闭 = 从未勾选过时
+              注册表无条目）。启动时最小化平台无关、始终可设，默认关闭。 */}
+              <div className="settings-section">
+                <div className="settings-section-head">
+                  <span className="settings-label">
+                    {sectionIcons.startup}
+                    {t('settings.startup')}
+                  </span>
+                  <span className="settings-hint">{t('settings.startupHint')}</span>
+                </div>
+                {autostart !== null && (
                   <label className="settings-option-row">
                     <input
                       type="checkbox"
@@ -559,9 +580,21 @@ export function SettingsDialog({
                     />
                     <span className="settings-check-label">{t('settings.autostartLabel')}</span>
                   </label>
-                  {autostartError && <div className="settings-proxy-err">{autostartError}</div>}
-                </div>
-              )}
+                )}
+                <label className="settings-option-row">
+                  <input
+                    type="checkbox"
+                    className="settings-checkbox"
+                    checked={startMinimized}
+                    onChange={(event) => saveStartMinimized(event.target.checked)}
+                  />
+                  <span className="settings-check-label">{t('settings.startMinimizedLabel')}</span>
+                </label>
+                {autostartError && <div className="settings-proxy-err">{autostartError}</div>}
+                {startMinimizedError && (
+                  <div className="settings-proxy-err">{startMinimizedError}</div>
+                )}
+              </div>
 
               {/* 仅 Windows 渲染（后端 get_taskbar_widget_support 为假时整卡不出现）：
               开关 + 要显示的参数复选 + 样式/排列单选。各项随时可改（关闭状态下也持久化），
