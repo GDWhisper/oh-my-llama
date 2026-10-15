@@ -538,12 +538,14 @@ fn apply_step(app: &AppHandle, win: &tauri::WebviewWindow, plan: StepPlan) {
             let _w = crate::diag::cmd("widget_show");
             let _ = win.show();
             let _ = app.emit_to(WIDGET_LABEL, "taskbar-widget://visible", true);
+            #[cfg(windows)]
             STATE.hidden.store(false, Ordering::Relaxed);
         }
         Some(false) => {
             let _w = crate::diag::cmd("widget_hide");
             let _ = win.hide();
             let _ = app.emit_to(WIDGET_LABEL, "taskbar-widget://visible", false);
+            #[cfg(windows)]
             STATE.hidden.store(true, Ordering::Relaxed);
         }
         None => {}
