@@ -202,9 +202,11 @@ pub struct ServerLogLine {
 //    （前端 ?? true 兜底，保持原观感）；Some(true/false) = 用户在日志工具栏主动切换过。
 //  - ui_theme：界面风格。None = 未设置（前端按羊皮纸 parchment 渲染，保持当前默认观感）；
 //    Some("default"|"parchment") = 用户在设置界面选择过，前端据此写 html[data-theme]。
-//  - start_minimized：应用每次启动时主窗口是否以最小化状态打开。默认 false = 正常显示；
-//    true = run() 的 setup 阶段把主窗置为最小化（适合配合开机自启，不抢登录后的屏幕焦点）。
-//    真源就在本字段（与开机自启不同——那个的注册表才是真源），改动下次启动生效。
+//  - start_hidden_to_tray：应用每次启动时主窗口是否隐藏到系统托盘（不显示、仅留托盘
+//    图标，与关闭行为 minimize_to_tray 的隐藏分支同款动作）。默认 false = 正常显示；
+//    true = run() 的 setup 阶段 hide() 主窗并广播 window://visible=false（适合配合
+//    开机自启，不让随系统拉起的实例露面）。真源就在本字段（与开机自启不同——那个的
+//    注册表才是真源），改动下次启动生效。
 //  - taskbar_metrics_enabled / taskbar_metrics_items / taskbar_metrics_style /
 //    taskbar_metrics_layout / taskbar_metrics_detailed：任务栏常驻性能小窗（仅 Windows）。
 //    默认关闭；items 是 taskbar_widget::ITEM_KEYS 的子集，缺省 = 全选四项；
@@ -231,7 +233,7 @@ pub struct AppSettings {
     #[serde(default)]
     pub ui_theme: Option<String>,
     #[serde(default)]
-    pub start_minimized: bool,
+    pub start_hidden_to_tray: bool,
     #[serde(default)]
     pub taskbar_metrics_enabled: bool,
     #[serde(default = "default_taskbar_metrics_items")]
@@ -275,7 +277,7 @@ impl Default for AppSettings {
             minimize_to_tray: None,
             show_log_times: None,
             ui_theme: None,
-            start_minimized: false,
+            start_hidden_to_tray: false,
             taskbar_metrics_enabled: false,
             taskbar_metrics_items: default_taskbar_metrics_items(),
             taskbar_metrics_style: default_taskbar_metrics_style(),
@@ -388,16 +390,17 @@ async fn set_autostart(enabled: bool) -> Result<bool, String> {
     Ok(autostart::is_enabled()?.unwrap_or(enabled))
 }
 
-// ── 启动时最小化 ────────────────────────────────────────────────────────
+// ── 启动时隐藏到托盘 ───────────────────────────────────────────────────
 // settings.json 里的普通持久化偏好（默认 false = 正常显示），本命令只负责落盘；
-// 真正的「最小化」动作在 run() 的 setup 阶段执行——启动时读一次，为真则把主窗置为
-// 最小化。故本命令无「立即生效」语义，改动下次启动生效。
+// 真正的「隐藏」动作在 run() 的 setup 阶段执行——启动时读一次，为真则把主窗 hide()
+// （不显示、仅留托盘图标，与关闭行为 minimize_to_tray 的隐藏分支同款）。故本命令
+// 无「立即生效」语义，改动下次启动生效。
 // 返回落盘后的完整设置，前端用它校准乐观回填（与 set_log_show_times 同款读-改-写）。
 #[tauri::command]
-async fn set_start_minimized(enabled: bool) -> Result<AppSettings, String> {
+async fn set_start_hidden_to_tray(enabled: bool) -> Result<AppSettings, String> {
     let app_data = resolve_app_data()?;
     let mut settings = load_settings(&app_data);
-    settings.start_minimized = enabled;
+    settings.start_hidden_to_tray = enabled;
     save_settings_json(&app_data, &settings)?;
     Ok(settings)
 }
@@ -689,9 +692,10 @@ pub fn run() {
             set_ui_theme,
             get_autostart,
             set_autostart,
-            set_start_minimized,
+            set_start_hidden_to_tray,
             resolve_close_choice,
             set_tray_labels,
+            get_main_window_visible,
             get_system_metrics,
             set_taskbar_metrics,
             taskbar_widget_ready,
@@ -746,15 +750,18 @@ pub fn run() {
             // 任务栏性能小窗：设置里开着就随启动恢复（失败仅打日志，不拦启动）。
             taskbar_widget::init_on_startup(app.handle());
 
-            // 启动时最小化：读一次 settings.json（默认关闭），为真则把主窗置为最小化——
-            // 适合配合开机自启，不让随系统拉起的实例抢登录后的屏幕焦点。托盘「显示主窗口」
-            // 或任务栏点击均可还原；默认关闭时不动任何窗口状态。
-            let start_minimized = resolve_app_data()
-                .map(|dir| load_settings(&dir).start_minimized)
+            // 启动时隐藏到托盘：读一次 settings.json（默认关闭），为真则把主窗直接
+            // hide()——不显示、仅留托盘图标，适合配合开机自启，不让随系统拉起的实例露面。
+            // 托盘「显示主窗口」可还原；默认关闭时不动任何窗口状态。hide() 后的广播照发
+            // （见 emit_window_visible 的硬性约定）：启动阶段虽早于前端监听必然收不到，
+            // 前端挂载后有 get_main_window_visible 实况对齐兜底。
+            let start_hidden = resolve_app_data()
+                .map(|dir| load_settings(&dir).start_hidden_to_tray)
                 .unwrap_or(false);
-            if start_minimized {
+            if start_hidden {
                 if let Some(win) = app.get_webview_window("main") {
-                    let _ = win.minimize();
+                    let _ = win.hide();
+                    emit_window_visible(app.handle(), false);
                 }
             }
 
@@ -981,6 +988,17 @@ fn show_main_window(app: &AppHandle) {
         let _ = win.set_focus();
         emit_window_visible(app, true);
     }
+}
+
+// 主窗口当前是否可见（hide/show 的实况）：前端挂载时用它对齐初始状态——启动即「隐藏
+// 到托盘」时，window://visible 广播早于前端监听建立、必然收不到。取不到窗口或查询
+// 失败一律按「可见」返回：前端据此维持正常刷新，比误判停表安全。
+#[tauri::command]
+async fn get_main_window_visible(app: AppHandle) -> Result<bool, String> {
+    Ok(app
+        .get_webview_window("main")
+        .map(|win| win.is_visible().unwrap_or(true))
+        .unwrap_or(true))
 }
 
 /// 主窗口原生句柄（诊断看门狗的探测目标）；取不到返回 None。
@@ -3284,7 +3302,7 @@ enabled_advanced_params = ["ctx_size"]
             minimize_to_tray: None,
             show_log_times: None,
             ui_theme: None,
-            start_minimized: false,
+            start_hidden_to_tray: false,
             taskbar_metrics_enabled: false,
             taskbar_metrics_items: default_taskbar_metrics_items(),
             taskbar_metrics_style: default_taskbar_metrics_style(),
@@ -3448,25 +3466,25 @@ enabled_advanced_params = ["ctx_size"]
     }
 
     #[test]
-    fn start_minimized_round_trip_and_legacy_default() {
-        // 旧 settings.json 没有 start_minimized 字段：必须解析为 false（默认关闭 = 启动时正常
-        // 显示），不得因新增字段把已有设置整体丢掉。
+    fn start_hidden_to_tray_round_trip_and_legacy_default() {
+        // 旧 settings.json 没有 start_hidden_to_tray 字段：必须解析为 false（默认关闭 =
+        // 启动时正常显示），不得因新增字段把已有设置整体丢掉。
         let legacy: AppSettings =
             serde_json::from_str(r#"{"update_proxy":"","auto_check_updates":false}"#)
                 .expect("parse legacy settings");
-        assert!(!legacy.start_minimized);
-        assert!(!AppSettings::default().start_minimized);
+        assert!(!legacy.start_hidden_to_tray);
+        assert!(!AppSettings::default().start_hidden_to_tray);
 
-        // true/false 落盘后原样读回（run() 的 setup 阶段读它决定启动时是否最小化主窗）。
-        let dir = std::env::temp_dir().join(format!("llama_startmin_test_{}", std::process::id()));
+        // true/false 落盘后原样读回（run() 的 setup 阶段读它决定启动时是否隐藏主窗）。
+        let dir = std::env::temp_dir().join(format!("llama_starthide_test_{}", std::process::id()));
         let _ = std::fs::create_dir_all(dir.join("OhMyLlama"));
         for enabled in [true, false] {
             let settings = AppSettings {
-                start_minimized: enabled,
+                start_hidden_to_tray: enabled,
                 ..AppSettings::default()
             };
             save_settings_json(&dir, &settings).expect("save settings");
-            assert_eq!(load_settings(&dir).start_minimized, enabled);
+            assert_eq!(load_settings(&dir).start_hidden_to_tray, enabled);
         }
 
         let _ = std::fs::remove_dir_all(&dir);
