@@ -632,6 +632,7 @@ export const zh = {
   'settings.taskbarMetricsDetailsHint': '内存/显存额外显示已用·总量（GB）。',
   'settings.taskbarMetricsDetailed': '显示具体数据',
   'tray.show': '显示主窗口',
+  'tray.metrics': '性能监控',
   'tray.quit': '退出',
   'tray.promptTitle': '要退出还是最小化到托盘？',
   'tray.promptBody':
@@ -1298,6 +1299,7 @@ export const en: Record<MessageKey, string> = {
   'settings.taskbarMetricsDetailsHint': 'Memory and VRAM also show used/total in GB.',
   'settings.taskbarMetricsDetailed': 'Show concrete values',
   'tray.show': 'Show Main Window',
+  'tray.metrics': 'Performance Monitor',
   'tray.quit': 'Quit',
   'tray.promptTitle': 'Quit or minimize to tray?',
   'tray.promptBody':

@@ -9,6 +9,7 @@ import { Button } from './Button';
 import type { AppSettings, UiTheme } from '../types';
 import type { PendingUpdate } from '../hooks/useUpdater';
 import { applyUiTheme, normalizeUiTheme } from '../lib/uiTheme';
+import { listenGuarded } from '../lib/listenGuarded';
 
 // 任务栏小窗的可勾选参数：键与后端 taskbar_widget::ITEM_KEYS 对齐，顺序即小窗显示顺序。
 const TASKBAR_ITEMS: Array<{ key: string; label: MessageKey }> = [
@@ -190,6 +191,28 @@ export function SettingsDialog({
         });
       });
   }, [open]);
+
+  // 托盘菜单「性能监控」开关与设置面板同一真源：托盘改开关时后端广播事件，
+  // 此处对齐本地 enabled。不同步的话，面板显示陈旧开关，随后改样式/排列会把
+  // 陈旧 enabled 一起写回，把用户刚从托盘关掉的小窗又打开。
+  useEffect(() => {
+    let disposed = false;
+    let unlisten: (() => void) | undefined;
+    listenGuarded<boolean>(
+      'taskbar-metrics://enabled',
+      (enabled) => {
+        setTaskbarMetrics((prev) => (prev ? { ...prev, enabled } : prev));
+      },
+      () => disposed,
+    ).then((u) => {
+      if (disposed) u?.();
+      else unlisten = u;
+    });
+    return () => {
+      disposed = true;
+      unlisten?.();
+    };
+  }, []);
 
   // 打开时实查本平台是否支持任务栏小窗（仅 Windows）。不支持则整卡不渲染。
   useEffect(() => {

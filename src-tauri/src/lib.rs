@@ -7,12 +7,12 @@ use std::net::{IpAddr, SocketAddr, TcpListener, TcpStream, UdpSocket};
 #[cfg(windows)]
 use std::os::windows::process::CommandExt;
 use std::str::FromStr;
-use std::sync::LazyLock;
+use std::sync::{LazyLock, Mutex};
 use std::time::Duration;
 use sysinfo::System;
-use tauri::menu::{Menu, MenuItem};
+use tauri::menu::{CheckMenuItem, IsMenuItem, Menu, MenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
-use tauri::{AppHandle, Emitter, Manager};
+use tauri::{AppHandle, Emitter, Manager, Wry};
 use tauri_plugin_opener::OpenerExt;
 #[cfg(windows)]
 use windows_sys::Win32::Foundation::{CloseHandle, HANDLE};
@@ -247,7 +247,7 @@ pub struct AppSettings {
 }
 
 /// 勾选项缺省 = 全选四项（与设置卡片里四项默认勾选一致）。
-fn default_taskbar_metrics_items() -> Vec<String> {
+pub(crate) fn default_taskbar_metrics_items() -> Vec<String> {
     taskbar_widget::ITEM_KEYS
         .iter()
         .map(|key| (*key).to_string())
@@ -475,19 +475,80 @@ async fn resolve_close_choice(
 }
 
 // 托盘菜单文案下发：i18n 真源在前端 messages.ts，语言切换/启动时由前端调用。
-// 按 ID 重建菜单（事件 handler 挂在托盘上，与菜单实例无关），未就绪时静默跳过。
+// 三段文案（显示主窗口 / 性能监控 / 退出）按 ID 重建菜单（事件 handler 挂在托盘上，
+// 与菜单实例无关），未就绪时静默跳过。复选项勾选态在 build_tray_menu 内读持久化真源。
 #[tauri::command]
-async fn set_tray_labels(app: AppHandle, show: String, quit: String) -> Result<(), String> {
+async fn set_tray_labels(
+    app: AppHandle,
+    show: String,
+    quit: String,
+    metrics: String,
+) -> Result<(), String> {
     let Some(tray) = app.tray_by_id(TRAY_ID) else {
         return Ok(());
     };
-    let show_item = MenuItem::with_id(&app, TRAY_ID_SHOW, &show, true, None::<&str>)
-        .map_err(|e| e.to_string())?;
-    let quit_item = MenuItem::with_id(&app, TRAY_ID_QUIT, &quit, true, None::<&str>)
-        .map_err(|e| e.to_string())?;
-    let menu = Menu::with_items(&app, &[&show_item, &quit_item]).map_err(|e| e.to_string())?;
+    let menu = build_tray_menu(&app, &show, &quit, &metrics)?;
     tray.set_menu(Some(menu)).map_err(|err| err.to_string())?;
     Ok(())
+}
+
+/// 建托盘菜单：显示主窗口 / 性能监控 / 退出三段。「性能监控」是复选项，勾选态读
+/// settings.json 真源（与设置面板同名开关同一真源）；仅 Windows 建这一项——任务栏
+/// 小窗本身仅 Windows 提供，其余平台点了必然报错，宁可不出（与设置卡片同款门控）。
+/// 建项时把句柄存进 TRAY_METRICS_ITEM，供后续对齐勾选。文案由调用方传入。
+fn build_tray_menu<M: Manager<Wry>>(
+    app: &M,
+    show: &str,
+    quit: &str,
+    metrics: &str,
+) -> Result<Menu<Wry>, String> {
+    let show_item = MenuItem::with_id(app, TRAY_ID_SHOW, show, true, None::<&str>)
+        .map_err(|e| e.to_string())?;
+    let quit_item = MenuItem::with_id(app, TRAY_ID_QUIT, quit, true, None::<&str>)
+        .map_err(|e| e.to_string())?;
+    let mut items: Vec<&dyn IsMenuItem<Wry>> = vec![&show_item, &quit_item];
+    let metrics_item;
+    if cfg!(windows) {
+        metrics_item = CheckMenuItem::with_id(
+            app,
+            TRAY_ID_METRICS,
+            metrics,
+            true,
+            taskbar_metrics_enabled(),
+            None::<&str>,
+        )
+        .map_err(|e| e.to_string())?;
+        items.insert(1, &metrics_item);
+        *TRAY_METRICS_ITEM.lock().unwrap() = Some(metrics_item.clone());
+    }
+    Menu::with_items(app, &items).map_err(|e| e.to_string())
+}
+
+/// 任务栏小窗开关的持久化真源（读 settings.json；读失败按关）。托盘菜单勾选态与
+/// 设置卡片开关最终都以它为准。
+fn taskbar_metrics_enabled() -> bool {
+    resolve_app_data()
+        .map(|dir| load_settings(&dir).taskbar_metrics_enabled)
+        .unwrap_or(false)
+}
+
+/// 把托盘菜单「性能监控」的勾选态对齐到 settings.json：设置面板改开关、托盘点击
+/// 切换（落盘后）都经此同步。菜单尚未建立（前端未推送文案 / 非 Windows）时句柄为
+/// None，无事可做。
+pub(crate) fn sync_tray_metrics_check() {
+    if let Some(item) = TRAY_METRICS_ITEM.lock().unwrap().as_ref() {
+        let _ = item.set_checked(taskbar_metrics_enabled());
+    }
+}
+
+/// 托盘「性能监控」点击：翻转任务栏小窗开关（与设置面板同名开关同一真源、同一
+/// 生效路径，勾选 / 样式 / 排列 / 详细数据沿用现值）。muda 在派发事件前已翻转
+/// 原生勾选，故落盘或建窗失败时要翻回去，不让菜单显示与真实状态不符。
+fn toggle_taskbar_metrics_tray(app: &AppHandle) {
+    if let Err(err) = taskbar_widget::toggle(app) {
+        eprintln!("[taskbar-widget] 托盘切换性能监控失败: {err}");
+        sync_tray_metrics_check();
+    }
 }
 
 // ── 路径历史（最近使用）───────────────────────────────────────────────
@@ -705,11 +766,10 @@ pub fn run() {
         ])
         .setup(|app| {
             // ── 系统托盘 ────────────────────────────────────────────────
-            // 左键单击 = 显示主窗口；右键 = 菜单（显示/退出）。菜单文案的 i18n 真源在前端，
-            // 启动后由 set_tray_labels 按 t() 下发，此处英文仅为前端尚未就绪时的兜底。
-            let show_item = MenuItem::with_id(app, TRAY_ID_SHOW, "Show", true, None::<&str>)?;
-            let quit_item = MenuItem::with_id(app, TRAY_ID_QUIT, "Quit", true, None::<&str>)?;
-            let tray_menu = Menu::with_items(app, &[&show_item, &quit_item])?;
+            // 左键单击 = 显示主窗口；右键 = 菜单（显示主窗口 / 性能监控 / 退出）。
+            // 菜单文案的 i18n 真源在前端，启动后由 set_tray_labels 按 t() 下发，
+            // 此处英文仅为前端尚未就绪时的兜底。
+            let tray_menu = build_tray_menu(app, "Show", "Quit", "Metrics")?;
             TrayIconBuilder::with_id(TRAY_ID)
                 .icon(
                     app.default_window_icon()
@@ -722,6 +782,7 @@ pub fn run() {
                 .show_menu_on_left_click(false)
                 .on_menu_event(|app, event| match event.id.as_ref() {
                     id if id == TRAY_ID_SHOW => show_main_window(app),
+                    id if id == TRAY_ID_METRICS => toggle_taskbar_metrics_tray(app),
                     id if id == TRAY_ID_QUIT => graceful_exit(app),
                     _ => {}
                 })
@@ -811,7 +872,14 @@ pub fn run() {
 // ── 托盘与退出路径 ─────────────────────────────────────────────────────
 const TRAY_ID: &str = "main-tray";
 const TRAY_ID_SHOW: &str = "tray-show";
+const TRAY_ID_METRICS: &str = "tray-metrics";
 const TRAY_ID_QUIT: &str = "tray-quit";
+
+// 「性能监控」复选项句柄：build_tray_menu 每次建菜单时换新（菜单按 ID 重建，旧句柄
+// 随之释放），设置面板 / 托盘点击改开关后由 sync_tray_metrics_check 对齐勾选态。
+// 非 Windows 不建这一项，句柄恒为 None。
+static TRAY_METRICS_ITEM: LazyLock<Mutex<Option<CheckMenuItem<Wry>>>> =
+    LazyLock::new(|| Mutex::new(None));
 
 // ── 任务栏 / 缩略图预览 / 托盘图标：按 DPI 喂「精确尺寸」的图 ──────────────
 //
@@ -3488,6 +3556,35 @@ enabled_advanced_params = ["ctx_size"]
         }
 
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn tray_toggle_next_state() {
+        // 关 → 开：勾选沿用现值；勾选为空（此前被全部取消过）时回落默认全选，
+        // 否则空勾选会被 apply 按「无内容」关回，托盘菜单看着像「点了没反应」。
+        let off = AppSettings::default();
+        assert!(!off.taskbar_metrics_enabled);
+        let (enabled, items) = taskbar_widget::next_toggle_state(&off);
+        assert!(enabled);
+        assert_eq!(items, default_taskbar_metrics_items());
+
+        let off_empty = AppSettings {
+            taskbar_metrics_items: Vec::new(),
+            ..AppSettings::default()
+        };
+        let (enabled, items) = taskbar_widget::next_toggle_state(&off_empty);
+        assert!(enabled);
+        assert_eq!(items, default_taskbar_metrics_items());
+
+        // 开 → 关：只翻开关，勾选原样带回（用户下次重开时还是原来选的那几项）。
+        let on = AppSettings {
+            taskbar_metrics_enabled: true,
+            taskbar_metrics_items: vec!["cpu".to_string(), "vram".to_string()],
+            ..AppSettings::default()
+        };
+        let (enabled, items) = taskbar_widget::next_toggle_state(&on);
+        assert!(!enabled);
+        assert_eq!(items, vec!["cpu".to_string(), "vram".to_string()]);
     }
 
     #[test]

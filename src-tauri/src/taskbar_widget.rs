@@ -144,16 +144,15 @@ struct WidgetSettings {
 
 /// 开关 / 勾选项 / 样式 / 排列 / 详细数据落盘并立即生效：开启时确保小窗存在并启动
 /// 定位线程，关闭时销毁小窗。返回落盘后的全量设置（前端以后端返回值校准，与其它设置命令一致）。
-#[tauri::command]
-pub async fn set_taskbar_metrics(
-    app: AppHandle,
+/// 设置面板命令与托盘菜单开关共用同一核心（托盘入口见 toggle）。
+fn apply(
+    app: &AppHandle,
     enabled: bool,
     items: Vec<String>,
     style: String,
     layout: String,
     detailed: bool,
 ) -> Result<AppSettings, String> {
-    let _g = crate::diag::cmd("cmd_set_taskbar_metrics");
     let items = normalize_items(&items)?;
     // style/layout 宽松归一化（未知值落回默认）：settings.json 可被手改，也可能来自更新版本。
     let style = normalize_style(&style).to_string();
@@ -164,9 +163,9 @@ pub async fn set_taskbar_metrics(
     // 先做运行时生效、再落盘：启用失败（平台不支持/建窗失败）不留下「已开启」的设置，
     // 否则下次启动会反复尝试恢复一个起不来的小窗。
     if enabled {
-        enable(&app)?;
+        enable(app)?;
     } else {
-        disable(&app);
+        disable(app);
     }
 
     let app_data = resolve_app_data()?;
@@ -190,7 +189,55 @@ pub async fn set_taskbar_metrics(
             detailed: settings.taskbar_metrics_detailed,
         },
     );
+    // 托盘「性能监控」复选对齐：开关有两个入口（设置面板 / 托盘菜单），都经此同步。
+    crate::sync_tray_metrics_check();
+    // 同时广播给已打开的设置浮窗：托盘改的开关它看不到，不对齐本地 enabled 的话，
+    // 随后改样式/排列会把陈旧 enabled 一起写回，把用户刚从托盘关掉的小窗又打开。
+    let _ = app.emit("taskbar-metrics://enabled", enabled);
     Ok(settings)
+}
+
+#[tauri::command]
+pub async fn set_taskbar_metrics(
+    app: AppHandle,
+    enabled: bool,
+    items: Vec<String>,
+    style: String,
+    layout: String,
+    detailed: bool,
+) -> Result<AppSettings, String> {
+    let _g = crate::diag::cmd("cmd_set_taskbar_metrics");
+    apply(&app, enabled, items, style, layout, detailed)
+}
+
+/// 托盘菜单开关：翻转持久化开关态，勾选 / 样式 / 排列 / 详细数据沿用现值。
+/// 与设置面板的开关同走 apply（同一真源、同一生效路径）。
+pub fn toggle(app: &AppHandle) -> Result<(), String> {
+    let _g = crate::diag::cmd("cmd_tray_toggle_metrics");
+    let app_data = resolve_app_data()?;
+    let settings = load_settings(&app_data);
+    let (enabled, items) = next_toggle_state(&settings);
+    apply(
+        app,
+        enabled,
+        items,
+        settings.taskbar_metrics_style,
+        settings.taskbar_metrics_layout,
+        settings.taskbar_metrics_detailed,
+    )
+    .map(|_| ())
+}
+
+/// 托盘点击后的目标状态：开关取反；勾选为空（此前被全部取消过）时回落默认全选——
+/// 空勾选 = 无内容可显示，直接开会被 apply 按关闭处理，菜单勾选态随之翻回，
+/// 用户看到「点了没反应」（设置面板勾掉最后一项后重开同款语义）。
+pub(crate) fn next_toggle_state(settings: &AppSettings) -> (bool, Vec<String>) {
+    let items = if settings.taskbar_metrics_items.is_empty() {
+        crate::default_taskbar_metrics_items()
+    } else {
+        settings.taskbar_metrics_items.clone()
+    };
+    (!settings.taskbar_metrics_enabled, items)
 }
 
 /// 前端量出的条带逻辑尺寸（CSS px）：窗口尺寸与位置到此才校准并首次显示。
