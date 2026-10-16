@@ -604,10 +604,11 @@ export const zh = {
   'settings.windowCloseAsk': '每次询问',
   'settings.windowCloseTray': '最小化到系统托盘',
   'settings.windowCloseQuit': '直接退出应用',
-  // 开机自启（登录时运行）
-  'settings.autostart': '开机自启动',
-  'settings.autostartHint': '登录系统后自动运行本应用。',
+  // 启动设置（开机自启 / 启动时隐藏到托盘）
+  'settings.startup': '启动设置',
+  'settings.startupHint': '开机自启与启动时的窗口行为。',
   'settings.autostartLabel': '开机时自动运行',
+  'settings.startHiddenToTrayLabel': '启动时隐藏到托盘',
   // 任务栏性能小窗（仅 Windows；设置卡片在其余平台整卡不渲染）
   'settings.taskbarMetrics': '任务栏性能显示',
   'settings.taskbarMetricsHint': '性能小窗常驻在任务栏上（仅 Windows）。',
@@ -631,6 +632,7 @@ export const zh = {
   'settings.taskbarMetricsDetailsHint': '内存/显存额外显示已用·总量（GB）。',
   'settings.taskbarMetricsDetailed': '显示具体数据',
   'tray.show': '显示主窗口',
+  'tray.metrics': '性能监控',
   'tray.quit': '退出',
   'tray.promptTitle': '要退出还是最小化到托盘？',
   'tray.promptBody':
@@ -1267,10 +1269,11 @@ export const en: Record<MessageKey, string> = {
   'settings.windowCloseAsk': 'Ask every time',
   'settings.windowCloseTray': 'Minimize to system tray',
   'settings.windowCloseQuit': 'Quit the application',
-  // Launch at login
-  'settings.autostart': 'Launch at Login',
-  'settings.autostartHint': 'Automatically run the app after you sign in.',
+  // Startup settings (launch at login / start hidden to tray)
+  'settings.startup': 'Startup Settings',
+  'settings.startupHint': 'Launch at login and window behavior on startup.',
   'settings.autostartLabel': 'Launch automatically at login',
+  'settings.startHiddenToTrayLabel': 'Start hidden to tray',
   // Taskbar metrics strip (Windows only; the settings card is hidden elsewhere)
   'settings.taskbarMetrics': 'Taskbar Metrics',
   'settings.taskbarMetricsHint': 'A performance strip docked on the taskbar (Windows only).',
@@ -1296,6 +1299,7 @@ export const en: Record<MessageKey, string> = {
   'settings.taskbarMetricsDetailsHint': 'Memory and VRAM also show used/total in GB.',
   'settings.taskbarMetricsDetailed': 'Show concrete values',
   'tray.show': 'Show Main Window',
+  'tray.metrics': 'Performance Monitor',
   'tray.quit': 'Quit',
   'tray.promptTitle': 'Quit or minimize to tray?',
   'tray.promptBody':

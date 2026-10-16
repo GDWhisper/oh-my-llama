@@ -4,6 +4,17 @@
 
 > 本文件为**详细改动历史**（含涉及的文件与实现机制）；GitHub Release 页面为对应版本的**总结性**说明。
 
+## [0.2.12] - 2026-10-16
+
+### 新增功能
+- **托盘菜单「性能监控」复选开关**：`src-tauri/src/lib.rs` 新增 `TRAY_ID_METRICS` 菜单项与 `build_tray_menu`——托盘菜单由两段（显示主窗口 / 退出）扩为三段，「性能监控」是 `CheckMenuItem`，仅 Windows 建这一项（任务栏小窗本身仅 Windows 提供，其余平台点了必然报错，与设置卡片同款门控）；勾选态在 `build_tray_menu` 内读 `settings.json` 持久化真源（`taskbar_metrics_enabled`，读失败按关），与设置面板同名开关同一真源。`set_tray_labels` 命令加 `metrics` 参数下发文案（`src/i18n/messages.ts` 补 `tray.metrics` 中英键，`src/App.tsx` 的 `useEffect` 随语言切换重新下发，后端未就绪时静默忽略）。点击托盘菜单项走 `toggle_taskbar_metrics_tray` → `taskbar_widget::toggle`（`src-tauri/src/taskbar_widget.rs` 把 `set_taskbar_metrics` 的「归一化 → 运行时生效 → 落盘」核心抽为 `apply`，托盘入口与设置面板命令共用同一生效路径；`next_toggle_state` 算目标状态：开关取反，勾选为空（此前被全部取消过）时回落 `default_taskbar_metrics_items` 默认全选——空勾选 = 无内容可显示，直接开会被 apply 按关闭处理、菜单勾选态随之翻回，用户看到「点了没反应」，与设置面板勾掉最后一项后重开同款语义）。勾选态对齐走 `sync_tray_metrics_check`（`TRAY_METRICS_ITEM` 静态句柄存最新 `CheckMenuItem`，`build_tray_menu` 每次建菜单时换新，旧句柄随菜单释放）；`apply` 落盘后 `emit("taskbar-metrics://enabled")` 广播，`src/components/SettingsDialog.tsx` 用 `listenGuarded` 监听并对齐本地 `enabled`——不同步的话，托盘改的开关设置浮窗看不到，随后改样式 / 排列会把陈旧 `enabled` 一起写回，把用户刚从托盘关掉的小窗又打开。新增单测 `tray_toggle_next_state`（关→开沿用勾选 / 空勾选回落默认全选；开→关只翻开关、勾选原样带回）。
+
+### 功能优化
+- 无
+
+### Bug 修复
+- 无
+
 ## [0.2.11] - 2026-10-15
 
 ### 新增功能

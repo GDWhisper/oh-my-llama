@@ -115,6 +115,8 @@ export interface PerfSnapshot {
 // true = 显示，false = 隐藏（隐藏时时间列宽度让给日志正文）。
 // ui_theme = 界面风格：null = 未设置（按羊皮纸 parchment 渲染）；
 // 'default' | 'parchment' = 用户在设置里选择过。
+// start_hidden_to_tray = 启动时隐藏到托盘：false（默认）= 应用启动时正常显示主窗口；
+// true = 启动阶段后端把主窗隐藏到托盘（不显示、仅留托盘图标，改动下次启动生效）。
 export interface AppSettings {
   update_proxy: string;
   auto_check_updates: boolean;
@@ -123,6 +125,7 @@ export interface AppSettings {
   minimize_to_tray: boolean | null;
   show_log_times: boolean | null;
   ui_theme: string | null;
+  start_hidden_to_tray: boolean;
   // 任务栏常驻性能小窗（仅 Windows）：开关 + 勾选参数（taskbar_widget::ITEM_KEYS 子集）
   // + 样式（default | transparent）、排列（single | double）与详细数据（内存/显存显示已用/总量 GB）。
   taskbar_metrics_enabled: boolean;

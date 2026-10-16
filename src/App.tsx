@@ -228,8 +228,13 @@ export default function App() {
 
   // 托盘菜单文案：i18n 真源在前端，语言切换时（t 仅随 lang 变化）重新下发。
   // 后端在托盘尚未就绪时静默忽略；StrictMode 双挂载重复 invoke 幂等无害。
+  // 「性能监控」是复选项：勾选态由后端读 settings.json 真源，此处只下发文案。
   useEffect(() => {
-    invoke('set_tray_labels', { show: t('tray.show'), quit: t('tray.quit') }).catch(() => {});
+    invoke('set_tray_labels', {
+      show: t('tray.show'),
+      metrics: t('tray.metrics'),
+      quit: t('tray.quit'),
+    }).catch(() => {});
   }, [t]);
 
   // 关闭行为询问：用户未选择过关闭偏好时，点窗口 X 由后端 emit 触发。
