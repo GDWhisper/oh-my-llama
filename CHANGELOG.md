@@ -4,6 +4,17 @@
 
 > 本文件为**详细改动历史**（含涉及的文件与实现机制）；GitHub Release 页面为对应版本的**总结性**说明。
 
+## [0.2.13] - 2026-10-27
+
+### 新增功能
+- 无
+
+### 功能优化
+- 无
+
+### Bug 修复
+- **应用可重复启动出多个实例**：此前没有任何单实例守卫，每次启动都会新建一整套主窗口、托盘图标与任务栏小窗，并共用 `settings.json` / `configs.toml`（整体读-改-写会互相覆盖）与 llama-server 端口。`src-tauri/Cargo.toml` 新增官方 `tauri-plugin-single-instance`；`src-tauri/src/lib.rs` 的 `run()` 在 release 构建中把该插件注册为第一个插件——第二实例把参数转发给首实例后退出，回调调用 `show_main_window()` 唤起已运行实例的主窗，`start_hidden_to_tray` 开着时也能把隐藏窗口带出来。dev 构建（`debug_assertions`）刻意不注册：插件互斥名基于 identifier，dev 与安装版共用同一 identifier，若 dev 也参与会与正式版互抢，开发时无法同时跑两个实例。
+
 ## [0.2.12] - 2026-10-16
 
 ### 新增功能
