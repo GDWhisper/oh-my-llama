@@ -21,6 +21,10 @@ tauri-build = { version = "2", features = [] }
 tauri = { version = "2", features = ["tray-icon"] }
 tauri-plugin-opener = "2"
 tauri-plugin-dialog = "2"
+# 单实例守卫：第二次启动把参数转给已运行实例并退出，回调里唤起主窗口。
+# 仅 release 构建注册（见 lib.rs run()）：互斥名基于 identifier，dev 与安装版
+# 共用同一 identifier，若 dev 也参与会与正式版互抢，开发时无法同时跑两个实例。
+tauri-plugin-single-instance = "2"
 # 内置自动更新（方案 A）：check/download/install 由前端经 JS API 调用，
 # Rust 侧仅需注册 Builder；签名公钥在 tauri.conf.json 的 plugins.updater.pubkey，
 # 私钥仅存本地（~/.tauri/oh-my-llama.key），绝不入库，发布时由 CI 环境变量注入。
