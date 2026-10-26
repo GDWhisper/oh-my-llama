@@ -716,7 +716,15 @@ pub fn run() {
         let settings = load_settings(&app_data);
         apply_update_proxy_env(&settings.update_proxy);
     }
-    tauri::Builder::default()
+    let builder = tauri::Builder::default();
+    // 单实例守卫仅 release 启用：插件互斥名取自 identifier，dev 与安装版共用同一
+    // identifier，若 dev 也参与会与正式版互抢。第二次启动由插件转发后退出，
+    // 回调唤起已运行实例的主窗（含「启动时隐藏到托盘」的情况）。
+    #[cfg(not(debug_assertions))]
+    let builder = builder.plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
+        show_main_window(app);
+    }));
+    builder
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
