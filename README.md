@@ -87,6 +87,16 @@ npm install
 npm run tauri dev
 ```
 
+### Git 提交钩子
+
+仓库内的 `.githooks/commit-msg` 会拒绝把 AI 工具写成提交署名（`Co-Authored-By` / `Generated with` 等）。首次克隆后启用一次：
+
+```bash
+git config core.hooksPath .githooks
+```
+
+Linux / macOS 上如钩子未生效，补执行 `chmod +x .githooks/commit-msg`。钩子只校验提交信息，不影响 CI 和其它 git 操作；人工协作者署名与正文中的普通技术提及不会被拦截。
+
 ### 验证与构建
 
 ```bash
