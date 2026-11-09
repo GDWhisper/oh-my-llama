@@ -70,21 +70,6 @@ const VISIBLE_MIN_PX: i32 = 8;
 #[cfg(windows)]
 const INITIAL_LOGICAL: (f64, f64) = (240.0, 32.0);
 
-/// 小窗 WebView2 的启动参数。
-///
-/// 2026-10-31 实测（本机 3840×2160 / 150%）：开始菜单等系统壳层窗口打开期间，小窗的
-/// 原生窗口仍在、`IsWindowVisible` 为真、未被 DWM cloak、z 序上方没有任何覆盖窗口、
-/// WebView2 的子窗口（含 `Intermediate D3D Window`）也都可见，但屏幕上的条带内容消失；
-/// 面板关闭后约 200ms 自行恢复（远快于定位线程收起态的 2s 拍）。据此判定：窗口既没被
-/// 代码隐藏、也没被遮挡，而是 WebView2（Chromium）的「原生窗口遮挡」判定认为窗口被遮挡，
-/// 于是停止出帧——透明窗口随即变空。关掉该特性后不再停帧。
-///
-/// 注意 Tauri 的 `additional_browser_args` 是**覆盖**语义：必须在这里复述 wry 的默认项
-/// （`wry-0.55.1/src/webview2/mod.rs`：`--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection`），
-/// 否则会把 WebView2 的迷你菜单 / PDF / SmartScreen 三个关闭项丢掉。
-#[cfg(windows)]
-const BROWSER_ARGS: &str = "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection,CalculateNativeWinOcclusion --disable-backgrounding-occluded-windows";
-
 struct Shared {
     /// 定位线程停止旗标；None = 线程未运行。取走并置位即要求线程在一拍内退出。
     stop: Mutex<Option<Arc<AtomicBool>>>,
@@ -423,9 +408,6 @@ fn ensure_window(app: &AppHandle) -> Result<bool, String> {
         .focused(false)
         // 先隐藏：前端上报尺寸并定位后再显示，避免首帧出现在屏幕角落。
         .visible(false)
-        // 关掉 WebView2 的原生窗口遮挡判定：系统壳层窗口（开始菜单等）打开时，
-        // Chromium 会误判条带被遮挡而停止出帧，导致条带在屏幕上消失（见 BROWSER_ARGS）。
-        .additional_browser_args(BROWSER_ARGS)
         .build()
         .map_err(|err| format!("创建任务栏小窗失败: {err}"))?;
     win.set_ignore_cursor_events(true)
@@ -1243,20 +1225,5 @@ mod tests {
         assert_eq!(moved.pos, Some((11, 20)), "位置漂了一像素也要纠正");
         let back = StepPlan::decide(&mut tick, Some(Placement::at(10, 20, 300, 40, false)), None);
         assert_eq!(back.pos, Some((10, 20)), "回来时同样纠正");
-    }
-
-    /// 小窗的 WebView2 启动参数必须复述 wry 的默认项：Tauri 的 `additional_browser_args`
-    /// 是覆盖语义，漏掉默认项就会把 WebView2 的迷你菜单 / PDF / SmartScreen 关闭项丢掉。
-    #[cfg(windows)]
-    #[test]
-    fn browser_args_keep_wry_defaults() {
-        for key in [
-            "msWebOOUI",
-            "msPdfOOUI",
-            "msSmartScreenProtection",
-            "CalculateNativeWinOcclusion",
-        ] {
-            assert!(BROWSER_ARGS.contains(key), "BROWSER_ARGS 缺少 {key}");
-        }
     }
 }
