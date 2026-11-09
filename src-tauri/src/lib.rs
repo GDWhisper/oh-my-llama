@@ -10,7 +10,7 @@ use std::str::FromStr;
 use std::sync::{LazyLock, Mutex};
 use std::time::Duration;
 use sysinfo::System;
-use tauri::menu::{CheckMenuItem, IsMenuItem, Menu, MenuItem};
+use tauri::menu::{CheckMenuItem, IsMenuItem, Menu, MenuItem, Submenu};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::{AppHandle, Emitter, Manager, Wry};
 use tauri_plugin_opener::OpenerExt;
@@ -45,6 +45,10 @@ mod icon_assets;
 // 任务栏常驻性能小窗（TrafficMonitor 风格；仅 Windows 提供，其余平台设置卡片不渲染）
 mod taskbar_widget;
 use taskbar_widget::{get_taskbar_widget_support, set_taskbar_metrics, taskbar_widget_ready};
+
+// 阻止系统休眠：三平台统一经 keepawake 原生 API，guard 的创建/销毁独占一条常驻线程
+// （Windows 的 ES_CONTINUOUS 线程绑定 + Linux Drop 可能 panic，见模块内注释）。
+mod keep_awake;
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
 pub struct ServerConfig {
@@ -244,6 +248,18 @@ pub struct AppSettings {
     pub taskbar_metrics_layout: String,
     #[serde(default)]
     pub taskbar_metrics_detailed: bool,
+    #[serde(default)]
+    pub keep_awake_manual: bool,
+    #[serde(default)]
+    pub keep_awake_with_server: bool,
+    #[serde(default)]
+    pub keep_awake_display: bool,
+    // 手动开关的时长：0 = 永久；正数 = 分钟数。自定义上限见 keep_awake::MAX_MINUTES。
+    #[serde(default)]
+    pub keep_awake_duration_minutes: i64,
+    // 定时的绝对到期时间（Unix 秒），None = 永久 / 未开启。重启据此判断剩余时间。
+    #[serde(default)]
+    pub keep_awake_until: Option<i64>,
 }
 
 /// 勾选项缺省 = 全选四项（与设置卡片里四项默认勾选一致）。
@@ -283,6 +299,11 @@ impl Default for AppSettings {
             taskbar_metrics_style: default_taskbar_metrics_style(),
             taskbar_metrics_layout: default_taskbar_metrics_layout(),
             taskbar_metrics_detailed: false,
+            keep_awake_manual: false,
+            keep_awake_with_server: false,
+            keep_awake_display: false,
+            keep_awake_duration_minutes: 0,
+            keep_awake_until: None,
         }
     }
 }
@@ -368,6 +389,23 @@ async fn save_settings(
     // 立即生效：本次会话内下一次「检查更新」即按新代理策略（无需重启）。
     apply_update_proxy_env(&proxy);
     Ok(settings)
+}
+
+// ── 阻止系统休眠 ──────────────────────────────────────────────────────
+// 设置面板「跟随服务 / 保持屏幕常亮」两个开关：整体读-改-写，只动自己两个字段。
+// 生效、落盘与失败回滚统一由 keep_awake::set_prefs 收口（与托盘 set_manual 同语义），
+// 返回落盘后的完整设置供乐观回填校准。命令层只转发，不各自实现半套回滚。
+#[tauri::command]
+async fn set_keep_awake_prefs(with_server: bool, display: bool) -> Result<AppSettings, String> {
+    keep_awake::set_prefs(with_server, display)
+}
+
+// 托盘时长项 / 自定义输入共用：设置手动开关与时长。minutes < 0 = 沿用落盘时长
+// （是否开启由 enabled 决定，托盘「关闭」项即 enabled=false, minutes=-1），
+// 0 = 永久，正数 = 分钟数；生效、计时与落盘由 keep_awake::set_manual 统一收口。
+#[tauri::command]
+async fn set_keep_awake_manual(enabled: bool, minutes: i64) -> Result<AppSettings, String> {
+    keep_awake::set_manual(enabled, minutes)
 }
 
 // ── 开机自启（登录时运行）─────────────────────────────────────────────
@@ -475,38 +513,94 @@ async fn resolve_close_choice(
 }
 
 // 托盘菜单文案下发：i18n 真源在前端 messages.ts，语言切换/启动时由前端调用。
-// 三段文案（显示主窗口 / 性能监控 / 退出）按 ID 重建菜单（事件 handler 挂在托盘上，
-// 与菜单实例无关），未就绪时静默跳过。复选项勾选态在 build_tray_menu 内读持久化真源。
+// 除四段顶层文案外，另下发「阻止休眠」子菜单的九个时长项文案（顺序与
+// KEEP_AWAKE_PRESETS 一一对应）。按 ID 重建菜单，事件 handler 挂在托盘上、与菜单实例
+// 无关；未就绪时静默跳过。勾选态在 build_tray_menu 内读持久化真源。
 #[tauri::command]
 async fn set_tray_labels(
     app: AppHandle,
     show: String,
     quit: String,
     metrics: String,
+    keep_awake: String,
+    keep_awake_items: Vec<String>,
 ) -> Result<(), String> {
+    // 数量不符说明前后端有一侧改了档位却没同步：此时整单失败、菜单保持上一次的
+    // 正确版本，比让子菜单静默错标时长（或用英文兜底混进中文菜单）更容易被发现。
+    if let Err(err) = validate_keep_awake_labels_len(keep_awake_items.len()) {
+        eprintln!("[tray] {err}");
+        return Err(err);
+    }
     let Some(tray) = app.tray_by_id(TRAY_ID) else {
         return Ok(());
     };
-    let menu = build_tray_menu(&app, &show, &quit, &metrics)?;
+    let menu = build_tray_menu(&app, &show, &quit, &metrics, &keep_awake, &keep_awake_items)?;
     tray.set_menu(Some(menu)).map_err(|err| err.to_string())?;
     Ok(())
 }
 
-/// 建托盘菜单：显示主窗口 / 性能监控 / 退出三段。「性能监控」是复选项，勾选态读
-/// settings.json 真源（与设置面板同名开关同一真源）；仅 Windows 建这一项——任务栏
-/// 小窗本身仅 Windows 提供，其余平台点了必然报错，宁可不出（与设置卡片同款门控）。
-/// 建项时把句柄存进 TRAY_METRICS_ITEM，供后续对齐勾选。文案由调用方传入。
+/// 前端下发的子菜单文案数量必须与 KEEP_AWAKE_PRESETS 一一对应。少一项会让末项退回
+/// 英文兜底、多一项会被截断，二者都会让「文案 ↔ 时长」错位；抽成纯函数便于单测。
+fn validate_keep_awake_labels_len(len: usize) -> Result<(), String> {
+    let expected = KEEP_AWAKE_PRESETS.len();
+    if len == expected {
+        Ok(())
+    } else {
+        Err(format!(
+            "阻止休眠子菜单文案数量不符：期望 {expected} 项，收到 {len} 项。"
+        ))
+    }
+}
+
+/// 建托盘菜单：显示主窗口 / 阻止休眠（子菜单）/ 性能监控 / 退出。
+/// 「阻止休眠」子菜单列出关闭 + 7 档时长 + 自定义，三平台都建；「性能监控」仅
+/// Windows 建。子菜单复选项的勾选态读 settings.json 真源，句柄存进静态供后续对齐。
 fn build_tray_menu<M: Manager<Wry>>(
     app: &M,
     show: &str,
     quit: &str,
     metrics: &str,
+    keep_awake_label: &str,
+    keep_awake_items: &[String],
 ) -> Result<Menu<Wry>, String> {
     let show_item = MenuItem::with_id(app, TRAY_ID_SHOW, show, true, None::<&str>)
         .map_err(|e| e.to_string())?;
     let quit_item = MenuItem::with_id(app, TRAY_ID_QUIT, quit, true, None::<&str>)
         .map_err(|e| e.to_string())?;
-    let mut items: Vec<&dyn IsMenuItem<Wry>> = vec![&show_item, &quit_item];
+
+    let (manual, minutes) = keep_awake::manual_selection();
+    let active = keep_awake_active_key(manual, minutes);
+    // 文案不足时退回英文，避免前端旧版本 / 异常载荷让菜单项缺字。
+    let label = |index: usize| -> &str {
+        keep_awake_items
+            .get(index)
+            .map(String::as_str)
+            .unwrap_or(DEFAULT_KEEP_AWAKE_LABELS[index])
+    };
+    // built 单独持有 CheckMenuItem 值：sub_items 只借用它们，循环期间不能移动元素。
+    let mut built: Vec<CheckMenuItem<Wry>> = Vec::new();
+    for (index, key) in KEEP_AWAKE_PRESETS.iter().enumerate() {
+        let id = if *key == KEEP_AWAKE_CUSTOM_KEY {
+            TRAY_ID_KEEP_AWAKE_CUSTOM.to_string()
+        } else {
+            format!("{TRAY_ID_KEEP_AWAKE_MIN_PREFIX}{key}")
+        };
+        built.push(
+            CheckMenuItem::with_id(app, id, label(index), true, active == *key, None::<&str>)
+                .map_err(|e| e.to_string())?,
+        );
+    }
+    let mut check_items: KeepAwakeItems = Vec::new();
+    let mut sub_items: Vec<&dyn IsMenuItem<Wry>> = Vec::new();
+    for (index, item) in built.iter().enumerate() {
+        check_items.push((KEEP_AWAKE_PRESETS[index], item.clone()));
+        sub_items.push(item);
+    }
+    let keep_awake_submenu =
+        Submenu::with_items(app, keep_awake_label, true, &sub_items).map_err(|e| e.to_string())?;
+    *TRAY_KEEP_AWAKE_ITEMS.lock().unwrap() = check_items;
+
+    let mut items: Vec<&dyn IsMenuItem<Wry>> = vec![&show_item, &keep_awake_submenu, &quit_item];
     let metrics_item;
     if cfg!(windows) {
         metrics_item = CheckMenuItem::with_id(
@@ -518,10 +612,21 @@ fn build_tray_menu<M: Manager<Wry>>(
             None::<&str>,
         )
         .map_err(|e| e.to_string())?;
-        items.insert(1, &metrics_item);
+        items.insert(2, &metrics_item);
         *TRAY_METRICS_ITEM.lock().unwrap() = Some(metrics_item.clone());
     }
     Menu::with_items(app, &items).map_err(|e| e.to_string())
+}
+
+/// 当前该勾哪个时长项：未开启 = 关闭；预设值 = 对应档；其它（自定义分钟数）= 自定义。
+fn keep_awake_active_key(manual: bool, minutes: i64) -> i64 {
+    if !manual {
+        KEEP_AWAKE_OFF_KEY
+    } else if [0, 30, 60, 120, 180, 360, 720].contains(&minutes) {
+        minutes
+    } else {
+        KEEP_AWAKE_CUSTOM_KEY
+    }
 }
 
 /// 任务栏小窗开关的持久化真源（读 settings.json；读失败按关）。托盘菜单勾选态与
@@ -541,6 +646,16 @@ pub(crate) fn sync_tray_metrics_check() {
     }
 }
 
+/// 把「阻止休眠」子菜单九个复选项的勾选态整体对齐到 settings.json 真源：设置时长、
+/// 定时到期、失败回滚都经此。菜单尚未建立时句柄为空，无事可做。
+pub(crate) fn sync_tray_keep_awake_check() {
+    let (manual, minutes) = keep_awake::manual_selection();
+    let active = keep_awake_active_key(manual, minutes);
+    for (key, item) in TRAY_KEEP_AWAKE_ITEMS.lock().unwrap().iter() {
+        let _ = item.set_checked(*key == active);
+    }
+}
+
 /// 托盘「性能监控」点击：翻转任务栏小窗开关（与设置面板同名开关同一真源、同一
 /// 生效路径，勾选 / 样式 / 排列 / 详细数据沿用现值）。muda 在派发事件前已翻转
 /// 原生勾选，故落盘或建窗失败时要翻回去，不让菜单显示与真实状态不符。
@@ -550,6 +665,8 @@ fn toggle_taskbar_metrics_tray(app: &AppHandle) {
         sync_tray_metrics_check();
     }
 }
+
+// 托盘时长项直接由 run() 的 on_menu_event 分发到 keep_awake::set_manual。
 
 // ── 路径历史（最近使用）───────────────────────────────────────────────
 // 同一套机制服务两种路径：llama-server 可执行文件（recent_servers）与模型目录
@@ -756,6 +873,8 @@ pub fn run() {
             remove_recent_model_dir,
             read_settings,
             save_settings,
+            set_keep_awake_prefs,
+            set_keep_awake_manual,
             set_close_pref,
             set_log_show_times,
             set_ui_theme,
@@ -774,10 +893,21 @@ pub fn run() {
         ])
         .setup(|app| {
             // ── 系统托盘 ────────────────────────────────────────────────
-            // 左键单击 = 显示主窗口；右键 = 菜单（显示主窗口 / 性能监控 / 退出）。
-            // 菜单文案的 i18n 真源在前端，启动后由 set_tray_labels 按 t() 下发，
-            // 此处英文仅为前端尚未就绪时的兜底。
-            let tray_menu = build_tray_menu(app, "Show", "Quit", "Metrics")?;
+            // 左键单击 = 显示主窗口；右键 = 菜单（显示主窗口 / 阻止休眠子菜单 /
+            // 性能监控 / 退出）。菜单文案的 i18n 真源在前端，启动后由 set_tray_labels
+            // 按 t() 下发，此处英文仅为前端尚未就绪时的兜底。
+            let default_awake_labels: Vec<String> = DEFAULT_KEEP_AWAKE_LABELS
+                .iter()
+                .map(|s| (*s).to_string())
+                .collect();
+            let tray_menu = build_tray_menu(
+                app,
+                "Show",
+                "Quit",
+                "Metrics",
+                "Prevent Sleep",
+                &default_awake_labels,
+            )?;
             TrayIconBuilder::with_id(TRAY_ID)
                 .icon(
                     app.default_window_icon()
@@ -791,6 +921,25 @@ pub fn run() {
                 .on_menu_event(|app, event| match event.id.as_ref() {
                     id if id == TRAY_ID_SHOW => show_main_window(app),
                     id if id == TRAY_ID_METRICS => toggle_taskbar_metrics_tray(app),
+                    id if id == TRAY_ID_KEEP_AWAKE_CUSTOM => {
+                        show_main_window(app);
+                        // muda 点选时已翻转该复选项，而弹窗可能被取消：先翻回真源，
+                        // 真确认后由 set_manual 再对齐一次。
+                        sync_tray_keep_awake_check();
+                        let _ = app.emit("keep-awake://custom", ());
+                    }
+                    id if id.starts_with(TRAY_ID_KEEP_AWAKE_MIN_PREFIX) => {
+                        if let Ok(minutes) =
+                            id[TRAY_ID_KEEP_AWAKE_MIN_PREFIX.len()..].parse::<i64>()
+                        {
+                            if let Err(err) =
+                                keep_awake::set_manual(minutes != KEEP_AWAKE_OFF_KEY, minutes)
+                            {
+                                eprintln!("[keep-awake] 托盘设置时长失败: {err}");
+                                sync_tray_keep_awake_check();
+                            }
+                        }
+                    }
                     id if id == TRAY_ID_QUIT => graceful_exit(app),
                     _ => {}
                 })
@@ -805,6 +954,10 @@ pub fn run() {
                     }
                 })
                 .build(app)?;
+
+            // 托盘建好后恢复「阻止休眠」：按落盘的手动 / 跟随服务偏好建立 guard
+            // （失败仅记日志、不拦启动）。
+            keep_awake::init_on_startup();
 
             // 覆盖 icon.ico 首帧那份兜底图：按当前 DPI 换成精确尺寸，避免 shell 双线性缩放
             apply_dpi_icons(app.handle());
@@ -883,11 +1036,37 @@ const TRAY_ID_SHOW: &str = "tray-show";
 const TRAY_ID_METRICS: &str = "tray-metrics";
 const TRAY_ID_QUIT: &str = "tray-quit";
 
+// 「阻止休眠」子菜单：时长项 ID = 前缀 + 分钟数（-1 = 关闭）。自定义项是独立 ID，
+// 点击后唤起主窗让前端弹输入框。KEEP_AWAKE_PRESETS 的顺序即文案数组顺序，
+// 与前端 App.tsx 的 keepAwakeItems 一一对应，改动必须两边同步。
+const TRAY_ID_KEEP_AWAKE_MIN_PREFIX: &str = "tray-keep-awake-min-";
+const TRAY_ID_KEEP_AWAKE_CUSTOM: &str = "tray-keep-awake-custom";
+const KEEP_AWAKE_OFF_KEY: i64 = -1;
+const KEEP_AWAKE_CUSTOM_KEY: i64 = -2;
+const KEEP_AWAKE_PRESETS: [i64; 9] = [-1, 0, 30, 60, 120, 180, 360, 720, -2];
+const DEFAULT_KEEP_AWAKE_LABELS: [&str; 9] = [
+    "Off",
+    "Indefinitely",
+    "30 minutes",
+    "1 hour",
+    "2 hours",
+    "3 hours",
+    "6 hours",
+    "12 hours",
+    "Custom...",
+];
+
 // 「性能监控」复选项句柄：build_tray_menu 每次建菜单时换新（菜单按 ID 重建，旧句柄
 // 随之释放），设置面板 / 托盘点击改开关后由 sync_tray_metrics_check 对齐勾选态。
 // 非 Windows 不建这一项，句柄恒为 None。
 static TRAY_METRICS_ITEM: LazyLock<Mutex<Option<CheckMenuItem<Wry>>>> =
     LazyLock::new(|| Mutex::new(None));
+
+// 「阻止休眠」子菜单九个复选项的句柄，按 (时长键, 项) 存：菜单每次按 ID 重建时
+// 整体换新，设置时长 / 定时到期后由 sync_tray_keep_awake_check 对齐勾选态。
+type KeepAwakeItems = Vec<(i64, CheckMenuItem<Wry>)>;
+static TRAY_KEEP_AWAKE_ITEMS: LazyLock<Mutex<KeepAwakeItems>> =
+    LazyLock::new(|| Mutex::new(Vec::new()));
 
 // ── 任务栏 / 缩略图预览 / 托盘图标：按 DPI 喂「精确尺寸」的图 ──────────────
 //
@@ -1487,7 +1666,13 @@ async fn get_status(app: AppHandle, config: ServerConfig) -> Result<ServerStatus
     let watch_now = watch_target(owned_alive, started, (&config.host, config.port));
     if watch_now != watch {
         align_display(&mut status, &config);
-        return Ok(status.clone());
+        // 探测作废也要同步运行态：start/stop 可能刚改过 status。
+        // 先释放 ServerStatus 锁再同步——同步内部会等常驻线程 ack，不能在持锁时阻塞。
+        let running = status.running && status.managed;
+        let snapshot = status.clone();
+        drop(status);
+        keep_awake::set_server_running(running);
+        return Ok(snapshot);
     }
     // 停止宽限期：本应用刚刚才停止该地址上的服务，进程/OS 还没把端口让出去。此刻
     // owned_alive 必然为 false（受管态已被 stop_server_inner 复位），但不能据此断言是
@@ -1534,8 +1719,15 @@ async fn get_status(app: AppHandle, config: ServerConfig) -> Result<ServerStatus
         ),
     }
     align_display(&mut status, &config);
+    // 只有「本应用拉起的受管服务」才算服务在跑；外部占用端口的不触发跟随服务。
+    // 同样先释放 ServerStatus 锁：同步内部可能等常驻线程 ack，持锁阻塞会拖住
+    // 其它 get_status / start / stop。
+    let running = status.running && status.managed;
+    let snapshot = status.clone();
+    drop(status);
+    keep_awake::set_server_running(running);
 
-    Ok(status.clone())
+    Ok(snapshot)
 }
 
 // 构造传给 llama-server 的命令行参数（不含可执行文件名本身）。
@@ -1866,6 +2058,11 @@ async fn start_server(app: AppHandle, config: ServerConfig) -> Result<ServerStat
         status.clone()
     };
 
+    // 与 get_status 同一判据：只有「受管且已就绪」才算服务在跑。慢加载分支里
+    // running 仍为 false，若这里直接传 true，下一轮轮询会立刻改回 false，
+    // 造成 guard 被反复创建/销毁。
+    keep_awake::set_server_running(final_status.running && final_status.managed);
+
     if ready {
         Ok(final_status)
     } else if alive {
@@ -2022,6 +2219,7 @@ async fn stop_server_inner(app: &AppHandle) -> Result<(), String> {
     begin_stop_grace(grace_host, grace_port);
     *status = ServerStatus::default();
     drop(status);
+    keep_awake::set_server_running(false);
 
     if let Some(pid) = pid {
         // 记下「这次停止是用户手动发起」：若此刻正处于某次 start_server 的启动等待期，
@@ -3384,6 +3582,11 @@ enabled_advanced_params = ["ctx_size"]
             taskbar_metrics_style: default_taskbar_metrics_style(),
             taskbar_metrics_layout: default_taskbar_metrics_layout(),
             taskbar_metrics_detailed: false,
+            keep_awake_manual: false,
+            keep_awake_with_server: false,
+            keep_awake_display: false,
+            keep_awake_duration_minutes: 0,
+            keep_awake_until: None,
         };
         save_settings_json(&dir, &settings).expect("save settings");
         let loaded = load_settings(&dir);
@@ -4368,5 +4571,104 @@ enabled_advanced_params = ["ctx_size"]
             ..Default::default()
         };
         assert_eq!(stop_grace_addr(&st), ("0.0.0.0", 9090));
+    }
+
+    #[test]
+    fn keep_awake_should_hold_truth_table() {
+        // manual || (with_server && server_running) 的全部 8 种布尔组合。
+        assert!(!keep_awake::should_hold(false, false, false));
+        assert!(!keep_awake::should_hold(false, false, true));
+        assert!(!keep_awake::should_hold(false, true, false));
+        assert!(keep_awake::should_hold(false, true, true));
+        assert!(keep_awake::should_hold(true, false, false));
+        assert!(keep_awake::should_hold(true, false, true));
+        assert!(keep_awake::should_hold(true, true, false));
+        assert!(keep_awake::should_hold(true, true, true));
+    }
+
+    #[test]
+    fn keep_awake_settings_fields_serde_default_and_round_trip() {
+        // 旧 settings.json 不含新字段：三个都缺省为 false（serde 与手写 Default 同源）。
+        let legacy: AppSettings =
+            serde_json::from_str(r#"{"update_proxy":"","auto_check_updates":false}"#)
+                .expect("parse legacy settings");
+        assert!(!legacy.keep_awake_manual);
+        assert!(!legacy.keep_awake_with_server);
+        assert!(!legacy.keep_awake_display);
+        assert!(!AppSettings::default().keep_awake_manual);
+        assert!(!AppSettings::default().keep_awake_with_server);
+        assert!(!AppSettings::default().keep_awake_display);
+
+        // 三字段 true / false / true 序列化再反序列化，值保持。
+        let settings = AppSettings {
+            keep_awake_manual: true,
+            keep_awake_with_server: false,
+            keep_awake_display: true,
+            ..AppSettings::default()
+        };
+        let text = serde_json::to_string(&settings).expect("serialize settings");
+        let parsed: AppSettings = serde_json::from_str(&text).expect("parse settings");
+        assert!(parsed.keep_awake_manual);
+        assert!(!parsed.keep_awake_with_server);
+        assert!(parsed.keep_awake_display);
+
+        // 新增的时长字段：旧文件缺省为 0 / None，写入非零值后往返保持。
+        assert_eq!(legacy.keep_awake_duration_minutes, 0);
+        assert_eq!(legacy.keep_awake_until, None);
+        assert_eq!(AppSettings::default().keep_awake_duration_minutes, 0);
+        let timed = AppSettings {
+            keep_awake_duration_minutes: 45,
+            keep_awake_until: Some(1_800_000_000),
+            ..AppSettings::default()
+        };
+        let text = serde_json::to_string(&timed).expect("serialize timed settings");
+        let parsed: AppSettings = serde_json::from_str(&text).expect("parse timed settings");
+        assert_eq!(parsed.keep_awake_duration_minutes, 45);
+        assert_eq!(parsed.keep_awake_until, Some(1_800_000_000));
+    }
+
+    #[test]
+    fn keep_awake_duration_selection_and_validation() {
+        // 未开启一律落在「关闭」；预设值勾对应档；非预设的自定义分钟数勾「自定义」。
+        assert_eq!(keep_awake_active_key(false, 30), KEEP_AWAKE_OFF_KEY);
+        assert_eq!(keep_awake_active_key(true, 0), 0);
+        assert_eq!(keep_awake_active_key(true, 720), 720);
+        assert_eq!(keep_awake_active_key(true, 45), KEEP_AWAKE_CUSTOM_KEY);
+        assert_eq!(keep_awake_active_key(true, -1), KEEP_AWAKE_CUSTOM_KEY);
+
+        // 自定义输入边界：0（永久哨兵）与负值（关闭哨兵）都不合法，上限 24 小时。
+        assert!(!keep_awake::valid_custom_minutes(0));
+        assert!(!keep_awake::valid_custom_minutes(-1));
+        assert!(keep_awake::valid_custom_minutes(1));
+        assert!(keep_awake::valid_custom_minutes(keep_awake::MAX_MINUTES));
+        assert!(!keep_awake::valid_custom_minutes(
+            keep_awake::MAX_MINUTES + 1
+        ));
+
+        // 时长项与文案兜底必须一一对应，漏一个就会让菜单项缺字。
+        assert_eq!(KEEP_AWAKE_PRESETS.len(), DEFAULT_KEEP_AWAKE_LABELS.len());
+        assert_eq!(KEEP_AWAKE_PRESETS[0], KEEP_AWAKE_OFF_KEY);
+        assert_eq!(
+            KEEP_AWAKE_PRESETS[KEEP_AWAKE_PRESETS.len() - 1],
+            KEEP_AWAKE_CUSTOM_KEY
+        );
+    }
+
+    #[test]
+    fn keep_awake_tray_labels_length_must_match_presets() {
+        // 只有恰好九段文案才允许重建菜单：少一项会静默退回英文、多一项会被截断，
+        // 二者都会让菜单文案与实际时长错位。
+        assert!(validate_keep_awake_labels_len(KEEP_AWAKE_PRESETS.len()).is_ok());
+        for wrong in [
+            0,
+            1,
+            KEEP_AWAKE_PRESETS.len() - 1,
+            KEEP_AWAKE_PRESETS.len() + 1,
+        ] {
+            assert!(
+                validate_keep_awake_labels_len(wrong).is_err(),
+                "文案数量 {wrong} 不该通过"
+            );
+        }
     }
 }

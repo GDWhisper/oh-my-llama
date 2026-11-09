@@ -72,6 +72,12 @@ const sectionIcons = {
       <path d="M4.6 13.4V8.8M8 13.4V4.4M11.4 13.4v-2.6" />
     </svg>
   ),
+  keepAwake: (
+    <svg width="14" height="14" viewBox="0 0 16 16" aria-hidden="true">
+      <path d="M12.8 9.6A5.4 5.4 0 0 1 6.4 3.2a5.4 5.4 0 1 0 6.4 6.4Z" />
+      <path d="M12.2 2.3v2.4M11 3.5h2.4" />
+    </svg>
+  ),
   about: (
     <svg width="14" height="14" viewBox="0 0 16 16" aria-hidden="true">
       <circle cx="8" cy="8" r="6.2" />
@@ -93,8 +99,8 @@ interface Props {
 }
 
 // 设置浮窗：居中弹层，承载语言、界面风格、更新（版本 / 自动检查 / 代理）、关闭窗口行为、
-// 启动设置（开机自启 / 启动时隐藏到托盘）与关于六组设置。
-// 复用公共 modal 遮罩与样式。
+// 启动设置（开机自启 / 启动时隐藏到托盘）、任务栏性能小窗、电源与休眠（跟随服务自动
+// 阻止休眠 / 保持屏幕常亮）与关于等分组。复用公共 modal 遮罩与样式。
 export function SettingsDialog({
   open,
   onClose,
@@ -129,6 +135,11 @@ export function SettingsDialog({
   } | null>(null);
   const [taskbarSupported, setTaskbarSupported] = useState(false);
   const [taskbarMetricsError, setTaskbarMetricsError] = useState('');
+  // 阻止系统休眠：设置面板只管这两项（manual 复选项由托盘管、不在此显示）。
+  // with_server = 服务运行时自动生效；display = 保持屏幕常亮，默认 false（默认允许息屏）。
+  const [keepAwakeWithServer, setKeepAwakeWithServer] = useState(false);
+  const [keepAwakeDisplay, setKeepAwakeDisplay] = useState(false);
+  const [keepAwakeError, setKeepAwakeError] = useState('');
 
   useEffect(() => {
     if (!open) return;
@@ -160,6 +171,7 @@ export function SettingsDialog({
     setProxyError('');
     setTaskbarMetricsError('');
     setStartHiddenError('');
+    setKeepAwakeError('');
     invoke<AppSettings>('read_settings')
       .then((s) => {
         setProxy(s.update_proxy ?? '');
@@ -167,6 +179,8 @@ export function SettingsDialog({
         setClosePref(s.minimize_to_tray ?? null);
         setUiTheme(normalizeUiTheme(s.ui_theme));
         setStartHidden(Boolean(s.start_hidden_to_tray));
+        setKeepAwakeWithServer(Boolean(s.keep_awake_with_server));
+        setKeepAwakeDisplay(Boolean(s.keep_awake_display));
         setTaskbarMetrics({
           enabled: Boolean(s.taskbar_metrics_enabled),
           items: s.taskbar_metrics_items ?? [],
@@ -182,6 +196,8 @@ export function SettingsDialog({
         setClosePref(null);
         setUiTheme('parchment');
         setStartHidden(false);
+        setKeepAwakeWithServer(false);
+        setKeepAwakeDisplay(false);
         setTaskbarMetrics({
           enabled: false,
           items: [],
@@ -280,6 +296,26 @@ export function SettingsDialog({
       .catch((e) => {
         setStartHidden(prev);
         setStartHiddenError(String(e));
+      });
+  };
+
+  // 切换「电源与休眠」两项：两项一并写入（后端按传入值整体覆盖），乐观回填，
+  // 再以后端返回值校准；写失败则回滚到切换前并就地提示。
+  const saveKeepAwakePrefs = (withServer: boolean, display: boolean) => {
+    const prevWithServer = keepAwakeWithServer;
+    const prevDisplay = keepAwakeDisplay;
+    setKeepAwakeWithServer(withServer);
+    setKeepAwakeDisplay(display);
+    setKeepAwakeError('');
+    invoke<AppSettings>('set_keep_awake_prefs', { withServer, display })
+      .then((s) => {
+        setKeepAwakeWithServer(Boolean(s.keep_awake_with_server));
+        setKeepAwakeDisplay(Boolean(s.keep_awake_display));
+      })
+      .catch((e) => {
+        setKeepAwakeWithServer(prevWithServer);
+        setKeepAwakeDisplay(prevDisplay);
+        setKeepAwakeError(String(e));
       });
   };
 
@@ -617,6 +653,37 @@ export function SettingsDialog({
                 </label>
                 {autostartError && <div className="settings-proxy-err">{autostartError}</div>}
                 {startHiddenError && <div className="settings-proxy-err">{startHiddenError}</div>}
+              </div>
+
+              <div className="settings-section">
+                <div className="settings-section-head">
+                  <span className="settings-label">
+                    {sectionIcons.keepAwake}
+                    {t('settings.keepAwakeTitle')}
+                  </span>
+                  <span className="settings-hint">{t('settings.keepAwakeHint')}</span>
+                </div>
+                <label className="settings-option-row">
+                  <input
+                    type="checkbox"
+                    className="settings-checkbox"
+                    checked={keepAwakeWithServer}
+                    onChange={(event) => saveKeepAwakePrefs(event.target.checked, keepAwakeDisplay)}
+                  />
+                  <span className="settings-check-label">{t('settings.keepAwakeWithServer')}</span>
+                </label>
+                <label className="settings-option-row">
+                  <input
+                    type="checkbox"
+                    className="settings-checkbox"
+                    checked={keepAwakeDisplay}
+                    onChange={(event) =>
+                      saveKeepAwakePrefs(keepAwakeWithServer, event.target.checked)
+                    }
+                  />
+                  <span className="settings-check-label">{t('settings.keepAwakeDisplay')}</span>
+                </label>
+                {keepAwakeError && <div className="settings-proxy-err">{keepAwakeError}</div>}
               </div>
 
               {/* 仅 Windows 渲染（后端 get_taskbar_widget_support 为假时整卡不出现）：

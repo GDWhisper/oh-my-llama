@@ -133,6 +133,15 @@ export interface AppSettings {
   taskbar_metrics_style: string;
   taskbar_metrics_layout: string;
   taskbar_metrics_detailed: boolean;
+  // 阻止系统休眠：keep_awake_manual 由托盘右键复选项控制（不在设置面板显示）；
+  // keep_awake_with_server / keep_awake_display 由设置面板「电源与休眠」分组控制，
+  // display 默认 false（默认允许息屏，仅阻止系统睡眠）。
+  keep_awake_manual: boolean;
+  keep_awake_with_server: boolean;
+  keep_awake_display: boolean;
+  // 手动开关的时长：0 = 永久，正数 = 分钟数；keep_awake_until 是定时的绝对到期 Unix 秒。
+  keep_awake_duration_minutes: number;
+  keep_awake_until: number | null;
 }
 
 export type UiTheme = 'default' | 'parchment';

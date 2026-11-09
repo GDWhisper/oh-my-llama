@@ -45,6 +45,17 @@ libc = "0.2"
 # 根治“管道下 stdout 被块缓冲、模型加载完才一次性涌出”的问题。跨平台（Windows=ConPTY /
 # Unix=openpty），单 crate 统一两套实现；仅暴露启动子进程与读 master 流，攻击面有限。
 portable-pty = "0.8"
+# 阻止系统休眠（托盘复选项 + 设置面板「跟随服务 / 保持屏幕常亮」）。MIT，单 crate
+# 覆盖三平台原生电源 API：Windows SetThreadExecutionState / macOS
+# IOPMAssertionCreateWithName / Linux systemd logind Inhibit + freedesktop ScreenSaver。
+# 未选 Tauri 插件：Tauri 2 无官方阻止休眠插件，社区插件的维护状态与权限面都需另行
+# 审核；keepawake API 极小、攻击面可控，只需一个进程级 guard 即可满足需求。
+# 注意其 Windows 实现是「线程绑定」的：在调用线程上 SetThreadExecutionState
+# (ES_CONTINUOUS|...)，Drop 也须在同一线程复位。本项目因此在 keep_awake.rs 自封
+# 唯一常驻 OS 线程，guard 的创建与销毁全部由该线程完成（不能用静态 Mutex 让任意
+# 线程 Drop）；Linux display=true 的 Drop 还会 unwrap D-Bus 调用，故销毁用
+# catch_unwind 兜住。
+keepawake = "0.6.1"
 
 [target.'cfg(windows)'.dependencies]
 # 仅用于 Job Object 内核级守护（KILL_ON_JOB_CLOSE）与控制台 CTRL_C_EVENT 优雅退出信号。

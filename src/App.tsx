@@ -10,6 +10,7 @@ import { RawParams } from './components/RawParams';
 import { IconButton } from './components/IconButton';
 import { ConfigManager } from './components/ConfigManager';
 import { configToCommand, splitExtraArg, type ApplyPlan } from './lib/parseArgs';
+import { listenGuarded } from './lib/listenGuarded';
 import { serverStatusState } from './lib/statusState';
 import { useI18n } from './i18n';
 import { SettingsDialog } from './components/SettingsDialog';
@@ -18,6 +19,7 @@ import { UpdateToast } from './components/UpdateToast';
 import { Toast } from './components/Toast';
 import { ConfirmDialog } from './components/ConfirmDialog';
 import { CloseBehaviorDialog } from './components/CloseBehaviorDialog';
+import { KeepAwakeCustomDialog } from './components/KeepAwakeCustomDialog';
 import { MetricsPanel } from './components/MetricsPanel';
 import { TitleBar } from './components/TitleBar';
 import { useUpdater } from './hooks/useUpdater';
@@ -227,14 +229,29 @@ export default function App() {
   }, [autoCheck]);
 
   // 托盘菜单文案：i18n 真源在前端，语言切换时（t 仅随 lang 变化）重新下发。
+  // 四段顶层文案 + 「阻止休眠」子菜单九项（顺序须与后端 KEEP_AWAKE_PRESETS 一致）。
   // 后端在托盘尚未就绪时静默忽略；StrictMode 双挂载重复 invoke 幂等无害。
-  // 「性能监控」是复选项：勾选态由后端读 settings.json 真源，此处只下发文案。
+  // 复选项勾选态由后端读 settings.json 真源，此处只下发文案。
   useEffect(() => {
     invoke('set_tray_labels', {
       show: t('tray.show'),
       metrics: t('tray.metrics'),
       quit: t('tray.quit'),
-    }).catch(() => {});
+      keepAwake: t('tray.keepAwake'),
+      keepAwakeItems: [
+        t('tray.keepAwakeOff'),
+        t('tray.keepAwakeForever'),
+        t('tray.keepAwake30m'),
+        t('tray.keepAwake1h'),
+        t('tray.keepAwake2h'),
+        t('tray.keepAwake3h'),
+        t('tray.keepAwake6h'),
+        t('tray.keepAwake12h'),
+        t('tray.keepAwakeCustom'),
+      ],
+      // 后端会校验子菜单文案数量；数量不符时整单失败，这里必须让错误可见，
+      // 否则前端静默吞掉后菜单停在旧版本，排查无从下手。
+    }).catch((err) => console.error('托盘文案下发失败', err));
   }, [t]);
 
   // 关闭行为询问：用户未选择过关闭偏好时，点窗口 X 由后端 emit 触发。
@@ -258,6 +275,24 @@ export default function App() {
     setClosePromptOpen(false);
     invoke('resolve_close_choice', { minimize, remember }).catch(() => {});
   };
+
+  // 托盘「自定义…」：原生菜单没有输入框，后端点该项时唤起主窗并 emit，这里弹输入弹窗。
+  const [keepAwakeCustomOpen, setKeepAwakeCustomOpen] = useState(false);
+  useEffect(() => {
+    let disposed = false;
+    let unlisten: (() => void) | undefined;
+    listenGuarded(
+      'keep-awake://custom',
+      () => setKeepAwakeCustomOpen(true),
+      () => disposed,
+    ).then((u) => {
+      if (u) unlisten = u;
+    });
+    return () => {
+      disposed = true;
+      unlisten?.();
+    };
+  }, []);
 
   // 「分享配置」：复制当前选中配置的【已落盘快照】（不含未保存改动）。
   // 快照取 default 模板(defaultConfig) 或 命名配置(configs[activeName])，
@@ -550,6 +585,10 @@ export default function App() {
         open={closePromptOpen}
         onDecide={resolveClosePrompt}
         onCancel={() => setClosePromptOpen(false)}
+      />
+      <KeepAwakeCustomDialog
+        open={keepAwakeCustomOpen}
+        onClose={() => setKeepAwakeCustomOpen(false)}
       />
     </main>
   );
