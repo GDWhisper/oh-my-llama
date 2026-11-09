@@ -1,0 +1,170 @@
+#!/usr/bin/env bash
+# Commit-msg hook: 拒绝 AI 工具把自身写入提交署名（Co-Authored-By / Generated with 等）。
+# 安装：git config core.hooksPath .githooks
+# 说明：README.md「Git 提交钩子」。
+
+set -e
+
+MSG_FILE="${1:-}"
+[ -n "$MSG_FILE" ] && [ -f "$MSG_FILE" ] || exit 0
+
+# 只在「署名行 / 生成行」内判定，正文普通提及 AI 工具名不拦。
+# awk 正常退出且无输出 = 通过；awk 自身失败 = 非 0，由 set -e 阻断提交，绝不静默放行。
+if REPORT=$(LC_ALL=C awk '
+function lev(a, b,    la, lb, i, j, d, c) {
+  la = length(a); lb = length(b)
+  if (la == 0) return lb
+  if (lb == 0) return la
+  for (i = 0; i <= la; i++) d[i, 0] = i
+  for (j = 0; j <= lb; j++) d[0, j] = j
+  for (i = 1; i <= la; i++) {
+    for (j = 1; j <= lb; j++) {
+      c = (substr(a, i, 1) == substr(b, j, 1)) ? 0 : 1
+      d[i, j] = d[i-1, j] + 1
+      if (d[i, j-1] + 1 < d[i, j]) d[i, j] = d[i, j-1] + 1
+      if (d[i-1, j-1] + c < d[i, j]) d[i, j] = d[i-1, j-1] + c
+    }
+  }
+  return d[la, lb]
+}
+
+function has_strong(s,    p, n, i) {
+  n = split(tolower(s), p, /[^a-z0-9]+/)
+  for (i = 1; i <= n; i++) {
+    if (p[i] in STRONG) return 1
+    if (p[i] ~ /^gpt-?[0-9]/) return 1
+    if (p[i] == "roo" && i < n && p[i+1] ~ /^code/) return 1
+  }
+  return 0
+}
+
+function has_ambiguous(s,    p, n, i) {
+  n = split(tolower(s), p, /[^a-z0-9]+/)
+  for (i = 1; i <= n; i++) if (p[i] in AMBIGUOUS) return 1
+  return 0
+}
+
+function human_name_like(display,    p, n, i, w, count, qual) {
+  # 先剥掉邮箱与域名样片段，避免 Claude claude@example.com 被当成两个人名
+  gsub(/[a-z0-9._%+-]+@[a-z0-9.-]+/, " ", display)
+  gsub(/[a-z0-9-]+\.[a-z0-9.-]+/, " ", display)
+  n = split(display, p, /[^a-z0-9]+/)
+  count = 0
+  qual = 0
+  for (i = 1; i <= n; i++) {
+    w = p[i]
+    if (w == "" || (w in NONNAME) || w ~ /^[0-9]+$/) continue
+    count++
+    if (w in QUALIFIER) qual = 1
+  }
+  return (count >= 2 && !qual)
+}
+
+function fuzzy_hit(line,    p, n, i, w, w2, tl, t, target) {
+  n = split(tolower(line), p, /[^a-z0-9]+/)
+  for (t = 1; t <= 2; t++) {
+    target = (t == 1) ? "codebuff" : "freebuff"
+    tl = length(target)
+    for (i = 1; i <= n; i++) {
+      w = p[i]
+      if (w == "") continue
+      if (length(w) >= tl - 1 && length(w) <= tl + 1 && lev(w, target) <= 1) return 1
+      if (i < n) {
+        w2 = w p[i+1]
+        if (length(w2) >= tl - 1 && length(w2) <= tl + 1 && lev(w2, target) <= 1) return 1
+      }
+    }
+  }
+  return 0
+}
+
+BEGIN {
+  split("anthropic codex openai chatgpt gpt copilot cursor aider windsurf sourcegraph codebuff freebuff opencode roocode", tmp, " ")
+  for (i in tmp) STRONG[tmp[i]] = 1
+  split("claude cody devin cline gemini", tmp, " ")
+  for (i in tmp) AMBIGUOUS[tmp[i]] = 1
+  split("ai bot assistant agent code cli model sonnet opus haiku pro flash ultra mini preview latest sourcegraph anthropic openai github copilot windsurf cursor aider codex roo roocode opencode chatgpt", tmp, " ")
+  for (i in tmp) QUALIFIER[tmp[i]] = 1
+  split("com org net io dev www http https mail email", tmp, " ")
+  for (i in tmp) NONNAME[tmp[i]] = 1
+}
+
+{
+  line = tolower($0)
+  sub(/\r$/, "", line)
+
+  # 跳过 scissors 之后的内容（git commit -v 的 diff）与注释行
+  if (line ~ /^[[:space:]]*#?[[:space:]]*-+[[:space:]]*>8[[:space:]]*-+/) exit
+  if (line ~ /^[[:space:]]*#/) next
+
+  is_trailer = 0
+  value = ""
+  if (line ~ /^[[:space:]]*(co-authored-by|co-author|assisted-by|generated-by|authored-by)[[:space:]]*:/) {
+    is_trailer = 1
+    value = substr(line, index(line, ":") + 1)
+  }
+
+  if (is_trailer) {
+    if (has_strong(value)) {
+      report = report sprintf("  第%d行 [AI 工具署名] %s\n", NR, $0)
+      next
+    }
+    display = value
+    sub(/[<(].*$/, "", display)
+    if (has_ambiguous(display) && human_name_like(display)) {
+      # 人工全名（如 Cody Buffington）放行；codebuff/freebuff 变体仍要查
+      if (fuzzy_hit(value)) {
+        report = report sprintf("  第%d行 [codebuff/freebuff 变体] %s\n", NR, $0)
+      }
+      next
+    }
+    if (has_ambiguous(value)) {
+      report = report sprintf("  第%d行 [AI 工具署名] %s\n", NR, $0)
+      next
+    }
+    if (fuzzy_hit(value)) {
+      report = report sprintf("  第%d行 [codebuff/freebuff 变体] %s\n", NR, $0)
+    }
+    next
+  }
+
+  # 生成尾注：行首（可带空白、标点或常见 emoji）的 Generated with/by。
+  # 用 index() 定位 ASCII 的 generated，再单独校验前缀，避开 gawk 在
+  # C.UTF-8 下对「多字节 emoji + 正则量词」的匹配缺陷，也不对正文散文全文匹配。
+  gen_pos = index(line, "generated")
+  is_generation = 0
+  if (gen_pos > 0 && substr(line, gen_pos) ~ /^generated[ -](with|by)/) {
+    pfx = substr(line, 1, gen_pos - 1)
+    gsub(/[[:space:]]/, "", pfx)
+    if (pfx == "" || pfx ~ /^[[:punct:]]+$/ || pfx == "🤖" || pfx == "✨" || pfx == "🚀" || pfx == "⚡" || pfx == "🛠" || pfx == "🛠️" || pfx == "—" || pfx == "–" || pfx == "•" || pfx == "·") {
+      is_generation = 1
+    }
+  }
+
+  if (is_generation) {
+    if (has_strong(line) || has_ambiguous(line) || fuzzy_hit(line)) {
+      report = report sprintf("  第%d行 [AI 生成尾注] %s\n", NR, $0)
+    }
+  }
+}
+
+END {
+  printf "%s", report
+}
+' "$MSG_FILE"); then
+  :
+else
+  RC=$?
+  echo "[commit-msg] 校验脚本执行失败（awk exit $RC），已拒绝提交。" >&2
+  exit 1
+fi
+
+if [ -n "$REPORT" ]; then
+  echo "[commit-msg] 拒绝提交：提交信息包含 AI 工具署名或生成尾注。" >&2
+  printf '%s\n' "$REPORT" >&2
+  echo "  作者只能是 git config 的 user.name / user.email；人工协作者请使用真实姓名署名。" >&2
+  echo "  规则与安装说明见 README.md「Git 提交钩子」。" >&2
+  exit 1
+fi
+
+exit 0

@@ -86,6 +86,16 @@ npm install
 npm run tauri dev
 ```
 
+### Git Commit Hook
+
+`.githooks/commit-msg` rejects commit messages that credit an AI tool as author or co-author (`Co-Authored-By` / `Generated with`, etc.). Enable it once after cloning:
+
+```bash
+git config core.hooksPath .githooks
+```
+
+On Linux / macOS, run `chmod +x .githooks/commit-msg` if the hook does not run. The hook only validates commit messages; it does not affect CI or other git operations. Human co-author trailers and ordinary technical mentions in the body are allowed.
+
 ### Verification & Build
 
 ```bash

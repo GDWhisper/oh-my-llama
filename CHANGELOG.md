@@ -4,6 +4,19 @@
 
 > 本文件为**详细改动历史**（含涉及的文件与实现机制）；GitHub Release 页面为对应版本的**总结性**说明。
 
+## [0.2.14] - 2026-11-10
+
+### 新增功能
+- **阻止系统休眠**：新增 `keepawake = "0.6.1"` 依赖（`src-tauri/Cargo.toml`，MIT，单 crate 统一三平台原生电源 API：Windows `SetThreadExecutionState` / macOS `IOPMAssertionCreateWithName` / Linux systemd logind `Inhibit` + freedesktop `ScreenSaver`），后端新增 `src-tauri/src/keep_awake.rs`——因 Windows 实现是线程绑定（调用线程建 guard、同线程 Drop 复位），自封唯一常驻 OS 线程独占 guard（`dispatch` 只经 channel 下发目标 `(hold, display)`、幂等创建/销毁，绝不让任意线程 Drop）；Linux `display=true` 的 `Drop` 内 `un_inhibit().unwrap()` 在 D-Bus 断开时会 panic，故销毁一律 `catch_unwind` 兜住；定时时长只约束「手动开关」，计时放独立一次性线程（不碰持有 `STATE` 锁的常驻线程，避免与调用方互等死锁），用墙上时钟分片 sleep、系统休眠/时间调整后不误判；生效是「先生效、再布计时、最后落盘」三段式，任一段失败都整体回滚到操作前 `Snapshot`（防「界面关、系统仍不休眠」假态），`EXPIRY_GENERATION` 让旧计时线程自作废，锁序固定 `MANUAL_MUTEX → STATE`。
+  `src-tauri/src/lib.rs` 的 `AppSettings` 新增 `keep_awake_manual` / `keep_awake_with_server` / `keep_awake_display` / `keep_awake_duration_minutes` / `keep_awake_until`（均 `#[serde(default)]` 兼容旧 `settings.json`）；新增命令 `set_keep_awake_prefs`（`with_server` / `display` 两项一并写入，乐观回填 + 写失败回滚，与托盘 `set_manual` 同语义收口）与 `set_keep_awake_manual`（托盘时长项与自定义输入共用）；托盘菜单新增「阻止休眠」子菜单（`KEEP_AWAKE_PRESETS` 九项：关闭 / 永久 / 30m / 1h / 2h / 3h / 6h / 12h / 自定义，与 `DEFAULT_KEEP_AWAKE_LABELS` 文案一一对应，`validate_keep_awake_labels_len` 校验前端下发数量须一致），`on_menu_event` 分发到 `keep_awake::set_manual`、自定义项 `emit("keep-awake://custom")` 唤起主窗弹输入；`run()` 的 `setup` 阶段 `keep_awake::init_on_startup` 按落盘恢复 guard 与计时、清理已过期定时，`get_status` / 启停路径调 `keep_awake::set_server_running` 让「跟随服务」随服务启停生效，`sync_tray_keep_awake_check` 对齐勾选态。
+  前端：`src/components/SettingsDialog.tsx` 新增「电源与休眠」分组（「运行模型时自动阻止休眠」「保持屏幕常亮」两复选，乐观回填 + 写失败回滚并就地提示，整体读-改-写落盘）；`src/components/KeepAwakeCustomDialog.tsx` 新建（托盘「自定义…」输入弹窗，确认走 `set_keep_awake_manual`）；`src/App.tsx` 托盘文案下发新增 `keepAwake` / `keepAwakeItems` 九项、监听 `keep-awake://custom` 打开自定义弹窗；`src/types.ts` 同步 `AppSettings` 五字段；`src/i18n/messages.ts` 补 `settings.keepAwake*` 与 `tray.keepAwake*`（中英双键）。新增单测 `keep_awake_should_hold_truth_table` / `keep_awake_settings_fields_serde_default_and_round_trip` / `keep_awake_duration_selection_and_validation` / `keep_awake_tray_labels_length_must_match_presets`。
+
+### 功能优化
+- 无
+
+### Bug 修复
+- 无
+
 ## [0.2.13] - 2026-10-27
 
 ### 新增功能
