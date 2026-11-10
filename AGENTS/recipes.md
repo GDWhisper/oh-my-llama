@@ -26,8 +26,8 @@
 全仓库仅 `src-tauri/capabilities/` 一处；读时以该目录实际内容为准。
 
 - `default.json`：对主窗口授权 `core:default`、`opener:default`、`dialog:default`、`updater:default`，以及 6 个 `core:window` 动作（minimize / toggle-maximize / maximize / unmaximize / close / start-dragging）。
-- `taskbar-widget.json`：只对运行时创建的 `taskbar-metrics` 窗口（窗口标签定义在 `src-tauri/src/taskbar_widget.rs`）授权 `core:event:default`。
-- 两份均无 shell、fs、http、process 类权限。新增 capability 后更新本节。
+- 任务栏小窗（`src-tauri/src/taskbar_widget.rs`）是原生 Win32 分层窗口、没有 webview，故不需要 capability。
+- 无 shell、fs、http、process 类权限。新增 capability 后更新本节。
 
 ## params.rs 两个陷阱
 

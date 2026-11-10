@@ -5,7 +5,7 @@
 ## 项目一句话
 
 Oh My Llama：Tauri 2 桌面工具，管理 `llama-server` 启动配置、参数与日志（仅作导航，产品介绍读 `README.md`）。双层边界：`src/`（React/TS 表现层）只经 invoke 桥与后端通信；`src-tauri/src/`（Rust）独占进程、文件、系统交互。
-任务栏小窗是独立 webview 入口（另起 webview，不走主窗 invoke 桥），常驻、生命周期独立于主窗。
+任务栏小窗是**原生 Win32 分层窗口**（自绘，无 webview；`taskbar_widget.rs` + `taskbar_render.rs`），由自己的线程持有，生命周期独立于主窗。
 
 ## 快速命令
 
