@@ -230,7 +230,8 @@ export default function App() {
 
   // 托盘菜单文案：i18n 真源在前端，语言切换时（t 仅随 lang 变化）重新下发。
   // 四段顶层文案 + 「阻止休眠」子菜单九项（顺序须与后端 KEEP_AWAKE_PRESETS 一致）。
-  // 后端在托盘尚未就绪时静默忽略；StrictMode 双挂载重复 invoke 幂等无害。
+  // 后端在托盘尚未就绪时静默忽略；StrictMode 双挂载会连发两次 invoke，后端以
+  // TRAY_MENU_REBUILD 锁串行化菜单重建，保证静态句柄与托盘实际挂上的菜单一致。
   // 复选项勾选态由后端读 settings.json 真源，此处只下发文案。
   useEffect(() => {
     invoke('set_tray_labels', {
