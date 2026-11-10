@@ -65,6 +65,17 @@ export default function App() {
   // 更新（方案 A）：手动检查、下载可见且可取消、安装需显式确认。
   const updater = useUpdater();
 
+  // 任务栏小窗是原生自绘（没有 webview，也就没有 i18n 环境）：标签由本窗口按当前语言
+  // 注入，后端在收到之前用中文兜底。t 随语言变化换引用，故切语言会重推一次。
+  useEffect(() => {
+    invoke('set_taskbar_metrics_labels', {
+      cpu: t('metrics.cpu'),
+      mem: t('metrics.memory'),
+      gpu: t('metrics.gpu'),
+      vram: t('metrics.vram'),
+    }).catch(() => {});
+  }, [t]);
+
   const {
     config,
     configEpoch,
@@ -230,7 +241,8 @@ export default function App() {
 
   // 托盘菜单文案：i18n 真源在前端，语言切换时（t 仅随 lang 变化）重新下发。
   // 四段顶层文案 + 「阻止休眠」子菜单九项（顺序须与后端 KEEP_AWAKE_PRESETS 一致）。
-  // 后端在托盘尚未就绪时静默忽略；StrictMode 双挂载重复 invoke 幂等无害。
+  // 后端在托盘尚未就绪时静默忽略；StrictMode 双挂载会连发两次 invoke，后端以
+  // TRAY_MENU_REBUILD 锁串行化菜单重建，保证静态句柄与托盘实际挂上的菜单一致。
   // 复选项勾选态由后端读 settings.json 真源，此处只下发文案。
   useEffect(() => {
     invoke('set_tray_labels', {

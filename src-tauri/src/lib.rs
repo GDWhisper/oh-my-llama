@@ -42,9 +42,11 @@ use perf::{get_perf_stats, record_log_line, reset_perf};
 // 各 DPI 档位下 shell 实际请求的图标尺寸（原始 RGBA），由 scripts/gen_app_icons.py 生成
 mod icon_assets;
 
-// 任务栏常驻性能小窗（TrafficMonitor 风格；仅 Windows 提供，其余平台设置卡片不渲染）
+// 任务栏常驻性能小窗（TrafficMonitor 风格；仅 Windows 提供，其余平台设置卡片不渲染）。
+// 内容是 Rust 侧自绘（taskbar_render），不再为它起 webview 实例。
+mod taskbar_render;
 mod taskbar_widget;
-use taskbar_widget::{get_taskbar_widget_support, set_taskbar_metrics, taskbar_widget_ready};
+use taskbar_widget::{get_taskbar_widget_support, set_taskbar_metrics, set_taskbar_metrics_labels};
 
 // 阻止系统休眠：三平台统一经 keepawake 原生 API，guard 的创建/销毁独占一条常驻线程
 // （Windows 的 ES_CONTINUOUS 线程绑定 + Linux Drop 可能 panic，见模块内注释）。
@@ -516,6 +518,13 @@ async fn resolve_close_choice(
 // 除四段顶层文案外，另下发「阻止休眠」子菜单的九个时长项文案（顺序与
 // KEEP_AWAKE_PRESETS 一一对应）。按 ID 重建菜单，事件 handler 挂在托盘上、与菜单实例
 // 无关；未就绪时静默跳过。勾选态在 build_tray_menu 内读持久化真源。
+//
+// 整段「建菜单 → 挂上托盘 → 提交复选项句柄」必须在同一把锁内完成：前端 StrictMode
+// 双挂载会连发两次 set_tray_labels，两次 IPC 落在不同线程。若允许交叉，最后一次
+// set_menu 的菜单与静态里留存的句柄可能不是同一份，之后所有勾选态对齐都打在一份
+// 看不见的孤儿菜单上 —— 可见菜单便停留在 muda 自动翻转后的状态（关闭 + 时长双勾）。
+static TRAY_MENU_REBUILD: LazyLock<Mutex<()>> = LazyLock::new(|| Mutex::new(()));
+
 #[tauri::command]
 async fn set_tray_labels(
     app: AppHandle,
@@ -534,8 +543,16 @@ async fn set_tray_labels(
     let Some(tray) = app.tray_by_id(TRAY_ID) else {
         return Ok(());
     };
-    let menu = build_tray_menu(&app, &show, &quit, &metrics, &keep_awake, &keep_awake_items)?;
+    let _rebuild_guard = TRAY_MENU_REBUILD
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let (menu, handles) =
+        build_tray_menu(&app, &show, &quit, &metrics, &keep_awake, &keep_awake_items)?;
+    // 先挂上再提交句柄：set_menu 失败时静态仍是上一份可见菜单的句柄，不会指向孤儿菜单。
     tray.set_menu(Some(menu)).map_err(|err| err.to_string())?;
+    commit_tray_handles(handles);
+    // 构造与挂上之间真源可能已变（定时到期 / 设置面板改开关），再刷一次保证单选。
+    sync_tray_keep_awake_check();
     Ok(())
 }
 
@@ -552,9 +569,22 @@ fn validate_keep_awake_labels_len(len: usize) -> Result<(), String> {
     }
 }
 
+/// 一份菜单对应的复选项句柄：必须等这份菜单真正挂上托盘后才写进静态。
+struct TrayMenuHandles {
+    keep_awake: KeepAwakeItems,
+    metrics: Option<CheckMenuItem<Wry>>,
+}
+
+/// 提交句柄。调用方持 TRAY_MENU_REBUILD 锁，保证不与另一次菜单重建交叉。
+fn commit_tray_handles(handles: TrayMenuHandles) {
+    *TRAY_METRICS_ITEM.lock().unwrap() = handles.metrics;
+    *TRAY_KEEP_AWAKE_ITEMS.lock().unwrap() = handles.keep_awake;
+}
+
 /// 建托盘菜单：显示主窗口 / 阻止休眠（子菜单）/ 性能监控 / 退出。
 /// 「阻止休眠」子菜单列出关闭 + 7 档时长 + 自定义，三平台都建；「性能监控」仅
-/// Windows 建。子菜单复选项的勾选态读 settings.json 真源，句柄存进静态供后续对齐。
+/// Windows 建。九个复选项是互斥单选组，构造时读 settings.json 真源只勾一项；
+/// 句柄随菜单一起返回，由调用方挂上托盘后提交（见 set_tray_labels 注释）。
 fn build_tray_menu<M: Manager<Wry>>(
     app: &M,
     show: &str,
@@ -562,7 +592,7 @@ fn build_tray_menu<M: Manager<Wry>>(
     metrics: &str,
     keep_awake_label: &str,
     keep_awake_items: &[String],
-) -> Result<Menu<Wry>, String> {
+) -> Result<(Menu<Wry>, TrayMenuHandles), String> {
     let show_item = MenuItem::with_id(app, TRAY_ID_SHOW, show, true, None::<&str>)
         .map_err(|e| e.to_string())?;
     let quit_item = MenuItem::with_id(app, TRAY_ID_QUIT, quit, true, None::<&str>)
@@ -580,11 +610,7 @@ fn build_tray_menu<M: Manager<Wry>>(
     // built 单独持有 CheckMenuItem 值：sub_items 只借用它们，循环期间不能移动元素。
     let mut built: Vec<CheckMenuItem<Wry>> = Vec::new();
     for (index, key) in KEEP_AWAKE_PRESETS.iter().enumerate() {
-        let id = if *key == KEEP_AWAKE_CUSTOM_KEY {
-            TRAY_ID_KEEP_AWAKE_CUSTOM.to_string()
-        } else {
-            format!("{TRAY_ID_KEEP_AWAKE_MIN_PREFIX}{key}")
-        };
+        let id = keep_awake_item_id(*key);
         built.push(
             CheckMenuItem::with_id(app, id, label(index), true, active == *key, None::<&str>)
                 .map_err(|e| e.to_string())?,
@@ -598,10 +624,10 @@ fn build_tray_menu<M: Manager<Wry>>(
     }
     let keep_awake_submenu =
         Submenu::with_items(app, keep_awake_label, true, &sub_items).map_err(|e| e.to_string())?;
-    *TRAY_KEEP_AWAKE_ITEMS.lock().unwrap() = check_items;
 
     let mut items: Vec<&dyn IsMenuItem<Wry>> = vec![&show_item, &keep_awake_submenu, &quit_item];
     let metrics_item;
+    let mut metrics_handle = None;
     if cfg!(windows) {
         metrics_item = CheckMenuItem::with_id(
             app,
@@ -613,9 +639,16 @@ fn build_tray_menu<M: Manager<Wry>>(
         )
         .map_err(|e| e.to_string())?;
         items.insert(2, &metrics_item);
-        *TRAY_METRICS_ITEM.lock().unwrap() = Some(metrics_item.clone());
+        metrics_handle = Some(metrics_item.clone());
     }
-    Menu::with_items(app, &items).map_err(|e| e.to_string())
+    let menu = Menu::with_items(app, &items).map_err(|e| e.to_string())?;
+    Ok((
+        menu,
+        TrayMenuHandles {
+            keep_awake: check_items,
+            metrics: metrics_handle,
+        },
+    ))
 }
 
 /// 当前该勾哪个时长项：未开启 = 关闭；预设值 = 对应档；其它（自定义分钟数）= 自定义。
@@ -642,18 +675,48 @@ fn taskbar_metrics_enabled() -> bool {
 /// None，无事可做。
 pub(crate) fn sync_tray_metrics_check() {
     if let Some(item) = TRAY_METRICS_ITEM.lock().unwrap().as_ref() {
-        let _ = item.set_checked(taskbar_metrics_enabled());
+        if let Err(err) = item.set_checked(taskbar_metrics_enabled()) {
+            eprintln!("[tray] 性能监控勾选态对齐失败: {err}");
+        }
     }
 }
 
 /// 把「阻止休眠」子菜单九个复选项的勾选态整体对齐到 settings.json 真源：设置时长、
 /// 定时到期、失败回滚都经此。菜单尚未建立时句柄为空，无事可做。
+///
+/// muda 在派发点击事件前会自行翻转被点项的原生勾选，所以九项必须逐项显式写回；
+/// 只要漏掉一项或某次 set_checked 失败，单选组就会残留两个勾。失败必须可见——
+/// Tauri 的 set_checked 要经主线程往返，静默吞错会把状态漂移伪装成正常。
 pub(crate) fn sync_tray_keep_awake_check() {
     let (manual, minutes) = keep_awake::manual_selection();
     let active = keep_awake_active_key(manual, minutes);
     for (key, item) in TRAY_KEEP_AWAKE_ITEMS.lock().unwrap().iter() {
-        let _ = item.set_checked(*key == active);
+        if let Err(err) = item.set_checked(*key == active) {
+            eprintln!("[tray] 阻止休眠勾选态对齐失败（key={key}）: {err}");
+        }
     }
+}
+
+/// 子菜单项 ID 的唯一生成入口：时长项带分钟数（-1 = 关闭），自定义项独立 ID。
+/// 与下面的解析函数成对，避免手写字符串与格式化模板漂移。
+fn keep_awake_item_id(key: i64) -> String {
+    if key == KEEP_AWAKE_CUSTOM_KEY {
+        TRAY_ID_KEEP_AWAKE_CUSTOM.to_string()
+    } else {
+        format!("{TRAY_ID_KEEP_AWAKE_MIN_PREFIX}{key}")
+    }
+}
+
+/// 托盘时长项 ID → 分钟数。非时长项（含自定义）返回 None，调用方据此决定不生效。
+fn keep_awake_minutes_from_id(id: &str) -> Option<i64> {
+    id.strip_prefix(TRAY_ID_KEEP_AWAKE_MIN_PREFIX)?
+        .parse::<i64>()
+        .ok()
+}
+
+/// 是否属于「阻止休眠」单选组：这些项点击后都要从真源重刷一遍勾选态。
+fn is_keep_awake_group_id(id: &str) -> bool {
+    id == TRAY_ID_KEEP_AWAKE_CUSTOM || id.starts_with(TRAY_ID_KEEP_AWAKE_MIN_PREFIX)
 }
 
 /// 托盘「性能监控」点击：翻转任务栏小窗开关（与设置面板同名开关同一真源、同一
@@ -886,7 +949,7 @@ pub fn run() {
             get_main_window_visible,
             get_system_metrics,
             set_taskbar_metrics,
-            taskbar_widget_ready,
+            set_taskbar_metrics_labels,
             get_taskbar_widget_support,
             get_perf_stats,
             get_param_registry
@@ -900,7 +963,12 @@ pub fn run() {
                 .iter()
                 .map(|s| (*s).to_string())
                 .collect();
-            let tray_menu = build_tray_menu(
+            // 与 set_tray_labels 共用同一把锁：启动阶段前端可能已下发文案，两次菜单
+            // 重建不能交叉，否则静态句柄会指向没挂上托盘的孤儿菜单。
+            let rebuild_guard = TRAY_MENU_REBUILD
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            let (tray_menu, tray_handles) = build_tray_menu(
                 app,
                 "Show",
                 "Quit",
@@ -918,30 +986,36 @@ pub fn run() {
                 .menu(&tray_menu)
                 // 左键不弹菜单：左键单击直接恢复主窗口，菜单留给右键（Windows 惯例）。
                 .show_menu_on_left_click(false)
-                .on_menu_event(|app, event| match event.id.as_ref() {
-                    id if id == TRAY_ID_SHOW => show_main_window(app),
-                    id if id == TRAY_ID_METRICS => toggle_taskbar_metrics_tray(app),
-                    id if id == TRAY_ID_KEEP_AWAKE_CUSTOM => {
-                        show_main_window(app);
-                        // muda 点选时已翻转该复选项，而弹窗可能被取消：先翻回真源，
-                        // 真确认后由 set_manual 再对齐一次。
-                        sync_tray_keep_awake_check();
-                        let _ = app.emit("keep-awake://custom", ());
-                    }
-                    id if id.starts_with(TRAY_ID_KEEP_AWAKE_MIN_PREFIX) => {
-                        if let Ok(minutes) =
-                            id[TRAY_ID_KEEP_AWAKE_MIN_PREFIX.len()..].parse::<i64>()
-                        {
-                            if let Err(err) =
-                                keep_awake::set_manual(minutes != KEEP_AWAKE_OFF_KEY, minutes)
-                            {
-                                eprintln!("[keep-awake] 托盘设置时长失败: {err}");
-                                sync_tray_keep_awake_check();
+                .on_menu_event(|app, event| {
+                    let menu_id = event.id.as_ref();
+                    match menu_id {
+                        id if id == TRAY_ID_SHOW => show_main_window(app),
+                        id if id == TRAY_ID_METRICS => toggle_taskbar_metrics_tray(app),
+                        id if id == TRAY_ID_KEEP_AWAKE_CUSTOM => {
+                            show_main_window(app);
+                            // 弹窗可能被取消；真确认后由 set_manual 生效并落盘。
+                            let _ = app.emit("keep-awake://custom", ());
+                        }
+                        id if id.starts_with(TRAY_ID_KEEP_AWAKE_MIN_PREFIX) => {
+                            if let Some(minutes) = keep_awake_minutes_from_id(id) {
+                                if let Err(err) =
+                                    keep_awake::set_manual(minutes != KEEP_AWAKE_OFF_KEY, minutes)
+                                {
+                                    eprintln!("[keep-awake] 托盘设置时长失败: {err}");
+                                }
+                            } else {
+                                eprintln!("[keep-awake] 无法解析托盘时长项 ID: {id}");
                             }
                         }
+                        id if id == TRAY_ID_QUIT => graceful_exit(app),
+                        _ => {}
                     }
-                    id if id == TRAY_ID_QUIT => graceful_exit(app),
-                    _ => {}
+                    // muda 在派发事件前已自行翻转被点项的原生勾选。无论 set_manual 成功、
+                    // 失败还是 ID 解析失败，九项都在这里统一回读真源，保证单选组恒有且
+                    // 仅有一个勾 —— 任何一条分支漏掉对齐都会留下「关闭 + 时长」双勾。
+                    if is_keep_awake_group_id(menu_id) {
+                        sync_tray_keep_awake_check();
+                    }
                 })
                 .on_tray_icon_event(|tray, event| {
                     if let TrayIconEvent::Click {
@@ -954,6 +1028,8 @@ pub fn run() {
                     }
                 })
                 .build(app)?;
+            commit_tray_handles(tray_handles);
+            drop(rebuild_guard);
 
             // 托盘建好后恢复「阻止休眠」：按落盘的手动 / 跟随服务偏好建立 guard
             // （失败仅记日志、不拦启动）。
@@ -4670,5 +4746,76 @@ enabled_advanced_params = ["ctx_size"]
                 "文案数量 {wrong} 不该通过"
             );
         }
+    }
+
+    #[test]
+    fn keep_awake_menu_has_exactly_one_active_item() {
+        // 九项是单选组：active 必须命中 presets 中恰好一项。命中 0 项会零勾，
+        // 对齐漏项或命中多项就会留下「关闭 + 时长」双勾。
+        for manual in [false, true] {
+            for minutes in [
+                i64::MIN,
+                -999,
+                -2,
+                -1,
+                0,
+                1,
+                29,
+                30,
+                60,
+                120,
+                180,
+                360,
+                720,
+                721,
+                1440,
+                1441,
+                i64::MAX,
+            ] {
+                let active = keep_awake_active_key(manual, minutes);
+                let hits = KEEP_AWAKE_PRESETS
+                    .iter()
+                    .filter(|key| **key == active)
+                    .count();
+                assert_eq!(
+                    hits, 1,
+                    "manual={manual} minutes={minutes} 得到 active={active}，命中 {hits} 项"
+                );
+            }
+        }
+        // presets 本身不能有重复键，否则同一时长会对应两个菜单项。
+        let mut sorted = KEEP_AWAKE_PRESETS.to_vec();
+        sorted.sort_unstable();
+        sorted.dedup();
+        assert_eq!(sorted.len(), KEEP_AWAKE_PRESETS.len());
+    }
+
+    #[test]
+    fn keep_awake_tray_ids_round_trip() {
+        // ID 生成与解析必须同源：解析失败时不调用 set_manual，只能靠点击后的统一对齐兜底。
+        for key in KEEP_AWAKE_PRESETS {
+            let id = keep_awake_item_id(key);
+            assert!(is_keep_awake_group_id(&id), "{id} 应属于单选组");
+            if key == KEEP_AWAKE_CUSTOM_KEY {
+                assert_eq!(id, TRAY_ID_KEEP_AWAKE_CUSTOM);
+                assert_eq!(keep_awake_minutes_from_id(&id), None);
+            } else {
+                assert_eq!(keep_awake_minutes_from_id(&id), Some(key));
+            }
+        }
+        for unrelated in [
+            TRAY_ID_SHOW,
+            TRAY_ID_QUIT,
+            TRAY_ID_METRICS,
+            "tray-keep-awake-min-",
+            "tray-keep-awake-min-abc",
+            "tray-keep-awake-min-999999999999999999999999",
+        ] {
+            assert_eq!(keep_awake_minutes_from_id(unrelated), None);
+        }
+        assert!(!is_keep_awake_group_id(TRAY_ID_SHOW));
+        assert!(is_keep_awake_group_id(TRAY_ID_KEEP_AWAKE_CUSTOM));
+        // 前缀命中但数字非法：仍属单选组，事件结束必须照常对齐勾选态。
+        assert!(is_keep_awake_group_id("tray-keep-awake-min-abc"));
     }
 }
