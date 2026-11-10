@@ -1,140 +1,120 @@
 //! 任务栏常驻性能小窗（TrafficMonitor 风格，仅 Windows 提供）。
 //!
-//! 形态：一个无边框 / 透明 / 置顶 / 点击穿透 / 不抢焦点（WS_EX_NOACTIVATE）的
-//! WebView2 条带窗，贴在任务栏托盘区左侧（竖任务栏则贴托盘区上方）。条带内容与
-//! 尺寸由前端页面（`widget.html`）渲染并经 `taskbar_widget_ready` 上报——Rust 侧
-//! 不画字，省掉自绘 GDI 的一整套字体 / DPI / 本地化逻辑，代价是多一个 webview 实例。
+//! 形态：一个无边框 / 分层（逐像素 alpha）/ 置顶 / 点击穿透 / 不抢焦点（WS_EX_NOACTIVATE）
+//! 的**原生窗口**，贴在任务栏托盘区左侧（竖任务栏则贴托盘区上方）。条带由 Rust 侧用
+//! GDI + `UpdateLayeredWindow` 自绘（见 `taskbar_render`）——不再为它起一个 webview 实例。
+//!
+//! 为什么自绘：原先小窗是独立 WebView2 窗口（页面 `widget.html`），内容由前端渲染、
+//! 量出尺寸再经 `taskbar_widget_ready` 回报后端。代价是常驻一个渲染进程（实测工作集约
+//! 74 MB / 私有约 36 MB），而它只显示一行数字。自绘后这部分进程完全消失。
+//!
+//! 为什么是**裸 Win32 窗口**而不是 `tauri::Window`：Tauri 2 的无 webview 窗口
+//! （`WindowBuilder` / `Manager::get_window`）在 `unstable` feature 后面，且 tao 会在每次
+//! show/hide 时整段重写 ex-style——旧实现为此在定位线程里每拍纠正 WS_EX_TOOLWINDOW，
+//! 还得把全部窗口操作排队到主线程上执行（否则 tao 的 window_state 锁与 IPC 线程反向取锁
+//! 会 AB-BA 死锁，2026-10-13 实测整应用 hung）。裸窗口由本模块自己的线程创建并持有，
+//! 上述两类问题从根上不存在：没有 tao 记账要同步，也没有跨线程的窗口 API 调用。
 //!
 //! 关键取舍（都是会踩的坑）：
-//! - 用 `win.destroy()` 而非 `win.close()`：本应用的 `on_window_event` 把任何窗口的
-//!   CloseRequested 都当主窗口关闭分流处理（隐藏主窗或整个退出），小窗走 close 会误触发。
-//! - 窗口先建为隐藏，等前端量出真实尺寸再定位 + 显示，避免首帧跳位。
-//! - `focusable(false)`（→ WS_EX_NOACTIVATE）保证 show() 与点击都不抢焦点；
-//!   `set_ignore_cursor_events(true)` 让鼠标事件穿透到任务栏本身。
-//! - 任务栏矩形取自 Shell_TrayWnd、托盘区取其子窗 TrayNotifyWnd；找不到托盘区时
-//!   退回任务栏右缘（可能与托盘图标重叠，属兜底）。
-//! - 点击任务栏会把 shell 提到置顶带最上层，把条带盖住；故每拍检查 z 序，被压住
-//!   才重申置顶——不做每秒无脑置顶，避免与托盘弹出面板（Wi-Fi/音量等）抢层。
-//!   完整核对 1s 一拍太慢：实测点击任务栏（托盘区收展 / 任务栏空白均然）后条带被
-//!   盖住 0.3~0.5s，肉眼就是一下闪烁。故定位线程另挂一个 50ms 轻量检测（只读 z 序，
-//!   不碰任何 tao 窗口 API），发现任务栏压在条带上就立即排队顶回，不等下一完整拍。
-//! - 条带样式（默认/透明）、排列（单行/两行）与日/夜间取色都是前端呈现；Rust 侧只经
-//!   `taskbar-widget://settings` 转发设置、每拍广播任务栏明暗（见 `taskbar_is_light`）。
+//! - 窗口必须**先**带 WS_EX_LAYERED 创建，再用 `UpdateLayeredWindow` 贴图；开
+//!   WS_EX_NOREDIRECTIONBITMAP（tao 的 `transparent(true)` 就会）与分层窗口互斥，
+//!   画面永远不显示。点击穿透靠 WS_EX_TRANSPARENT。
+//! - **WS_EX_TOPMOST 必须在建窗时就带上**（2026-11-10 实测踩坑）：只在落位时
+//!   `SetWindowPos(HWND_TOPMOST, …)` 不够——Win11 的任务栏宿主
+//!   （`XamlExplorerHostIslandWindow` / `Shell_TrayWnd`）在置顶带里压着普通窗口，
+//!   条带会被任务栏底色整块盖住，而 `IsWindowVisible` 仍为 1、`UpdateLayeredWindow`
+//!   也返回成功，肉眼「什么都没画出来」。同样地，判「被压住」的 `taskbar_above` 在
+//!   窗口本身不置顶时也读不出真相：它只在置顶带内比较 z 序。
+//! - 窗口线程用 `SetTimer` + 消息循环驱动（空闲时 GetMessage 阻塞，0% CPU），
+//!   不用 sleep 轮询：50ms 一拍做「任务栏是否压在条带上」的只读 z 序检查，
+//!   1s/2s 一拍做完整核对（落位 / 显隐 / 尺寸），1.5s 一拍采集指标。
+//! - 尺寸由本线程按文字实测得出（物理像素），随即 `SetWindowPos` 落位再贴图：同一个
+//!   线程内同步完成，不存在「窗口尺寸与位图不一致」的中间态。
+//! - 任务栏矩形取自 Shell_TrayWnd、托盘区取其子窗 TrayNotifyWnd；找不到托盘区时退回
+//!   任务栏右缘（可能与托盘图标重叠，属兜底）。
+//! - 点击任务栏会把 shell 提到置顶带最上层盖住条带（实测 0.3~0.5s，肉眼就是一下闪烁），
+//!   故 50ms 检查命中即重申置顶；完整核对里不无脑置顶，免得与托盘弹出面板抢层。
+//! - 标签文案（CPU / 内存 / GPU / 显存）由主窗口按当前语言注入
+//!   （`set_taskbar_metrics_labels`）：自绘没有 i18n 环境，后端只保留中文兜底。
 
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, LazyLock, Mutex};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::{LazyLock, Mutex};
 
-use tauri::{AppHandle, Emitter, Manager, PhysicalPosition, PhysicalSize};
-#[cfg(windows)]
-use tauri::{WebviewUrl, WebviewWindowBuilder};
+use tauri::AppHandle;
 
 use crate::{load_settings, resolve_app_data, save_settings_json, AppSettings};
-
-/// 小窗的窗口 label（与 capabilities/taskbar-widget.json、前端事件目标一致）。
-pub const WIDGET_LABEL: &str = "taskbar-metrics";
 
 /// 可显示的参数键：顺序即条带内显示顺序（前端复选框与设置持久化共用）。
 pub const ITEM_KEYS: [&str; 4] = ["cpu", "mem", "gpu", "vram"];
 
 /// 条带样式键（与设置卡片单选组、前端归一化对齐）：default = 近黑圆角底；
-/// transparent = 无底色，文字直接叠在任务栏上（由后端广播的任务栏明暗驱动取色）。
+/// transparent = 无底色，文字直接叠在任务栏上（取色由任务栏明暗驱动）。
 pub const STYLE_DEFAULT: &str = "default";
 pub const STYLE_TRANSPARENT: &str = "transparent";
-/// 排列键：single = 单行；double = 两行（仅横任务栏生效；竖任务栏本就逐项成行，保持单列）。
+/// 排列键：single = 单行；double = 两行（仅横任务栏生效；竖任务栏本就逐项成行）。
 pub const LAYOUT_SINGLE: &str = "single";
 pub const LAYOUT_DOUBLE: &str = "double";
 
-/// 定位线程节拍（毫秒）：任务栏移动 / 自动隐藏 / 全屏切换都靠这一周期兜住。
+/// 指标轮询间隔（毫秒）：与主面板同频，避免同一个采集器被两处不同节奏地刷新。
 #[cfg(windows)]
-const TICK_MS: u64 = 1000;
-/// 条带收起期间（任务栏自动隐藏 / 前台全屏 / explorer 重启间隙）的完整拍节拍：
-/// 没人看就放慢几何核对，恢复检测 2s 一次足够（条带不在屏上，落位精度无感）。
+const INTERVAL_MS: u64 = 1500;
+/// 整机 CPU 高负载时放慢轮询（快照自带全局占用，判定零成本）：负载越高压在监控上的
+/// CPU 越添乱，5s 一拍仍够看趋势；占用回落后自动回到常速。阈值按显示值口径取 90。
+#[cfg(windows)]
+const BUSY_PCT: f32 = 90.0;
+#[cfg(windows)]
+const SLOW_INTERVAL_MS: u64 = 5000;
+/// 高占用告警线（显示值达到即染红）：条带只有一格字号，两档分不出主次，一档够传达
+/// 「该看一眼」。
+#[cfg(windows)]
+const HOT_PCT: i32 = 80;
+/// 定时器节拍（毫秒）：50ms 做只读 z 序检查，顺手把「该重算了吗」一并判掉。
+#[cfg(windows)]
+const TICK_MS: u32 = 50;
+/// 完整核对节拍（毫秒）：显示中 1s 一拍；收起期间（任务栏自动隐藏 / 前台全屏 /
+/// explorer 重启间隙）没人看，降到 2s。
+#[cfg(windows)]
+const FULL_TICK_MS: u64 = 1000;
 #[cfg(windows)]
 const HIDDEN_TICK_MS: u64 = 2000;
-/// 条带收起期间的循环睡眠：被压检测无从做起（条带不在屏上，任务栏压不到它），
-/// 不必 50ms 醒一次；200ms 醒来看是否该排下一拍即可。
+/// 首帧最多等标签注入这么久（主窗口 webview 未就绪时用中文兜底），避免英文界面闪中文。
 #[cfg(windows)]
-const HIDDEN_SLEEP_MS: u64 = 200;
-/// 高频检测节拍（毫秒）：只做「任务栏是否压在条带上」的只读 z 序检查，命中即排队
-/// 顶回。比完整拍快一个量级，把点击任务栏后条带被盖住的时间压到人眼难辨。
-#[cfg(windows)]
-const PRESS_CHECK_MS: u64 = 50;
+const LABELS_WAIT_MS: u64 = 2000;
 /// 条带与托盘区之间的间隙（逻辑像素，按 DPI 换算为物理像素）。
 #[cfg(windows)]
 const GAP_LOGICAL: f64 = 6.0;
 /// 任务栏与其所在显示器的可见交叠低于该值（物理像素）视为「已自动隐藏」。
 #[cfg(any(windows, test))]
 const VISIBLE_MIN_PX: i32 = 8;
-/// 前端上报真实尺寸前的窗口粗尺寸（逻辑像素）。仅 Windows 建窗用；非 Windows 上
-/// 整个文件不进构建路径的门控区，留着就是 dead_code（clippy -D warnings 会拦）。
+/// 首帧尺寸（物理像素）：仅建窗用，真实尺寸由文字实测得出。
 #[cfg(windows)]
-const INITIAL_LOGICAL: (f64, f64) = (240.0, 32.0);
+const INITIAL_SIZE: (i32, i32) = (240, 32);
 
-struct Shared {
-    /// 定位线程停止旗标；None = 线程未运行。取走并置位即要求线程在一拍内退出。
-    stop: Mutex<Option<Arc<AtomicBool>>>,
-    /// 前端量出的条带逻辑尺寸（CSS px）；None = 尚未上报（窗口保持隐藏）。
-    size: Mutex<Option<(f64, f64)>>,
-    /// 上一拍已生效的窗口状态（去重用，避免重复落位 / 重复发事件）。
-    tick: Mutex<TickState>,
-    /// 小窗原生句柄（isize）缓存：供定位线程做只读 z 序检测。句柄在窗口生命周期内
-    /// 不变，故只在未缓存时写一次；窗口销毁（disable）时清空，防拿失效句柄乱找。
-    #[cfg(windows)]
-    hwnd: Mutex<Option<isize>>,
-    /// 条带当前是否收起（由 `apply_step` 的显隐分支维护，定位线程只读）：收起期间
-    /// 核对降频、被压检测停跑（见 `spawn_supervisor`）。
-    #[cfg(windows)]
-    hidden: AtomicBool,
+/// 一项的标签文案（按语言注入；默认值见 `Labels::default`）。
+#[derive(Clone)]
+struct Labels {
+    cpu: String,
+    mem: String,
+    gpu: String,
+    vram: String,
 }
 
-#[derive(Default)]
-struct TickState {
-    pos: Option<(i32, i32)>,
-    size_px: Option<(u32, u32)>,
-    vertical: Option<bool>,
-    /// 任务栏是否浅色（SystemUsesLightTheme）。None = 读不到（键/值缺失），不广播，
-    /// 前端按系统 prefers-color-scheme 兜底。
-    theme_light: Option<bool>,
-    shown: bool,
-}
-
-static STATE: LazyLock<Shared> = LazyLock::new(|| Shared {
-    stop: Mutex::new(None),
-    size: Mutex::new(None),
-    tick: Mutex::new(TickState::default()),
-    #[cfg(windows)]
-    hwnd: Mutex::new(None),
-    #[cfg(windows)]
-    hidden: AtomicBool::new(false),
-});
-
-/// `step()` 是否正在主线程上执行（可重入守卫）。
-///
-/// 窗口操作会**同步**回调到本线程（`SetWindowPos` → 窗口过程），而 `step()` 自身又是由
-/// IPC（`taskbar_widget_ready`）触发的，二者叠加就可能让 `step()` 在主线程上二次进入。
-/// `std::sync::Mutex` 不可重入，二次进入即主线程自锁死（整应用 hung、托盘点不动）。
-/// 挡掉即可：本拍的活由外层那次做完，被挡的这次下一拍自会补上。
-static STEPPING: AtomicBool = AtomicBool::new(false);
-
-/// 已排进主线程队列但尚未开跑的 `step()` 数量上限——最多一个。
-/// 主线程繁忙（长任务 / 系统挂起）时若每拍都追加，队列会无界增长；而多排几次也没有
-/// 额外收益（第二拍看到的仍是同一份状态），故已有排队就直接跳过本拍。
-static STEP_QUEUED: AtomicBool = AtomicBool::new(false);
-
-/// RAII：离开 `step()` 时清除「执行中」标记（panic 路径同样生效，不留死标记）。
-struct StepGuard;
-
-impl Drop for StepGuard {
-    fn drop(&mut self) {
-        STEPPING.store(false, Ordering::SeqCst);
+impl Default for Labels {
+    fn default() -> Self {
+        // 中文兜底：主窗口 webview 起来后会立刻用当前语言覆盖（见
+        // `set_taskbar_metrics_labels`）。刻意不在这里读系统语言——用户可能在应用内
+        // 选过与系统不同的语言，读系统反而更常错。
+        Self {
+            cpu: "CPU".into(),
+            mem: "内存".into(),
+            gpu: "GPU".into(),
+            vram: "显存".into(),
+        }
     }
 }
 
-// ── IPC 命令 ───────────────────────────────────────────────────────────
-
-/// `taskbar-widget://settings` 事件载荷：一份设置快照。字段名是跨层契约
-/// （前端见 src/widget/TaskbarMetrics.tsx），改名须两处同步。
-#[derive(Clone, serde::Serialize)]
+/// 小窗当前生效的设置（内存副本；真源仍是 settings.json）。
+#[derive(Clone)]
 struct WidgetSettings {
     items: Vec<String>,
     style: String,
@@ -142,9 +122,55 @@ struct WidgetSettings {
     detailed: bool,
 }
 
-/// 开关 / 勾选项 / 样式 / 排列 / 详细数据落盘并立即生效：开启时确保小窗存在并启动
-/// 定位线程，关闭时销毁小窗。返回落盘后的全量设置（前端以后端返回值校准，与其它设置命令一致）。
-/// 设置面板命令与托盘菜单开关共用同一核心（托盘入口见 toggle）。
+impl Default for WidgetSettings {
+    fn default() -> Self {
+        Self {
+            items: ITEM_KEYS.iter().map(|k| (*k).to_string()).collect(),
+            style: STYLE_DEFAULT.to_string(),
+            layout: LAYOUT_SINGLE.to_string(),
+            detailed: false,
+        }
+    }
+}
+
+/// 跨线程共享的小窗状态。窗口本身由小窗线程独占（见模块头），这里只放**数据**：
+/// IPC 线程写、小窗线程读，全部是短临界区的 Mutex / 原子量。
+struct Shared {
+    /// 代际号：每次 enable 自增。线程发现自己不再是当代即主动销毁窗口退出，
+    /// 保证「关→开」快速连点时旧窗口不会残留。
+    generation: AtomicU64,
+    /// 窗口句柄（isize）：仅用于让 `disable` 能 `PostMessage(WM_CLOSE)` 唤醒阻塞中的
+    /// 消息循环。窗口归小窗线程所有，这里只做只读转发。
+    #[cfg(windows)]
+    hwnd: Mutex<Option<isize>>,
+    /// 请求尽快重算一帧（设置 / 语言变更）。定时器 50ms 内必然看到。
+    wake: AtomicBool,
+    /// 当前设置 / 标签 / 最近一次指标快照（小窗线程只读）。
+    settings: Mutex<WidgetSettings>,
+    labels: Mutex<Labels>,
+    /// 标签是否已由主窗口注入（未注入时首帧最多等 `LABELS_WAIT_MS`）。
+    labels_ready: AtomicBool,
+    #[cfg(windows)]
+    metrics: Mutex<Option<crate::metrics::MetricsSnapshot>>,
+}
+
+static STATE: LazyLock<Shared> = LazyLock::new(|| Shared {
+    generation: AtomicU64::new(0),
+    #[cfg(windows)]
+    hwnd: Mutex::new(None),
+    wake: AtomicBool::new(true),
+    settings: Mutex::new(WidgetSettings::default()),
+    labels: Mutex::new(Labels::default()),
+    labels_ready: AtomicBool::new(false),
+    #[cfg(windows)]
+    metrics: Mutex::new(None),
+});
+
+// ── IPC 命令 ───────────────────────────────────────────────────────────
+
+/// 开关 / 勾选项 / 样式 / 排列 / 详细数据落盘并立即生效：开启时确保小窗存在，关闭时
+/// 销毁小窗。返回落盘后的全量设置（前端以后端返回值校准，与其它设置命令一致）。
+/// 设置面板命令与托盘菜单开关共用同一核心（托盘入口见 [`toggle`]）。
 fn apply(
     app: &AppHandle,
     enabled: bool,
@@ -160,7 +186,7 @@ fn apply(
     // 勾选全空 = 无内容可显示，按关闭落盘（前端在勾掉最后一项时会同步关掉开关）。
     let enabled = enabled && !items.is_empty();
 
-    // 先做运行时生效、再落盘：启用失败（平台不支持/建窗失败）不留下「已开启」的设置，
+    // 先做运行时生效、再落盘：启用失败（建窗失败）不留下「已开启」的设置，
     // 否则下次启动会反复尝试恢复一个起不来的小窗。
     if enabled {
         enable(app)?;
@@ -177,23 +203,21 @@ fn apply(
     settings.taskbar_metrics_layout = layout;
     settings.taskbar_metrics_detailed = detailed;
     save_settings_json(&app_data, &settings)?;
-    // 让已打开的小窗立刻按新设置重绘（样式/排列/详细数据变更会经 ResizeObserver 触发
-    // 尺寸重报，由定位线程跟随新尺寸重新落位）；小窗刚被销毁时该事件无人接收，属预期。
-    let _ = app.emit_to(
-        WIDGET_LABEL,
-        "taskbar-widget://settings",
-        WidgetSettings {
+    // 落盘后再更新内存副本：enable() 是从磁盘读的（启动路径的真源），此刻磁盘还是旧值。
+    if enabled {
+        *STATE.settings.lock().unwrap() = WidgetSettings {
             items: settings.taskbar_metrics_items.clone(),
             style: settings.taskbar_metrics_style.clone(),
             layout: settings.taskbar_metrics_layout.clone(),
             detailed: settings.taskbar_metrics_detailed,
-        },
-    );
+        };
+    }
+    STATE.wake.store(true, Ordering::Relaxed);
     // 托盘「性能监控」复选对齐：开关有两个入口（设置面板 / 托盘菜单），都经此同步。
     crate::sync_tray_metrics_check();
     // 同时广播给已打开的设置浮窗：托盘改的开关它看不到，不对齐本地 enabled 的话，
     // 随后改样式/排列会把陈旧 enabled 一起写回，把用户刚从托盘关掉的小窗又打开。
-    let _ = app.emit("taskbar-metrics://enabled", enabled);
+    let _ = tauri::Emitter::emit(app, "taskbar-metrics://enabled", enabled);
     Ok(settings)
 }
 
@@ -208,6 +232,25 @@ pub async fn set_taskbar_metrics(
 ) -> Result<AppSettings, String> {
     let _g = crate::diag::cmd("cmd_set_taskbar_metrics");
     apply(&app, enabled, items, style, layout, detailed)
+}
+
+/// 主窗口按当前语言注入条带标签（自绘没有 i18n 环境）。
+///
+/// 四个标签都在 `src/i18n/messages.ts` 的 `metrics.*` 里，本命令只是把它们搬过进程边界；
+/// 后端不维护第二份译文（`Labels::default` 的中文仅为 webview 就绪前的兜底）。
+#[tauri::command]
+pub fn set_taskbar_metrics_labels(cpu: String, mem: String, gpu: String, vram: String) {
+    let _g = crate::diag::cmd("cmd_set_taskbar_metrics_labels");
+    // 标签来自自家前端，截断只为防呆：异常长度会把条带撑得过宽。
+    let clip = |s: String| -> String { s.chars().take(24).collect() };
+    *STATE.labels.lock().unwrap() = Labels {
+        cpu: clip(cpu),
+        mem: clip(mem),
+        gpu: clip(gpu),
+        vram: clip(vram),
+    };
+    STATE.labels_ready.store(true, Ordering::Relaxed);
+    STATE.wake.store(true, Ordering::Relaxed);
 }
 
 /// 托盘菜单开关：翻转持久化开关态，勾选 / 样式 / 排列 / 详细数据沿用现值。
@@ -240,47 +283,13 @@ pub(crate) fn next_toggle_state(settings: &AppSettings) -> (bool, Vec<String>) {
     (!settings.taskbar_metrics_enabled, items)
 }
 
-/// 前端量出的条带逻辑尺寸（CSS px）：窗口尺寸与位置到此才校准并首次显示。
-#[tauri::command]
-pub fn taskbar_widget_ready(app: AppHandle, width: f64, height: f64) {
-    let _g = crate::diag::cmd("cmd_taskbar_widget_ready");
-    if !(width.is_finite() && height.is_finite() && width > 0.0 && height > 0.0) {
-        return;
-    }
-    *STATE.size.lock().unwrap() = Some((width, height));
-    // 不等下一拍：立即定位 + 显示，避免开启后约 1 秒空窗。
-    // 本命令跑在 tokio worker 上（同步命令），故经主线程排队执行——窗口 API 必须在
-    // 事件循环线程上调用（见 `spawn_supervisor` 的注释）。
-    queue_step(&app);
-}
-
-/// 把一拍 `step()` 排到主线程上执行。**所有调用点都必须走这里**，不能直调 `step()`。
-///
-/// 经 `run_on_main_thread`（wry 侧 PostThreadMessage 投递 `Message::Task`）排队，由事件
-/// 循环线程取走执行。已有排队未跑时跳过本拍：主线程繁忙（长任务 / 系统挂起）期间每拍
-/// 都追加会让队列无界增长，而多排一次也没有额外收益（第二拍看到的仍是同一份状态）。
-fn queue_step(app: &AppHandle) {
-    if STEP_QUEUED.swap(true, Ordering::SeqCst) {
-        return;
-    }
-    let handle = app.clone();
-    let run = move || {
-        STEP_QUEUED.store(false, Ordering::SeqCst);
-        step(&handle);
-    };
-    if app.run_on_main_thread(run).is_err() {
-        // 主线程已不可用（应用正在退出）：清掉标记，让下一次调用还能正常排队。
-        STEP_QUEUED.store(false, Ordering::SeqCst);
-    }
-}
-
 /// 本平台是否支持任务栏小窗（前端据此决定设置卡片是否渲染）。目前仅 Windows。
 #[tauri::command]
 pub fn get_taskbar_widget_support() -> bool {
     cfg!(windows)
 }
 
-/// 启动恢复：设置里开着且勾选项非空时，随应用启动重建小窗与定位线程。
+/// 启动恢复：设置里开着且勾选项非空时，随应用启动重建小窗。
 pub fn init_on_startup(app: &AppHandle) {
     if !cfg!(windows) {
         return; // 仅 Windows；非 Windows 上即使 settings.json 里是开启的也不建窗
@@ -301,20 +310,20 @@ pub fn init_on_startup(app: &AppHandle) {
 // ── 开关实现 ───────────────────────────────────────────────────────────
 
 #[cfg(windows)]
-fn enable(app: &AppHandle) -> Result<(), String> {
+fn enable(_app: &AppHandle) -> Result<(), String> {
     // 重复开启（连点开关 / 启动恢复与手动开启重叠）时先停旧线程，保持单例。
     stop_thread();
-    let created = ensure_window(app)?;
-    if created {
-        // 换了新窗口：等前端重新上报尺寸，并清掉旧的落位记录。
-        *STATE.size.lock().unwrap() = None;
-        *STATE.tick.lock().unwrap() = TickState::default();
-        *STATE.hwnd.lock().unwrap() = None;
-    }
-    let stop = Arc::new(AtomicBool::new(false));
-    *STATE.stop.lock().unwrap() = Some(stop.clone());
-    spawn_supervisor(app.clone(), stop);
-    Ok(())
+    // 设置以磁盘为真源读一次（apply 会在落盘后覆盖内存副本）。
+    let dir = resolve_app_data()?;
+    let settings = load_settings(&dir);
+    *STATE.settings.lock().unwrap() = WidgetSettings {
+        items: settings.taskbar_metrics_items.clone(),
+        style: settings.taskbar_metrics_style.clone(),
+        layout: settings.taskbar_metrics_layout.clone(),
+        detailed: settings.taskbar_metrics_detailed,
+    };
+    let generation = STATE.generation.fetch_add(1, Ordering::SeqCst) + 1;
+    spawn_widget(generation)
 }
 
 #[cfg(not(windows))]
@@ -322,306 +331,404 @@ fn enable(_app: &AppHandle) -> Result<(), String> {
     Err("任务栏小窗仅支持 Windows。".into())
 }
 
-fn disable(app: &AppHandle) {
+fn disable(_app: &AppHandle) {
     stop_thread();
-    // destroy（而非 close）：close 会走主窗口那套 CloseRequested 分流（隐藏主窗/退出应用），
-    // 绝不能用于小窗（见模块头「关键取舍」）。
-    if let Some(win) = app.get_webview_window(WIDGET_LABEL) {
-        let _ = win.destroy();
-    }
-    *STATE.size.lock().unwrap() = None;
-    *STATE.tick.lock().unwrap() = TickState::default();
-    #[cfg(windows)]
-    {
-        *STATE.hwnd.lock().unwrap() = None;
-        // 复位「收起」标志：下次启用的首个完整拍会重新判定，不停在降频分支。
-        STATE.hidden.store(false, Ordering::Relaxed);
-    }
 }
 
+/// 让小窗线程退出：先把代际号推进（线程在下一拍发现自己是旧代即自毁），再向窗口投
+/// `WM_CLOSE` 唤醒阻塞在 `GetMessage` 上的消息循环。不 join——线程最多 50ms 内自清。
 fn stop_thread() {
-    if let Some(stop) = STATE.stop.lock().unwrap().take() {
-        stop.store(true, Ordering::Relaxed);
-    }
-}
-
-/// 定位线程：完整核对（落位 / 显隐 / 主题）可见时每秒一次；另以 50ms 轻量检测盯着
-/// 「任务栏是否压在条带上」——点击任务栏（托盘区收展 / 任务栏空白）时 Windows 把任务栏
-/// 提到条带之上盖住它，等下一完整拍才顶回的话，实测被盖住 0.3~0.5s，肉眼就是一下闪烁。
-/// 检测命中即排队顶回，把被盖时间压到人眼难辨。disabled 后一拍内退出。
-/// 条带收起期间（任务栏自动隐藏 / 前台全屏 / explorer 重启间隙）没人看：完整核对降频到
-/// 2s 一拍，被压检测停跑（条带不在屏上，任务栏压不到它），循环睡眠放到 200ms。
-/// 可见性只由任务栏几何与前台全屏驱动——**与主窗口是否隐藏到托盘无关**：主窗口托盘
-/// 常驻时主面板停表（省 CPU 的既有优化），而本小窗是常驻监控，继续显示与刷新。
-///
-/// 本线程**不做任何窗口操作**，只把一拍 `step()` 排到主线程（见 `queue_step`）：
-/// tao 的窗口 API 会在调用方线程上同步取窗口自己的 `window_state` 锁，而主线程另有路径
-/// （IPC / 窗口过程回调）也来取这把锁与 `STATE.tick`——两边跨线程反向取锁即 AB-BA 死锁
-/// （2026-10-13 休眠唤醒后实测：两线程互等，整应用 hung、托盘点不动）。
-/// 统一到主线程后，所有窗口操作与 `STATE.tick` 都在同一线程串行发生，锁序天然一致。
-/// 高频检测因此也只做只读 user32 调用（`pressed_by_taskbar`），不碰 tao 窗口 API。
-#[cfg(windows)]
-fn spawn_supervisor(app: AppHandle, stop: Arc<AtomicBool>) {
-    std::thread::spawn(move || {
-        // 初始值拨到「已到点」：进线程立即做一次完整核对（同原行为）。
-        let mut next_full = std::time::Instant::now() - std::time::Duration::from_millis(TICK_MS);
-        while !stop.load(Ordering::Relaxed) {
-            if STATE.hidden.load(Ordering::Relaxed) {
-                if next_full.elapsed() >= std::time::Duration::from_millis(HIDDEN_TICK_MS) {
-                    next_full = std::time::Instant::now();
-                    queue_step(&app);
-                }
-                std::thread::sleep(std::time::Duration::from_millis(HIDDEN_SLEEP_MS));
-            } else {
-                if next_full.elapsed() >= std::time::Duration::from_millis(TICK_MS) {
-                    next_full = std::time::Instant::now();
-                    queue_step(&app);
-                }
-                if pressed_by_taskbar() {
-                    queue_step(&app);
-                }
-                std::thread::sleep(std::time::Duration::from_millis(PRESS_CHECK_MS));
-            }
-        }
-    });
-}
-
-/// 建立小窗（已存在则复用）：返回是否新建。
-#[cfg(windows)]
-fn ensure_window(app: &AppHandle) -> Result<bool, String> {
-    if app.get_webview_window(WIDGET_LABEL).is_some() {
-        return Ok(false);
-    }
-    let win = WebviewWindowBuilder::new(app, WIDGET_LABEL, WebviewUrl::App("widget.html".into()))
-        .title("Oh My Llama")
-        .inner_size(INITIAL_LOGICAL.0, INITIAL_LOGICAL.1)
-        .decorations(false)
-        .transparent(true)
-        .shadow(false)
-        .resizable(false)
-        .maximizable(false)
-        .minimizable(false)
-        .skip_taskbar(true)
-        .always_on_top(true)
-        // focusable(false) → WS_EX_NOACTIVATE：show()/点击均不激活，绝不抢走用户当前窗口的焦点。
-        .focusable(false)
-        .focused(false)
-        // 先隐藏：前端上报尺寸并定位后再显示，避免首帧出现在屏幕角落。
-        .visible(false)
-        .build()
-        .map_err(|err| format!("创建任务栏小窗失败: {err}"))?;
-    win.set_ignore_cursor_events(true)
-        .map_err(|err| format!("设置小窗点击穿透失败: {err}"))?;
-    Ok(true)
-}
-
-/// 把窗口从「显示在任务栏」族里摘干净（Alt-Tab / 任务栏悬停预览也不出现）。
-///
-/// tauri 的 skip_taskbar 走 ITaskbarList::DeleteTab——只摘任务栏按钮、不改 ex-style；
-/// 而 tao 建的是无 owner 顶层窗（ON_TASKBAR → WS_EX_APPWINDOW）且每次显示/隐藏都会
-/// **整段重写** ex-style（见 tao window_state::apply_diff），所以只能在定位线程里每拍
-/// 兜底纠正：缺 WS_EX_TOOLWINDOW / 带 WS_EX_APPWINDOW 时就地改回来（2026-10-11 实测）。
-/// 顺带覆盖 explorer 重启后 DeleteTab 失效、任务栏按钮复活的情况。
-#[cfg(windows)]
-fn mark_tool_window(win: &tauri::WebviewWindow) {
-    use windows_sys::Win32::UI::WindowsAndMessaging::{
-        GetWindowLongPtrW, SetWindowLongPtrW, SetWindowPos, GWL_EXSTYLE, SWP_FRAMECHANGED,
-        SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, WS_EX_APPWINDOW, WS_EX_TOOLWINDOW,
-    };
-
-    let Ok(hwnd) = win.hwnd() else {
-        return;
-    };
-    let raw = hwnd.0 as windows_sys::Win32::Foundation::HWND;
-    unsafe {
-        let ex = GetWindowLongPtrW(raw, GWL_EXSTYLE) as u32;
-        let want = (ex | WS_EX_TOOLWINDOW) & !WS_EX_APPWINDOW;
-        if want != ex {
-            SetWindowLongPtrW(raw, GWL_EXSTYLE, want as isize);
-            // 帧刷新让 shell 重读样式（任务栏按钮与 Alt-Tab 归属随之更新）。
-            SetWindowPos(
-                raw,
-                std::ptr::null_mut(),
-                0,
-                0,
-                0,
-                0,
-                SWP_FRAMECHANGED | SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE,
-            );
-        }
-    }
-}
-
-// ── 每拍核对 ───────────────────────────────────────────────────────────
-
-/// 本拍要施加到窗口上的动作（纯数据，不含任何窗口/事件调用）。
-///
-/// 先由 `plan_step` 在**持 `STATE.tick` 锁期间**算出，再由 `apply_step` 在**完全释放该锁之后**
-/// 执行。这条分层是死锁修复的关键：窗口 API 与事件广播会同步去取别的锁（tao 的
-/// `window_state`、tauri 的事件系统），而主线程另有路径（`taskbar_widget_ready` 的 IPC、
-/// 窗口过程回调）会来取 `STATE.tick`——持锁调窗口 API 会与主线程的反向取锁构成 AB-BA 死锁
-/// （2026-10-13 休眠唤醒后实测：主线程与定位线程互等，整应用 hung、托盘点不动）。
-struct StepPlan {
-    /// 要广播的任务栏明暗；None = 本拍不广播。
-    theme: Option<&'static str>,
-    size_px: Option<(u32, u32)>,
-    pos: Option<(i32, i32)>,
-    vertical: Option<bool>,
-    /// Some(true)/Some(false) = 要求显示/隐藏；None = 维持现状（已显示时不重复 show）。
-    place: Option<bool>,
-    /// 是否重申置顶 + 纠正工具窗样式：条带在任务栏上有位置时每拍都要做（点击任务栏会
-    /// 把 shell 提到置顶带最上层、tao 每次显隐又重写 ex-style），与是否需要 show 无关。
-    /// 仅 Windows 有读者（`apply_step` 的纠正块）；非 Windows 无 z 序可纠正，字段不构建。
-    #[cfg(windows)]
-    fixups: bool,
-}
-
-impl StepPlan {
-    /// 与本拍几何和上一拍记账比对，得出要施加的动作，并把记账推进到「已生效」。
-    ///
-    /// 记账在这里就推进（不等 `apply_step` 返回）：执行失败只丢一拍，下一拍仍会按新几何
-    /// 纠正；反过来等执行成功再记账，则要在锁外再写一次 `STATE.tick`，多一次取锁。
-    /// 纯逻辑（不碰窗口、不算几何），故可直接单测。
-    fn decide(tick: &mut TickState, place: Option<Placement>, theme: Option<bool>) -> Self {
-        let mut plan = match place {
-            Some(p) => Self {
-                theme: None,
-                size_px: (tick.size_px != Some((p.w_px, p.h_px))).then_some((p.w_px, p.h_px)),
-                pos: (tick.pos != Some((p.x, p.y))).then_some((p.x, p.y)),
-                vertical: (tick.vertical != Some(p.vertical)).then_some(p.vertical),
-                place: (!tick.shown).then_some(true),
-                #[cfg(windows)]
-                fixups: true,
-            },
-            // 任务栏不可用（自动隐藏 / 全屏 / explorer 重启间隙）：收起条带。
-            None => Self {
-                theme: None,
-                size_px: None,
-                pos: None,
-                vertical: None,
-                place: tick.shown.then_some(false),
-                #[cfg(windows)]
-                fixups: false,
-            },
-        };
-        // 只有**读到**且翻转才广播：读不到（None）时不广播，由前端按系统 prefers-color-scheme
-        // 兜底——不能拿「读不到」去推翻上一次结论，否则明暗会来回跳。
-        plan.theme = match (tick.theme_light, theme) {
-            (None, Some(true)) | (Some(false), Some(true)) => Some("light"),
-            (None, Some(false)) | (Some(true), Some(false)) => Some("dark"),
-            _ => None,
-        };
-        tick.theme_light = theme;
-        if let Some(v) = plan.size_px {
-            tick.size_px = Some(v);
-        }
-        if let Some(v) = plan.pos {
-            tick.pos = Some(v);
-        }
-        if let Some(v) = plan.vertical {
-            tick.vertical = Some(v);
-        }
-        if let Some(show) = plan.place {
-            tick.shown = show;
-        }
-        plan
-    }
-}
-
-/// 缓存小窗原生句柄（供定位线程只读 z 序检测用）：句柄在窗口生命周期内不变，只在
-/// 未缓存时写一次。放在任何 `STATE` 锁之外调用——持锁写缓存会把锁序搞成嵌套。
-#[cfg(windows)]
-fn cache_hwnd(win: &tauri::WebviewWindow) {
-    let mut cached = STATE.hwnd.lock().unwrap();
-    if cached.is_none() {
-        if let Ok(hwnd) = win.hwnd() {
-            *cached = Some(hwnd.0 as isize);
-        }
-    }
-}
-
-/// 读任务栏几何与上一拍状态，算出本拍动作（持 `STATE.tick` 锁，不做任何窗口调用）。
-fn plan_step(app: &AppHandle) -> Option<(tauri::WebviewWindow, StepPlan)> {
-    let Some(win) = app.get_webview_window(WIDGET_LABEL) else {
-        return None; // 已禁用（窗口被销毁）；定位线程将在一拍内自行退出
-    };
+    STATE.generation.fetch_add(1, Ordering::SeqCst);
     #[cfg(windows)]
     {
-        cache_hwnd(&win);
-    }
-    let Some((lw, lh)) = *STATE.size.lock().unwrap() else {
-        return None; // 前端还没上报尺寸：窗口保持隐藏
-    };
-    let place = placement(lw, lh, win.scale_factor().unwrap_or(1.0));
-
-    let mut tick = STATE.tick.lock().unwrap();
-    // 任务栏明暗（透明样式据此选文字色）：只在变化时广播；读不到不广播，由前端按
-    // prefers-color-scheme 兜底。放在显隐分支之前——条带被全屏压住期间也保持同步。
-    let theme = {
-        let _t = crate::diag::cmd("widget_theme_read");
-        taskbar_is_light()
-    };
-    Some((win, StepPlan::decide(&mut tick, place, theme)))
-}
-
-/// 施加本拍动作（**不持任何 STATE 锁**）。
-fn apply_step(app: &AppHandle, win: &tauri::WebviewWindow, plan: StepPlan) {
-    if let Some(payload) = plan.theme {
-        let _ = app.emit_to(WIDGET_LABEL, "taskbar-widget://theme", payload);
-    }
-    if let Some((w, h)) = plan.size_px {
-        let _w = crate::diag::cmd("widget_set_size");
-        let _ = win.set_size(PhysicalSize::new(w, h));
-    }
-    if let Some((x, y)) = plan.pos {
-        let _w = crate::diag::cmd("widget_set_position");
-        let _ = win.set_position(PhysicalPosition::new(x, y));
-    }
-    if let Some(vertical) = plan.vertical {
-        let _ = app.emit_to(WIDGET_LABEL, "taskbar-widget://vertical", vertical);
-    }
-    match plan.place {
-        Some(true) => {
-            let _w = crate::diag::cmd("widget_show");
-            let _ = win.show();
-            let _ = app.emit_to(WIDGET_LABEL, "taskbar-widget://visible", true);
-            #[cfg(windows)]
-            STATE.hidden.store(false, Ordering::Relaxed);
+        if let Some(hwnd) = STATE.hwnd.lock().unwrap().take() {
+            use windows_sys::Win32::UI::WindowsAndMessaging::{PostMessageW, WM_CLOSE};
+            unsafe { PostMessageW(hwnd as windows_sys::Win32::Foundation::HWND, WM_CLOSE, 0, 0) };
         }
-        Some(false) => {
-            let _w = crate::diag::cmd("widget_hide");
-            let _ = win.hide();
-            let _ = app.emit_to(WIDGET_LABEL, "taskbar-widget://visible", false);
-            #[cfg(windows)]
-            STATE.hidden.store(true, Ordering::Relaxed);
+    }
+}
+
+// ── 窗口线程（仅 Windows）─────────────────────────────────────────────
+
+/// 小窗线程的私有状态。窗口归本线程独占，故这里不需要任何锁。
+#[cfg(windows)]
+struct Ctx {
+    /// 建窗时的代际号：与 `STATE.generation` 不符即说明已被 disable / 重建。
+    generation: u64,
+    started: std::time::Instant,
+    next_full: std::time::Instant,
+    next_poll: std::time::Instant,
+    /// 上次落位的 (x, y, w, h)（物理像素）：几何没变就不重复 SetWindowPos。
+    placed: Option<(i32, i32, u32, u32)>,
+    shown: bool,
+}
+
+#[cfg(windows)]
+impl Ctx {
+    /// 完整核对：算尺寸 → 落位 → 显隐 → 贴图。全部在本线程内同步完成。
+    fn full_tick(&mut self, hwnd: windows_sys::Win32::Foundation::HWND) {
+        let Some(geo) = geometry() else {
+            self.hide(hwnd);
+            return;
+        };
+        if geo.suppressed {
+            self.hide(hwnd);
+            return;
         }
-        None => {}
+        // 首帧等一次标签注入：主窗口 webview 就绪通常只要几百毫秒，等不到就用兜底。
+        if !STATE.labels_ready.load(Ordering::Relaxed)
+            && self.started.elapsed() < std::time::Duration::from_millis(LABELS_WAIT_MS)
+        {
+            return;
+        }
+
+        let dpi = dpi_of(hwnd);
+        let settings = STATE.settings.lock().unwrap().clone();
+        let labels = STATE.labels.lock().unwrap().clone();
+        let snap = STATE.metrics.lock().unwrap().clone();
+        let items: Vec<_> = settings
+            .items
+            .iter()
+            .filter_map(|key| build_item(key, &labels, snap.as_ref(), settings.detailed))
+            .collect();
+        if items.is_empty() {
+            self.hide(hwnd);
+            return;
+        }
+        let style = crate::taskbar_render::StripStyle {
+            transparent: settings.style == STYLE_TRANSPARENT,
+            // 读不到明暗时按深色处理（与原前端 prefers-color-scheme 的兜底一致）。
+            light: taskbar_is_light().unwrap_or(false),
+            vertical: geo.vertical,
+            double: settings.layout == LAYOUT_DOUBLE,
+        };
+        let Some(frame) = crate::taskbar_render::measure(&items, &style, dpi as f32) else {
+            return;
+        };
+        let place = compute_placement(&geo, frame.w, frame.h, dpi);
+        let key = (place.x, place.y, place.w_px, place.h_px);
+        if self.placed != Some(key) || !self.shown {
+            let _w = crate::diag::cmd("widget_place");
+            use windows_sys::Win32::UI::WindowsAndMessaging::{
+                SetWindowPos, HWND_TOPMOST, SWP_NOACTIVATE, SWP_SHOWWINDOW,
+            };
+            unsafe {
+                SetWindowPos(
+                    hwnd,
+                    HWND_TOPMOST,
+                    place.x,
+                    place.y,
+                    place.w_px as i32,
+                    place.h_px as i32,
+                    SWP_NOACTIVATE | SWP_SHOWWINDOW,
+                );
+            }
+            self.placed = Some(key);
+            self.shown = true;
+        }
+        // 落位与贴图在同一拍内完成：客户区尺寸此刻必然等于位图尺寸（SetWindowPos 同步生效）。
+        let _w = crate::diag::cmd("widget_paint");
+        let _ = crate::taskbar_render::paint(hwnd, &frame);
     }
-    // show()/hide() 都经 tao 整段重写 ex-style，置顶与工具窗纠正必须放在其后
-    // （刚显示完就把 APPWINDOW 摘掉，不给 Alt-Tab 留窗口期）。
-    #[cfg(windows)]
-    if plan.fixups {
-        let _w = crate::diag::cmd("widget_topmost_toolwindow");
-        reassert_topmost(win);
-        mark_tool_window(win);
+
+    fn hide(&mut self, hwnd: windows_sys::Win32::Foundation::HWND) {
+        if !self.shown {
+            return;
+        }
+        use windows_sys::Win32::UI::WindowsAndMessaging::{ShowWindow, SW_HIDE};
+        unsafe { ShowWindow(hwnd, SW_HIDE) };
+        self.shown = false;
+        self.placed = None;
+    }
+
+    /// 采集一拍指标，并按整机占用决定下一拍间隔。
+    fn poll(&mut self) {
+        let _g = crate::diag::cmd("widget_metrics_poll");
+        let snap = crate::metrics::get_system_metrics();
+        let interval = if snap.cpu_usage >= BUSY_PCT {
+            SLOW_INTERVAL_MS
+        } else {
+            INTERVAL_MS
+        };
+        *STATE.metrics.lock().unwrap() = Some(snap);
+        self.next_poll = std::time::Instant::now() + std::time::Duration::from_millis(interval);
     }
 }
 
-/// 一拍核对。**只能在主线程上调用**（见 `spawn_supervisor`）；入口处挡掉重入。
-fn step(app: &AppHandle) {
-    let _g = crate::diag::cmd("widget_step");
-    // 重入守卫：窗口操作会同步回调到本线程，可能再经 IPC 进到这里。挡掉即可——
-    // 本拍的活由外层那次做完，被挡的这次下一拍自会补上。
-    if STEPPING.swap(true, Ordering::SeqCst) {
-        return;
-    }
-    let _guard = StepGuard;
+/// 建窗并进入消息循环；建窗结果经 channel 回传给 `enable`，失败要让设置不落成「已开启」。
+#[cfg(windows)]
+fn spawn_widget(generation: u64) -> Result<(), String> {
+    use std::sync::mpsc;
+    let (tx, rx) = mpsc::channel::<Result<(), String>>();
+    std::thread::Builder::new()
+        .name("taskbar-widget".into())
+        .spawn(move || match create_window(generation) {
+            Ok(hwnd) => {
+                let _ = tx.send(Ok(()));
+                message_loop(hwnd);
+            }
+            Err(err) => {
+                let _ = tx.send(Err(err));
+            }
+        })
+        .map_err(|err| format!("启动任务栏小窗线程失败: {err}"))?;
+    rx.recv_timeout(std::time::Duration::from_secs(3))
+        .map_err(|_| "任务栏小窗创建超时。".to_string())?
+}
 
-    let Some((win, plan)) = plan_step(app) else {
-        return;
+/// 注册窗口类并建窗。
+///
+/// `Ctx` 用 `Box::into_raw` 泄漏而非随窗口释放：`DestroyWindow` 会在 `WM_DESTROY` 里
+/// 同步回收，而那一刻调用栈上可能还持有 `&mut Ctx`（`full_tick` 里触发的重建路径），
+/// 释放即悬垂引用。小窗一生只会建个位数次，每份百来字节，泄漏是这里最省事也最安全的选择。
+#[cfg(windows)]
+fn create_window(generation: u64) -> Result<windows_sys::Win32::Foundation::HWND, String> {
+    use std::ptr;
+    use windows_sys::Win32::Foundation::GetLastError;
+    use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
+    use windows_sys::Win32::UI::WindowsAndMessaging::{
+        CreateWindowExW, RegisterClassW, WNDCLASSW, WS_EX_LAYERED, WS_EX_NOACTIVATE,
+        WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_EX_TRANSPARENT, WS_POPUP,
     };
-    apply_step(app, &win, plan);
+
+    let class: Vec<u16> = "OhMyLlamaTaskbarWidget\0".encode_utf16().collect();
+    let title: Vec<u16> = "Oh My Llama\0".encode_utf16().collect();
+    let ctx = Box::into_raw(Box::new(Ctx {
+        generation,
+        started: std::time::Instant::now(),
+        next_full: std::time::Instant::now(),
+        next_poll: std::time::Instant::now(),
+        placed: None,
+        shown: false,
+    }));
+
+    unsafe {
+        let hinstance = GetModuleHandleW(ptr::null());
+        let wc = WNDCLASSW {
+            style: 0,
+            lpfnWndProc: Some(wndproc),
+            cbClsExtra: 0,
+            cbWndExtra: 0,
+            hInstance: hinstance,
+            hIcon: ptr::null_mut(),
+            hCursor: ptr::null_mut(),
+            hbrBackground: ptr::null_mut(),
+            lpszMenuName: ptr::null(),
+            lpszClassName: class.as_ptr(),
+        };
+        // 类已注册（同进程内重建小窗）不算错误：ERROR_CLASS_ALREADY_EXISTS = 1410。
+        if RegisterClassW(&wc) == 0 && GetLastError() != 1410 {
+            return Err("注册任务栏小窗窗口类失败。".into());
+        }
+        let hwnd = CreateWindowExW(
+            WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE | WS_EX_TOPMOST,
+            class.as_ptr(),
+            title.as_ptr(),
+            WS_POPUP,
+            0,
+            0,
+            INITIAL_SIZE.0,
+            INITIAL_SIZE.1,
+            ptr::null_mut(),
+            ptr::null_mut(),
+            hinstance,
+            ctx as *const std::ffi::c_void,
+        );
+        if hwnd.is_null() {
+            return Err("创建任务栏小窗失败。".into());
+        }
+        *STATE.hwnd.lock().unwrap() = Some(hwnd as isize);
+        Ok(hwnd)
+    }
 }
+
+#[cfg(windows)]
+fn message_loop(hwnd: windows_sys::Win32::Foundation::HWND) {
+    use std::ptr;
+    use windows_sys::Win32::UI::WindowsAndMessaging::{
+        DispatchMessageW, GetMessageW, SetTimer, TranslateMessage, MSG,
+    };
+
+    // 定时器驱动一切：空闲时 GetMessage 阻塞，不占 CPU。
+    let timer = unsafe { SetTimer(hwnd, 1, TICK_MS, None) };
+    if timer == 0 {
+        eprintln!("[taskbar-widget] SetTimer 失败，小窗将不再刷新");
+    }
+    let mut msg: MSG = unsafe { std::mem::zeroed() };
+    loop {
+        let ret = unsafe { GetMessageW(&mut msg, ptr::null_mut(), 0, 0) };
+        if ret <= 0 {
+            break; // 0 = WM_QUIT，-1 = 错误
+        }
+        unsafe {
+            TranslateMessage(&msg);
+            DispatchMessageW(&msg);
+        }
+    }
+    // 只清自己那一份：旧线程可能比新线程晚收尾，无条件清空会把新窗口的句柄抹掉，
+    // 之后 disable 就发不出 WM_CLOSE（虽仍靠代际号兜底，但会多挂 50ms）。
+    let mut slot = STATE.hwnd.lock().unwrap();
+    if *slot == Some(hwnd as isize) {
+        *slot = None;
+    }
+}
+
+/// 窗口过程：只处理定时器、DPI 变化与关闭；其余交给 `DefWindowProcW`。
+#[cfg(windows)]
+unsafe extern "system" fn wndproc(
+    hwnd: windows_sys::Win32::Foundation::HWND,
+    msg: u32,
+    wparam: windows_sys::Win32::Foundation::WPARAM,
+    lparam: windows_sys::Win32::Foundation::LPARAM,
+) -> windows_sys::Win32::Foundation::LRESULT {
+    use windows_sys::Win32::UI::WindowsAndMessaging::{
+        DefWindowProcW, DestroyWindow, GetWindowLongPtrW, PostQuitMessage, SetWindowLongPtrW,
+        CREATESTRUCTW, GWLP_USERDATA, WM_CLOSE, WM_DESTROY, WM_DPICHANGED, WM_NCCREATE, WM_TIMER,
+    };
+
+    // 建窗时把 Ctx 指针存进 GWLP_USERDATA（此后每拍从那里取回）。
+    if msg == WM_NCCREATE {
+        let create = &*(lparam as *const CREATESTRUCTW);
+        SetWindowLongPtrW(hwnd, GWLP_USERDATA, create.lpCreateParams as isize);
+        return DefWindowProcW(hwnd, msg, wparam, lparam);
+    }
+
+    let ctx = GetWindowLongPtrW(hwnd, GWLP_USERDATA) as *mut Ctx;
+    match msg {
+        WM_TIMER if ctx.is_null() => 0,
+        WM_TIMER => {
+            let ctx = &mut *ctx;
+            // 旧代际（disable 后又重开）：自毁，避免两个条带叠着画。
+            if STATE.generation.load(Ordering::SeqCst) != ctx.generation {
+                DestroyWindow(hwnd);
+                return 0;
+            }
+            let now = std::time::Instant::now();
+            if STATE.wake.swap(false, Ordering::Relaxed) {
+                ctx.next_full = now;
+                ctx.next_poll = now;
+            }
+            if now >= ctx.next_full {
+                ctx.full_tick(hwnd);
+                let interval = if ctx.shown {
+                    FULL_TICK_MS
+                } else {
+                    HIDDEN_TICK_MS
+                };
+                ctx.next_full =
+                    std::time::Instant::now() + std::time::Duration::from_millis(interval);
+            } else if ctx.shown && taskbar_above(hwnd) {
+                // 被任务栏压住（点击 shell 后的 0.3~0.5s）：立刻顶回，不等下一完整拍。
+                reassert_topmost(hwnd);
+            }
+            if ctx.shown && std::time::Instant::now() >= ctx.next_poll {
+                ctx.poll();
+                // 采集到新值：下一拍（≤50ms）重画，不必等 1s 的完整核对。
+                ctx.next_full = std::time::Instant::now();
+            }
+            0
+        }
+        // DPI 变化（拖到别的显示器 / 改缩放）：尺寸与字号都要重算。
+        WM_DPICHANGED => {
+            STATE.wake.store(true, Ordering::Relaxed);
+            0
+        }
+        WM_CLOSE => {
+            DestroyWindow(hwnd);
+            0
+        }
+        WM_DESTROY => {
+            PostQuitMessage(0);
+            0
+        }
+        _ => DefWindowProcW(hwnd, msg, wparam, lparam),
+    }
+}
+
+/// 条带当前所处显示器的 DPI 比例（1.0 = 96 DPI）。
+#[cfg(windows)]
+fn dpi_of(hwnd: windows_sys::Win32::Foundation::HWND) -> f64 {
+    use windows_sys::Win32::UI::HiDpi::GetDpiForWindow;
+    let dpi = unsafe { GetDpiForWindow(hwnd) };
+    if dpi == 0 {
+        1.0
+    } else {
+        f64::from(dpi) / 96.0
+    }
+}
+
+/// 标准百分比文本：0-100 取整 + 触线判定；缺值显示占位符，不让条带出现 NaN。
+#[cfg(windows)]
+fn pct_text(value: Option<f32>) -> (String, bool) {
+    match value {
+        Some(v) if v.is_finite() => {
+            let rounded = f64::from(v).clamp(0.0, 100.0).round() as i32;
+            (format!("{rounded}%"), rounded >= HOT_PCT)
+        }
+        _ => ("—".to_string(), false),
+    }
+}
+
+/// 紧凑容量对（GB 一位小数，单位只写一次）：如 22.1/31.9G——条带横向空间有限。
+#[cfg(windows)]
+fn gb_pair(used_mb: u64, total_mb: u64) -> Option<String> {
+    (total_mb > 0).then(|| {
+        format!(
+            "{:.1}/{:.1}G",
+            used_mb as f64 / 1024.0,
+            total_mb as f64 / 1024.0
+        )
+    })
+}
+
+/// 按当前设置与快照拼出一项（与主面板同口径：多卡取第一张）。
+#[cfg(windows)]
+fn build_item(
+    key: &str,
+    labels: &Labels,
+    snap: Option<&crate::metrics::MetricsSnapshot>,
+    detailed: bool,
+) -> Option<crate::taskbar_render::Item> {
+    use crate::taskbar_render::Item;
+    let gpu = snap.and_then(|s| s.gpus.first());
+    let (label, (value, hot), extra) = match key {
+        "cpu" => (
+            labels.cpu.as_str(),
+            pct_text(snap.map(|s| s.cpu_usage)),
+            None,
+        ),
+        "mem" => (
+            labels.mem.as_str(),
+            pct_text(snap.map(|s| s.mem_usage)),
+            detailed
+                .then(|| snap.and_then(|s| gb_pair(s.mem_used_mb, s.mem_total_mb)))
+                .flatten(),
+        ),
+        "gpu" => (labels.gpu.as_str(), pct_text(gpu.map(|g| g.usage)), None),
+        "vram" => {
+            let pct = gpu.and_then(|g| {
+                (g.vram_total_mb > 0)
+                    .then(|| (g.vram_used_mb as f32 / g.vram_total_mb as f32) * 100.0)
+            });
+            (
+                labels.vram.as_str(),
+                pct_text(pct),
+                detailed
+                    .then(|| gpu.and_then(|g| gb_pair(g.vram_used_mb, g.vram_total_mb)))
+                    .flatten(),
+            )
+        }
+        _ => return None,
+    };
+    Some(Item {
+        label: label.to_string(),
+        value,
+        extra,
+        hot,
+    })
+}
+
+// ── 校验与归一化 ───────────────────────────────────────────────────────
 
 /// 校验并归一化勾选项：未知键报错（IPC 边界），顺序固定为 ITEM_KEYS（与显示顺序一致）。
 fn normalize_items(items: &[String]) -> Result<Vec<String>, String> {
@@ -686,7 +793,7 @@ impl Rect {
     }
 }
 
-/// 竖任务栏（宽 ≤ 高）判定；横任务栏的条带横排，竖任务栏的条带由前端改为竖排。
+/// 竖任务栏（宽 ≤ 高）判定；横任务栏的条带横排，竖任务栏的条带逐项成行。
 #[cfg(any(windows, test))]
 fn is_vertical(bar: &Rect) -> bool {
     bar.height() > bar.width()
@@ -739,26 +846,20 @@ fn covers_monitor(fg: &Rect, monitor: &Rect, fg_class: &str) -> bool {
 
 // ── Win32 采集与定位（仅 Windows）──────────────────────────────────────
 
+#[cfg(windows)]
 struct Placement {
     x: i32,
     y: i32,
     w_px: u32,
     h_px: u32,
-    vertical: bool,
 }
 
-/// 测试替身：非 Windows 上 `placement()` 恒为 None，单测要造一份「有位置」的几何。
-#[cfg(test)]
-impl Placement {
-    fn at(x: i32, y: i32, w_px: u32, h_px: u32, vertical: bool) -> Self {
-        Self {
-            x,
-            y,
-            w_px,
-            h_px,
-            vertical,
-        }
-    }
+/// 条带在任务栏上的落位：尺寸由文字实测给出（物理像素），这里只换算间隙与坐标。
+#[cfg(windows)]
+fn compute_placement(geo: &Geometry, w_px: u32, h_px: u32, dpi: f64) -> Placement {
+    let gap = (GAP_LOGICAL * dpi).round() as i32;
+    let (x, y) = compute_position(&geo.bar, geo.tray.as_ref(), w_px as i32, h_px as i32, gap);
+    Placement { x, y, w_px, h_px }
 }
 
 #[cfg(windows)]
@@ -768,30 +869,6 @@ struct Geometry {
     /// 任务栏之外是否还有别的理由不显示：自动隐藏或前台全屏。
     suppressed: bool,
     vertical: bool,
-}
-
-#[cfg(windows)]
-fn placement(logical_w: f64, logical_h: f64, scale: f64) -> Option<Placement> {
-    let geo = geometry()?;
-    if geo.suppressed {
-        return None;
-    }
-    let w_px = (logical_w * scale).round().max(1.0) as u32;
-    let h_px = (logical_h * scale).round().max(1.0) as u32;
-    let gap = (GAP_LOGICAL * scale).round() as i32;
-    let (x, y) = compute_position(&geo.bar, geo.tray.as_ref(), w_px as i32, h_px as i32, gap);
-    Some(Placement {
-        x,
-        y,
-        w_px,
-        h_px,
-        vertical: geo.vertical,
-    })
-}
-
-#[cfg(not(windows))]
-fn placement(_logical_w: f64, _logical_h: f64, _scale: f64) -> Option<Placement> {
-    None // 非 Windows 平台不启用（前端卡片据此也不渲染）
 }
 
 #[cfg(windows)]
@@ -895,7 +972,7 @@ fn foreground_fullscreen() -> bool {
 /// 任务栏当前是否浅色：读 HKCU 的 `SystemUsesLightTheme`。任务栏与开始菜单等系统壳层
 /// 跟随的是「Windows 模式」这个键，而**不是**应用的 `AppsUseLightTheme`——两者被分开
 /// 设置过时必须取前者，否则透明样式的文字色会选反（白字贴浅色任务栏）。
-/// None = 读不到（键/值缺失或类型不对），由前端按 prefers-color-scheme 兜底。
+/// None = 读不到（键/值缺失或类型不对），由调用方按深色兜底。
 #[cfg(windows)]
 fn taskbar_is_light() -> Option<bool> {
     use windows_sys::Win32::Foundation::ERROR_SUCCESS;
@@ -945,17 +1022,9 @@ fn taskbar_is_light() -> Option<bool> {
     (rc == ERROR_SUCCESS && kind == REG_DWORD && bytes == 4).then_some(data != 0)
 }
 
-#[cfg(not(windows))]
-fn taskbar_is_light() -> Option<bool> {
-    None // 小窗仅 Windows；兜底保持编译通过且不广播
-}
-
 /// 任务栏是否压在条带之上：从本窗口沿 z 序向上最多找 32 个窗口，命中任务栏即算
 /// 「被压住」。托盘弹出面板（Wi-Fi/音量等）弹出时面板自身是直接上层、任务栏不在
 /// 近处，故不命中、不抢层。
-///
-/// 「被压住」的唯一定义处：`reassert_topmost`（完整拍里重申置顶）与
-/// `pressed_by_taskbar`（50ms 高频检测）共用同一判据，两处理解必须一致。
 #[cfg(windows)]
 fn taskbar_above(our: windows_sys::Win32::Foundation::HWND) -> bool {
     use windows_sys::Win32::UI::WindowsAndMessaging::{FindWindowW, GetWindow, GW_HWNDPREV};
@@ -980,41 +1049,23 @@ fn taskbar_above(our: windows_sys::Win32::Foundation::HWND) -> bool {
     }
 }
 
-/// 50ms 高频检测用：任务栏此刻是否压在条带上（点击任务栏激活 shell 后的瞬时状态）。
-/// **只读** z 序、只碰 `STATE.hwnd` 一把独立锁，不调任何 tao 窗口 API——跨线程取
-/// 窗口锁会 AB-BA 死锁（见 `spawn_supervisor` 注释）。句柄未缓存（首拍未到）时跳过。
-#[cfg(windows)]
-fn pressed_by_taskbar() -> bool {
-    let Some(hwnd) = *STATE.hwnd.lock().unwrap() else {
-        return false;
-    };
-    taskbar_above(hwnd as windows_sys::Win32::Foundation::HWND)
-}
-
 /// 条带被任务栏压住时重申置顶（点击任务栏会把 shell 提到置顶带最上层）。
 #[cfg(windows)]
-fn reassert_topmost(win: &tauri::WebviewWindow) {
-    use windows_sys::Win32::Foundation::HWND;
+fn reassert_topmost(our: windows_sys::Win32::Foundation::HWND) {
     use windows_sys::Win32::UI::WindowsAndMessaging::{
         SetWindowPos, HWND_TOPMOST, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE,
     };
 
-    let Ok(hwnd) = win.hwnd() else {
-        return;
-    };
-    let our = hwnd.0 as HWND;
     unsafe {
-        if taskbar_above(our) {
-            SetWindowPos(
-                our,
-                HWND_TOPMOST,
-                0,
-                0,
-                0,
-                0,
-                SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE,
-            );
-        }
+        SetWindowPos(
+            our,
+            HWND_TOPMOST,
+            0,
+            0,
+            0,
+            0,
+            SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE,
+        );
     }
 }
 
@@ -1138,92 +1189,5 @@ mod tests {
         assert_eq!(normalize_layout(LAYOUT_SINGLE), LAYOUT_SINGLE);
         assert_eq!(normalize_layout("triple"), LAYOUT_SINGLE);
         assert_eq!(normalize_layout(""), LAYOUT_SINGLE);
-    }
-
-    /// 广播载荷的字段名是前端契约（TaskbarMetrics.tsx 按 items / style / layout / detailed 解析）。
-    #[test]
-    fn widget_settings_payload_shape() {
-        let json = serde_json::to_value(WidgetSettings {
-            items: vec!["cpu".into()],
-            style: STYLE_TRANSPARENT.into(),
-            layout: LAYOUT_DOUBLE.into(),
-            detailed: true,
-        })
-        .unwrap();
-        assert_eq!(json["items"], serde_json::json!(["cpu"]));
-        assert_eq!(json["style"], STYLE_TRANSPARENT);
-        assert_eq!(json["layout"], LAYOUT_DOUBLE);
-        assert_eq!(json["detailed"], true);
-    }
-
-    /// 首拍（全新状态 + 任务栏有位置）：尺寸 / 位置 / 竖排 / 显示 / 置顶纠正全都要做。
-    #[test]
-    fn plan_first_tick_does_everything() {
-        let mut tick = TickState::default();
-        let plan = StepPlan::decide(&mut tick, Some(Placement::at(10, 20, 300, 40, false)), None);
-        assert_eq!(plan.size_px, Some((300, 40)));
-        assert_eq!(plan.pos, Some((10, 20)));
-        assert_eq!(plan.vertical, Some(false));
-        assert_eq!(plan.place, Some(true));
-        #[cfg(windows)]
-        assert!(plan.fixups, "有位置时每拍都要重申置顶/纠正样式");
-    }
-
-    /// 次拍（几何未变、已显示）：除置顶纠正外全部去重为空——不重复 set_size/set_position/show。
-    #[test]
-    fn plan_repeat_tick_is_all_noop_except_fixups() {
-        let mut tick = TickState::default();
-        let place = || Some(Placement::at(10, 20, 300, 40, false));
-        let _ = StepPlan::decide(&mut tick, place(), None);
-        let plan = StepPlan::decide(&mut tick, place(), None);
-        assert_eq!(plan.size_px, None, "尺寸未变则不再 set_size");
-        assert_eq!(plan.pos, None, "位置未变则不再 set_position");
-        assert_eq!(plan.vertical, None);
-        assert_eq!(plan.place, None, "已显示则不重复 show");
-        #[cfg(windows)]
-        assert!(plan.fixups, "置顶纠正每拍都做（防被 shell 压住）");
-    }
-
-    /// 任务栏不可用（自动隐藏 / 全屏 / explorer 重启间隙）：要求收起，且不做置顶纠正。
-    /// 收起后再次不可用 → `place` 为 None（已隐藏，不重复 hide）。
-    #[test]
-    fn plan_without_placement_hides_once() {
-        let mut tick = TickState::default();
-        let _ = StepPlan::decide(&mut tick, Some(Placement::at(10, 20, 300, 40, false)), None);
-        let hidden = StepPlan::decide(&mut tick, None, None);
-        assert_eq!(hidden.place, Some(false));
-        #[cfg(windows)]
-        assert!(!hidden.fixups, "已收起时无需再动 z 序");
-        assert_eq!(StepPlan::decide(&mut tick, None, None).place, None);
-    }
-
-    /// 任务栏明暗只在翻转时广播一次；读不到（None）不广播，由前端按系统配色兜底。
-    #[test]
-    fn plan_broadcasts_theme_only_on_flip() {
-        let mut tick = TickState::default();
-        assert_eq!(
-            StepPlan::decide(&mut tick, None, Some(false)).theme,
-            Some("dark"),
-            "首次读到即广播一次"
-        );
-        assert_eq!(StepPlan::decide(&mut tick, None, Some(false)).theme, None);
-        assert_eq!(
-            StepPlan::decide(&mut tick, None, Some(true)).theme,
-            Some("light"),
-            "翻转才再广播"
-        );
-        // 读不到：不广播（保留上一次结论，不做无依据的翻转）。
-        assert_eq!(StepPlan::decide(&mut tick, None, None).theme, None);
-    }
-
-    /// 记账在 `decide` 内即推进：几何再回到原值时仍能重新纠正（不因「已记账」而永远不发）。
-    #[test]
-    fn plan_accounting_advances_so_later_drift_is_corrected() {
-        let mut tick = TickState::default();
-        let _ = StepPlan::decide(&mut tick, Some(Placement::at(10, 20, 300, 40, false)), None);
-        let moved = StepPlan::decide(&mut tick, Some(Placement::at(11, 20, 300, 40, false)), None);
-        assert_eq!(moved.pos, Some((11, 20)), "位置漂了一像素也要纠正");
-        let back = StepPlan::decide(&mut tick, Some(Placement::at(10, 20, 300, 40, false)), None);
-        assert_eq!(back.pos, Some((10, 20)), "回来时同样纠正");
     }
 }

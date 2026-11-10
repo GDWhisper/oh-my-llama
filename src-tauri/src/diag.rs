@@ -267,11 +267,9 @@ fn render_dump(entries: Option<&[Entry]>, fail_count: u32, at: &str) -> String {
     out.push_str("\n--- 采集说明 ---\n");
     out.push_str("探针覆盖：命令守卫（get_system_metrics / set_taskbar_metrics /\n");
     out.push_str(
-        "taskbar_widget_ready / get_status / get_perf_stats / read_logs 等）、taskbar_widget 定位\n",
+        "set_taskbar_metrics_labels / get_status / get_perf_stats / read_logs 等）、taskbar_widget\n",
     );
-    out.push_str(
-        "线程每拍标记（widget_step / widget_theme_read / widget_set_size 等）、log 落盘。\n",
-    );
+    out.push_str("每拍标记（widget_place / widget_paint / widget_metrics_poll 等）、log 落盘。\n");
     out.push_str("启用方式：环境变量 OML_DIAG=1 后重启应用；默认关闭。\n");
     out.push_str(
         "若卡点不在覆盖范围，可进一步用 F:\\llama_run\\_diag_dumps 下的脚本抓 minidump。\n",

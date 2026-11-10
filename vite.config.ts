@@ -29,15 +29,4 @@ export default defineConfig(async () => ({
       ignored: ["**/src-tauri/**"],
     },
   },
-
-  build: {
-    // 双入口：index.html（主窗口）+ widget.html（任务栏性能小窗，由 Rust 侧
-    // WebviewWindowBuilder 以 WebviewUrl::App("widget.html") 打开）。
-    rollupOptions: {
-      input: {
-        index: "index.html",
-        widget: "widget.html",
-      },
-    },
-  },
 }));

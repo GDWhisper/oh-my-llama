@@ -65,6 +65,17 @@ export default function App() {
   // 更新（方案 A）：手动检查、下载可见且可取消、安装需显式确认。
   const updater = useUpdater();
 
+  // 任务栏小窗是原生自绘（没有 webview，也就没有 i18n 环境）：标签由本窗口按当前语言
+  // 注入，后端在收到之前用中文兜底。t 随语言变化换引用，故切语言会重推一次。
+  useEffect(() => {
+    invoke('set_taskbar_metrics_labels', {
+      cpu: t('metrics.cpu'),
+      mem: t('metrics.memory'),
+      gpu: t('metrics.gpu'),
+      vram: t('metrics.vram'),
+    }).catch(() => {});
+  }, [t]);
+
   const {
     config,
     configEpoch,

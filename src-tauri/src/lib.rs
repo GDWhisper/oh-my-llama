@@ -42,9 +42,11 @@ use perf::{get_perf_stats, record_log_line, reset_perf};
 // 各 DPI 档位下 shell 实际请求的图标尺寸（原始 RGBA），由 scripts/gen_app_icons.py 生成
 mod icon_assets;
 
-// 任务栏常驻性能小窗（TrafficMonitor 风格；仅 Windows 提供，其余平台设置卡片不渲染）
+// 任务栏常驻性能小窗（TrafficMonitor 风格；仅 Windows 提供，其余平台设置卡片不渲染）。
+// 内容是 Rust 侧自绘（taskbar_render），不再为它起 webview 实例。
+mod taskbar_render;
 mod taskbar_widget;
-use taskbar_widget::{get_taskbar_widget_support, set_taskbar_metrics, taskbar_widget_ready};
+use taskbar_widget::{get_taskbar_widget_support, set_taskbar_metrics, set_taskbar_metrics_labels};
 
 // 阻止系统休眠：三平台统一经 keepawake 原生 API，guard 的创建/销毁独占一条常驻线程
 // （Windows 的 ES_CONTINUOUS 线程绑定 + Linux Drop 可能 panic，见模块内注释）。
@@ -947,7 +949,7 @@ pub fn run() {
             get_main_window_visible,
             get_system_metrics,
             set_taskbar_metrics,
-            taskbar_widget_ready,
+            set_taskbar_metrics_labels,
             get_taskbar_widget_support,
             get_perf_stats,
             get_param_registry

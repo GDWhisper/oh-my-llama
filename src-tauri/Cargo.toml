@@ -72,5 +72,11 @@ keepawake = "0.6.1"
 #     RegDeleteValueW / RegCloseKey
 #                               → Win32_System_Registry（开机自启的 HKCU\...\Run 项，
 #                                 见 autostart.rs；不引第三方自启插件）
+#   - CreateCompatibleDC / CreateDIBSection / CreateFontW / TextOutW /
+#     GetTextExtentPoint32W / UpdateLayeredWindow / SetTimer / CreateWindowExW
+#       → Win32_Graphics_Gdi + Win32_UI_WindowsAndMessaging（任务栏小窗自绘，见
+#         taskbar_render.rs；分层窗口 + GDI 文字掩膜）
+#   - GetDpiForWindow          → Win32_UI_HiDpi（小窗按显示器 DPI 排版）
+#   - GetModuleHandleW         → Win32_System_LibraryLoader（注册小窗窗口类）
 # 0.59 已锁定且本地缓存，离线可编译。
-windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_System_JobObjects", "Win32_System_Threading", "Win32_Security", "Win32_System_Console", "Win32_UI_WindowsAndMessaging", "Win32_Graphics_Gdi", "Win32_System_Registry"] }
+windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_System_JobObjects", "Win32_System_Threading", "Win32_Security", "Win32_System_Console", "Win32_UI_WindowsAndMessaging", "Win32_Graphics_Gdi", "Win32_System_Registry", "Win32_UI_HiDpi", "Win32_System_LibraryLoader"] }

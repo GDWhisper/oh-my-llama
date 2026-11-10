@@ -63,3 +63,10 @@ dev 上重新开关「任务栏常驻性能显示」后，条带不再出现。�
 「系统壳层窗口弹出时条带消失」仍未修——原修复空转，回退不损失任何已生效行为。
 要修就按上面的约束从主窗口统一参数入手并实测；不要在定位线程里用
 `hide()/show()` 强制重绘这类症状层补丁绕过。
+
+## 后续（同日）
+
+小窗已改为**原生自绘**（`taskbar_widget.rs` + `taskbar_render.rs`，GDI + `UpdateLayeredWindow`），
+不再有第二个 webview，本文描述的 environment 参数复用问题与 `taskbar_widget_ready` 尺寸上报
+握手一并消失。保留本文仅作排障记录：若将来又出现「窗口在但不可见」，那是分层窗口的
+`UpdateLayeredWindow` 没贴上去，而非 webview 初始化问题。
