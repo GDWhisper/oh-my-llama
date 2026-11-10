@@ -44,6 +44,9 @@ mod icon_assets;
 
 // 任务栏常驻性能小窗（TrafficMonitor 风格；仅 Windows 提供，其余平台设置卡片不渲染）。
 // 内容是 Rust 侧自绘（taskbar_render），不再为它起 webview 实例。
+// taskbar_render 直接 use windows_sys（Windows 专用依赖），故整模块仅 Windows 编译；
+// 非 Windows 平台不编译它，taskbar_widget 内对它的引用也都在 cfg(windows) 块内。
+#[cfg(windows)]
 mod taskbar_render;
 mod taskbar_widget;
 use taskbar_widget::{get_taskbar_widget_support, set_taskbar_metrics, set_taskbar_metrics_labels};
