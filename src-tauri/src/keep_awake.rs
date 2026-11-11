@@ -10,6 +10,13 @@
 //! `un_inhibit(cookie).unwrap()`，D-Bus 断开会在 Drop 内 panic；故销毁 guard 一律
 //! 用 `catch_unwind` 包住，panic 只记日志、不掀翻常驻线程。
 //!
+//! Windows 会在**用户主动休眠**（开始菜单睡眠 / 合盖 / 电源键）时终止
+//! `SetThreadExecutionState` 注册的电源请求（PowerSetRequest 文档明示）；恢复后进程
+//! 原样唤醒、不走 `init_on_startup`，请求不会自动回来，而常驻线程的 `last` 幂等缓存
+//! 仍记着「已持有」，任何后续下发都被短路。故 Windows 上常驻线程额外注册
+//! `PowerRegisterSuspendResumeNotification`，收到恢复回调就绕过幂等、重建仍应持有的
+//! guard（见 `win_resume` 与 `Cmd::Reassert`）。
+//!
 //! 定时时长只约束「手动开关」：「跟随服务」由服务启停决定，不受倒计时影响。计时放在
 //! 独立的一次性线程里，不放在持有 guard 的常驻线程内——到期处理需要走 configure
 //! （它会持 STATE 锁等 ack），若由常驻线程自己做会与调用方互等形成死锁。
@@ -79,6 +86,10 @@ enum Cmd {
         display: bool,
         ack: Sender<Result<(), String>>,
     },
+    /// 系统睡眠/休眠恢复后，重建仍应持有的 guard（Windows 专用，见 `win_resume`）。
+    /// 与 Configure 不同：不看目标是否变化，只要 `last` 记着持有就强制重建。
+    #[cfg(windows)]
+    Reassert { ack: Sender<Result<(), String>> },
 }
 
 /// 操作前的落盘真源快照：三段式生效任一步失败都据此回滚 guard 与计时线程。
@@ -391,17 +402,34 @@ pub(crate) fn init_on_startup() {
     }
 }
 
-/// 懒启动常驻线程，下发 Configure 并同步等 ack。channel 断开一律视为失败；
-/// 常驻线程意外退出时清掉死 Sender 并重新拉起一条，避免一次意外让功能永久失效。
+/// 下发 Configure 并同步等常驻线程回传结果。
 fn dispatch(hold: bool, display: bool) -> Result<(), String> {
+    dispatch_cmd(|ack| Cmd::Configure { hold, display, ack })
+}
+
+/// 系统恢复后让常驻线程重建仍应持有的 guard（Windows 专用）。
+#[cfg(windows)]
+fn dispatch_reassert() -> Result<(), String> {
+    dispatch_cmd(|ack| Cmd::Reassert { ack })
+}
+
+/// 系统从睡眠/休眠恢复后调用（Windows 专用）：用户主动休眠会终止电源请求，恢复后
+/// 进程原样唤醒、不走 init_on_startup，须让常驻线程把仍应持有的 guard 重建一次。
+/// 回调运行在线程池线程，只负责下发命令；guard 的创建/销毁仍由常驻线程独占。
+#[cfg(windows)]
+fn reassert_on_resume() {
+    if let Err(err) = dispatch_reassert() {
+        eprintln!("[keep-awake] 系统恢复后重建阻止休眠失败: {err}");
+    }
+}
+
+/// 懒启动常驻线程，下发 make_cmd 构造的命令并同步等 ack。channel 断开一律视为失败；
+/// 常驻线程意外退出时清掉死 Sender 并重新拉起一条，避免一次意外让功能永久失效。
+fn dispatch_cmd(make_cmd: impl Fn(Sender<Result<(), String>>) -> Cmd) -> Result<(), String> {
     for attempt in 0..2 {
         let sender = ensure_worker()?;
         let (ack_tx, ack_rx) = mpsc::channel();
-        match sender.send(Cmd::Configure {
-            hold,
-            display,
-            ack: ack_tx,
-        }) {
+        match sender.send(make_cmd(ack_tx)) {
             Ok(()) => {
                 return ack_rx
                     .recv()
@@ -437,10 +465,13 @@ fn ensure_worker() -> Result<Sender<Cmd>, String> {
 }
 
 /// 常驻线程主体：独占 guard，按「目标 (hold, display)」幂等地创建/销毁。
+/// Windows 上额外注册系统恢复通知，收到恢复回调时经 `Cmd::Reassert` 强制重建。
 fn run_worker(rx: mpsc::Receiver<Cmd>) {
     let mut guard: Option<keepawake::KeepAwake> = None;
     // 上次成功下发的目标；初始 (false, false) 对应「无 guard」。
     let mut last: (bool, bool) = (false, false);
+    #[cfg(windows)]
+    let resume_notify = win_resume::register();
     while let Ok(cmd) = rx.recv() {
         match cmd {
             Cmd::Configure { hold, display, ack } => {
@@ -472,10 +503,35 @@ fn run_worker(rx: mpsc::Receiver<Cmd>) {
                 };
                 let _ = ack.send(result);
             }
+            #[cfg(windows)]
+            Cmd::Reassert { ack } => {
+                // 系统已在主动休眠时清掉电源请求，但 last 仍记着「持有」：绕过幂等
+                // 直接重建。last 未持有则无可重建，直接成功返回。
+                let result = if last.0 {
+                    drop_guard(&mut guard);
+                    match create_guard(last.1) {
+                        Ok(g) => {
+                            guard = Some(g);
+                            Ok(())
+                        }
+                        Err(err) => {
+                            last = (false, false);
+                            Err(err)
+                        }
+                    }
+                } else {
+                    Ok(())
+                };
+                let _ = ack.send(result);
+            }
         }
     }
     // 线程随进程退出；系统侧会自动释放各平台电源断言，此处仅兜底走一次安全 Drop。
     drop_guard(&mut guard);
+    #[cfg(windows)]
+    if let Some(handle) = resume_notify {
+        win_resume::unregister(handle);
+    }
 }
 
 /// 只用 idle（阻止系统空闲休眠）+ 可选 display（保持屏幕常亮），绝不用 sleep。
@@ -496,6 +552,54 @@ fn drop_guard(guard: &mut Option<keepawake::KeepAwake>) {
     if let Some(g) = guard.take() {
         if std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| drop(g))).is_err() {
             eprintln!("[keep-awake] 释放阻止休眠 guard 时发生 panic（已忽略）");
+        }
+    }
+}
+
+/// Windows 电源通知：用户主动休眠（开始菜单睡眠 / 合盖 / 电源键）会终止
+/// `SetThreadExecutionState` 注册的电源请求（PowerSetRequest 文档明示），恢复后不会
+/// 自动重建。这里注册恢复回调，唤醒时让常驻线程重新断言。回调运行在线程池线程，只
+/// 负责下发命令；guard 仍由常驻线程独占（`SetThreadExecutionState` 线程绑定）。
+#[cfg(windows)]
+mod win_resume {
+    use std::ffi::c_void;
+    use windows_sys::Win32::Foundation::{ERROR_SUCCESS, HANDLE};
+    use windows_sys::Win32::System::Power::{
+        PowerRegisterSuspendResumeNotification, PowerUnregisterSuspendResumeNotification,
+    };
+    use windows_sys::Win32::UI::WindowsAndMessaging::{
+        DEVICE_NOTIFY_CALLBACK, PBT_APMRESUMEAUTOMATIC, PBT_APMRESUMESUSPEND,
+    };
+
+    unsafe extern "system" fn on_resume(
+        _context: *const c_void,
+        kind: u32,
+        _setting: *const c_void,
+    ) -> u32 {
+        if kind == PBT_APMRESUMEAUTOMATIC || kind == PBT_APMRESUMESUSPEND {
+            super::reassert_on_resume();
+        }
+        0
+    }
+
+    /// 注册恢复通知；失败只记日志（阻止休眠仍按原逻辑工作，只是失去恢复自愈）。
+    pub(super) fn register() -> Option<HANDLE> {
+        let mut handle: *mut c_void = std::ptr::null_mut();
+        let recipient = on_resume as *const c_void as HANDLE;
+        let err = unsafe {
+            PowerRegisterSuspendResumeNotification(DEVICE_NOTIFY_CALLBACK, recipient, &mut handle)
+        };
+        if err == ERROR_SUCCESS {
+            Some(handle)
+        } else {
+            eprintln!("[keep-awake] 注册系统恢复通知失败（错误码 {err}），休眠恢复后不会自动重建");
+            None
+        }
+    }
+
+    pub(super) fn unregister(handle: HANDLE) {
+        unsafe {
+            PowerUnregisterSuspendResumeNotification(handle as isize);
         }
     }
 }
