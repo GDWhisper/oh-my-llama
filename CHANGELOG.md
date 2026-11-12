@@ -4,6 +4,17 @@
 
 > 本文件为**详细改动历史**（含涉及的文件与实现机制）；GitHub Release 页面为对应版本的**总结性**说明。
 
+## [0.2.16] - 2026-11-12
+
+### 新增功能
+- 无
+
+### 功能优化
+- 无
+
+### Bug 修复
+- **用户主动休眠（开始菜单睡眠 / 合盖 / 电源键）恢复后「阻止休眠」失效**：Windows 在用户主动休眠时会终止 `SetThreadExecutionState` 注册的电源请求（PowerSetRequest 文档明示），恢复后进程原样唤醒、不走 `init_on_startup`，请求不会自动回来；而常驻线程的 `last` 幂等缓存仍记着「已持有」，后续下发全被短路——托盘仍勾选但系统已无阻止能力。`src-tauri/src/keep_awake.rs` 在 Windows 上给常驻线程注册 `PowerRegisterSuspendResumeNotification`（`win_resume` 模块），收到 `PBT_APMRESUMEAUTOMATIC` / `PBT_APMRESUMESUSPEND` 回调即经新增 `Cmd::Reassert` 绕过幂等、重建仍应持有的 guard；回调运行在线程池线程，只下发命令，guard 创建/销毁仍由常驻线程独占（`SetThreadExecutionState` 线程绑定约束不变）。`dispatch` 拆出 `dispatch_cmd` 供 Configure 与 Reassert 共用；reassert 全路径 `#[cfg(windows)]` 门控，非 Windows 的 guard 本就跨睡眠存活，不引入死代码。`src-tauri/Cargo.toml` 给现有 windows-sys 补 `Win32_System_Power` feature（非新增依赖）；注册失败只记日志、阻止休眠按原逻辑工作，仅失去恢复自愈。
+
 ## [0.2.15] - 2026-11-10
 
 ### 新增功能
