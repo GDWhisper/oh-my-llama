@@ -566,6 +566,7 @@ mod win_resume {
     use windows_sys::Win32::Foundation::{ERROR_SUCCESS, HANDLE};
     use windows_sys::Win32::System::Power::{
         PowerRegisterSuspendResumeNotification, PowerUnregisterSuspendResumeNotification,
+        DEVICE_NOTIFY_SUBSCRIBE_PARAMETERS,
     };
     use windows_sys::Win32::UI::WindowsAndMessaging::{
         DEVICE_NOTIFY_CALLBACK, PBT_APMRESUMEAUTOMATIC, PBT_APMRESUMESUSPEND,
@@ -585,7 +586,11 @@ mod win_resume {
     /// 注册恢复通知；失败只记日志（阻止休眠仍按原逻辑工作，只是失去恢复自愈）。
     pub(super) fn register() -> Option<HANDLE> {
         let mut handle: *mut c_void = std::ptr::null_mut();
-        let recipient = on_resume as *const c_void as HANDLE;
+        let mut params = DEVICE_NOTIFY_SUBSCRIBE_PARAMETERS {
+            Callback: Some(on_resume),
+            Context: std::ptr::null_mut(),
+        };
+        let recipient = &mut params as *mut _ as HANDLE;
         let err = unsafe {
             PowerRegisterSuspendResumeNotification(DEVICE_NOTIFY_CALLBACK, recipient, &mut handle)
         };
