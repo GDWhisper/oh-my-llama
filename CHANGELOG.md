@@ -4,6 +4,17 @@
 
 > 本文件为**详细改动历史**（含涉及的文件与实现机制）；GitHub Release 页面为对应版本的**总结性**说明。
 
+## [0.2.17] - 2026-11-15
+
+### 新增功能
+- 无
+
+### 功能优化
+- 无
+
+### Bug 修复
+- **Windows 用户主动休眠或合盖睡眠时程序异常崩溃退出**：修复 `src-tauri/src/keep_awake.rs` 中 `win_resume::register` 调用 Windows API `PowerRegisterSuspendResumeNotification` 时误将回调函数指针强转为 `HANDLE` 传入的问题。改用原生结构体 `DEVICE_NOTIFY_SUBSCRIBE_PARAMETERS` 封装回调与上下文指针并传入结构体指针，消除 Windows 控制流防护（CFG）因函数指针类型不匹配触发的非法间接调用校验失败（`0xc0000409` FAST_FAIL_GUARD_ICALL_CHECK_FAILURE），解决进入休眠时程序被操作系统静默终止的问题。
+
 ## [0.2.16] - 2026-11-12
 
 ### 新增功能
